@@ -1,2 +1,14 @@
 x = 5
 y = "hello world"
+z = 3.1415
+x == z
+x != z
+a = true
+!a
+x + z
+x - z
+x / z
+x * z
+fnc(param1, param2) {}
+|x, y| x + y
+|| {}
