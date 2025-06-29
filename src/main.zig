@@ -21,6 +21,8 @@ const TokenType = enum {
     Identifier,
     Assign,
     Comma,
+    Lt,
+    Gt,
 
     Return,
     If,
@@ -31,8 +33,8 @@ const TokenType = enum {
 
     Plus,
     Minus,
-    Divide,
-    Multiply,
+    Slash,
+    Asterisk,
 };
 
 const Token = struct {
@@ -81,8 +83,8 @@ const Lexer = struct {
             ',' => Token{ .type = TokenType.Comma, .literal = charString },
             '+' => Token{ .type = TokenType.Plus, .literal = charString },
             '-' => Token{ .type = TokenType.Minus, .literal = charString },
-            '/' => Token{ .type = TokenType.Divide, .literal = charString },
-            '*' => Token{ .type = TokenType.Multiply, .literal = charString },
+            '/' => Token{ .type = TokenType.Slash, .literal = charString },
+            '*' => Token{ .type = TokenType.Asterisk, .literal = charString },
             '(' => Token{ .type = TokenType.LParen, .literal = charString },
             ')' => Token{ .type = TokenType.RParen, .literal = charString },
             '[' => Token{ .type = TokenType.LBracket, .literal = charString },
@@ -91,6 +93,8 @@ const Lexer = struct {
             '}' => Token{ .type = TokenType.RBrace, .literal = charString },
             '|' => Token{ .type = TokenType.Pipe, .literal = charString },
             '\n' => Token{ .type = TokenType.NewLine, .literal = charString },
+            '<' => Token{ .type = TokenType.Lt, .literal = charString },
+            '>' => Token{ .type = TokenType.Gt, .literal = charString },
             '!' => {
                 return self.scan_bang_char();
             },
@@ -263,27 +267,29 @@ const ExpressionStatement = struct {
     expression: Expression,
 };
 
-const ExpressionType = enum {
-    Identifier,
-    Prefix,
-    Infix,
-    Call,
-    Function,
-    String,
-    Number,
-    Boolean,
-    Array,
-    Table,
-    Index,
-    If,
-    Loop,
-};
+// const ExpressionType = enum {
+//     Identifier,
+//     Prefix,
+//     Infix,
+//     Call,
+//     Function,
+//     String,
+//     Number,
+//     Boolean,
+//     Array,
+//     Table,
+//     Index,
+//     If,
+//     Loop,
+// };
 
 const Expression = union(enum) {
-    Identifier: Identifier,
-    StringLiteral: StringLiteral,
-    NumberLiteral: NumberLiteral,
-    BooleanLiteral: BooleanLiteral,
+    Identifier: []const u8,
+    StringLiteral: []const u8,
+    IntegerLiteral: i64,
+    FloatLiteral: f64,
+    BooleanLiteral: bool,
+    InfixExpression: InfixExpression,
 
     pub fn format(
         self: @This(),
@@ -294,36 +300,51 @@ const Expression = union(enum) {
         _ = fmt;
         _ = options;
         switch (self) {
-            .Identifier => |v| try writer.print("{s}", .{v.token.literal}),
-            .StringLiteral => |v| try writer.print("\"{s}\"", .{v.token.literal}),
-            .NumberLiteral => |v| try writer.print("{s}", .{v.token.literal}),
-            .BooleanLiteral => |v| try writer.print("{s}", .{v.token.literal}),
+            .Identifier => |v| try writer.print("{s}", .{v}),
+            .StringLiteral => |v| try writer.print("\"{s}\"", .{v}),
+            .FloatLiteral => |v| try writer.print("{}", .{v}),
+            .IntegerLiteral => |v| try writer.print("{}", .{v}),
+            .BooleanLiteral => |v| try writer.print("{}", .{v}),
+            .InfixExpression => |v| try writer.print("({any} {any} {any})", .{ v.left, v.operator, v.right }),
         }
     }
 };
 
-const StringLiteral = struct {
-    token: Token,
+const Operator = enum {
+    Plus,
+    Minus,
+    Asterisk,
+    Slash,
+    Gt,
+    Lt,
+    Eq,
+    NotEq,
 };
 
-const NumberLiteral = struct {
-    token: Token,
+const InfixExpression = struct {
+    operator: Operator,
+    left: *const Expression,
+    right: *const Expression,
 };
 
-const BooleanLiteral = struct {
-    token: Token,
-};
-
-const Identifier = struct {
-    token: Token,
+const Precedence = enum(u8) {
+    Lowest = 1,
+    Equals,
+    Lessgreater,
+    Sum,
+    Product,
+    Prefix,
+    Call,
+    Index,
 };
 
 const Parser = struct {
     cur_token: Token,
     peek_token: Token,
     lexer: *Lexer,
+    allocator: std.mem.Allocator,
 
-    fn init(lexer: *Lexer) !Parser {
+    fn init(lexer: *Lexer, allocator: std.mem.Allocator) !Parser {
         const cur_token = try lexer.next();
         if (cur_token.type == TokenType.Eof) {
             return error.NoTokens;
@@ -333,6 +354,7 @@ const Parser = struct {
             .lexer = lexer,
             .cur_token = cur_token,
             .peek_token = peek_token,
+            .allocator = allocator,
         };
     }
 
@@ -349,6 +371,7 @@ const Parser = struct {
 
     fn expect_token(self: *Parser, expected_type: TokenType) !void {
         if (self.cur_token.type != expected_type) {
+            std.debug.print("expected: {any}, got: {any}\n", .{ expected_type, self.cur_token.type });
             return error.UnexpectedTokenType;
         }
     }
@@ -356,12 +379,14 @@ const Parser = struct {
     fn advance_and_expect(self: *Parser, expected_type: TokenType) !void {
         try self.advance();
         if (self.cur_token.type != expected_type) {
+            std.debug.print("expected: {any}, got: {any}\n", .{ expected_type, self.cur_token.type });
             return error.UnexpectedTokenType;
         }
     }
 
     fn expect_and_advance(self: *Parser, expected_type: TokenType) !void {
         if (self.cur_token.type != expected_type) {
+            std.debug.print("expected: {any}, got: {any}\n", .{ expected_type, self.cur_token.type });
             return error.UnexpectedTokenType;
         }
         try self.advance();
@@ -370,58 +395,161 @@ const Parser = struct {
     fn parse_program(self: *Parser, allocator: std.mem.Allocator) !std.ArrayList(Statement) {
         var list = std.ArrayList(Statement).init(allocator);
         while (self.cur_token.type != TokenType.Eof) {
-            try list.append(try self.parse_statement());
+            const statement = try self.parse_statement();
+            std.debug.print("Statement: {any}\n", .{statement});
+            try list.append(statement);
         }
         return list;
     }
 
     fn parse_statement(self: *Parser) !Statement {
-        const statement = switch (self.cur_token.type) {
-            TokenType.Identifier => try self.parse_assignment_statement(),
+        return switch (self.cur_token.type) {
+            TokenType.Identifier => {
+                if (self.peek_token.type == TokenType.Assign) {
+                    return try self.parse_assignment_statement();
+                }
+                return try self.parse_expression_statement();
+            },
             TokenType.Return => try self.parse_return_statement(),
             else => try self.parse_expression_statement(),
         };
-        std.debug.print("{any}\n", .{statement});
-        return statement;
     }
 
     fn parse_expression_statement(self: *Parser) !Statement {
-        const expression = try self.parse_expression();
-        try self.expect_and_advance(TokenType.NewLine);
+        const expression = try self.parse_expression(Precedence.Lowest);
+        try self.advance_and_expect(TokenType.NewLine);
+        try self.advance();
         return Statement{ .ExpressionStatement = .{ .expression = expression } };
     }
 
     fn parse_return_statement(self: *Parser) !Statement {
         try self.advance();
-        const expression = try self.parse_expression();
-        try self.expect_and_advance(TokenType.NewLine);
+        const expression = try self.parse_expression(Precedence.Lowest);
+        try self.advance_and_expect(TokenType.NewLine);
+        try self.advance();
         return Statement{ .ReturnStatement = .{ .expression = expression } };
     }
 
     fn parse_assignment_statement(self: *Parser) !Statement {
         const identifier = try self.get_and_advance();
         try self.expect_and_advance(TokenType.Assign);
-        const expression = try self.parse_expression();
-        try self.expect_and_advance(TokenType.NewLine);
+        const expression = try self.parse_expression(Precedence.Lowest);
+        try self.advance_and_expect(TokenType.NewLine);
+        try self.advance();
         return Statement{ .AssignmentStatement = AssignmentStatement{ .identifier = identifier, .expression = expression } };
     }
 
     fn get_prefix_expression(self: *Parser) !Expression {
         return switch (self.cur_token.type) {
-            TokenType.Identifier => Expression{ .Identifier = Identifier{ .token = self.cur_token } },
-            TokenType.String => Expression{ .StringLiteral = StringLiteral{ .token = self.cur_token } },
-            TokenType.Integer => Expression{ .NumberLiteral = NumberLiteral{ .token = self.cur_token } },
-            TokenType.Float => Expression{ .NumberLiteral = NumberLiteral{ .token = self.cur_token } },
-            TokenType.False => Expression{ .BooleanLiteral = BooleanLiteral{ .token = self.cur_token } },
-            TokenType.True => Expression{ .BooleanLiteral = BooleanLiteral{ .token = self.cur_token } },
+            TokenType.Identifier => Expression{ .Identifier = self.cur_token.literal },
+            TokenType.String => Expression{ .StringLiteral = self.cur_token.literal },
+            TokenType.Integer => Expression{ .IntegerLiteral = try std.fmt.parseInt(i64, self.cur_token.literal, 10) },
+            TokenType.Float => Expression{ .FloatLiteral = try std.fmt.parseFloat(f64, self.cur_token.literal) },
+            TokenType.False => Expression{ .BooleanLiteral = false },
+            TokenType.True => Expression{ .BooleanLiteral = true },
             else => error.UnknownTokenType,
         };
     }
 
-    fn parse_expression(self: *Parser) !Expression {
-        const expression = try self.get_prefix_expression();
+    fn get_infix_expression(self: *Parser, left: Expression) !Expression {
+        return switch (self.cur_token.type) {
+            TokenType.Plus => self.parse_infix_expression(left),
+            TokenType.Minus => self.parse_infix_expression(left),
+            TokenType.Slash => self.parse_infix_expression(left),
+            TokenType.Asterisk => self.parse_infix_expression(left),
+            TokenType.Eq => self.parse_infix_expression(left),
+            TokenType.NotEq => self.parse_infix_expression(left),
+            TokenType.Lt => self.parse_infix_expression(left),
+            TokenType.Gt => self.parse_infix_expression(left),
+            else => error.NoInfixFunctionFound,
+        };
+    }
+
+    fn parse_infix_expression(self: *Parser, left: Expression) !Expression {
+        const precedence = self.get_current_precedence();
+        const operator = try self.get_current_operator();
+        const left_owned = try self.allocator.create(Expression);
+        left_owned.* = left;
+
+        std.debug.print("parse infix {any}\n", .{operator});
+
         try self.advance();
-        return expression;
+
+        const right = try self.parse_expression(precedence);
+        const right_owned = try self.allocator.create(Expression);
+        right_owned.* = right;
+
+        const infix_expression = InfixExpression{
+            .operator = operator,
+            .left = left_owned,
+            .right = right_owned,
+        };
+
+        return Expression{ .InfixExpression = infix_expression };
+    }
+
+    fn parse_expression(self: *Parser, precedence: Precedence) anyerror!Expression {
+        var left: Expression = try self.get_prefix_expression();
+
+        std.debug.print("{any}\n", .{self.cur_token});
+        std.debug.print("{any}\n", .{self.peek_token.type});
+
+        std.debug.print("{any} < {any}\n", .{ @intFromEnum(precedence), @intFromEnum(self.get_peek_precedence()) });
+
+        while (self.peek_token.type != TokenType.NewLine and @intFromEnum(precedence) < @intFromEnum(self.get_peek_precedence())) {
+            try self.advance();
+            left = self.get_infix_expression(left) catch |err| {
+                switch (err) {
+                    error.NoInfixFunctionFound => return left,
+                    else => return err,
+                }
+            };
+        }
+
+        std.debug.print("Returning {any}\n", .{left});
+
+        return left;
+    }
+
+    fn get_current_precedence(self: *Parser) Precedence {
+        return Parser.get_token_precedence(&self.cur_token);
+    }
+
+    fn get_peek_precedence(self: *Parser) Precedence {
+        return Parser.get_token_precedence(&self.peek_token);
+    }
+
+    fn get_token_precedence(token: *Token) Precedence {
+        return switch (token.type) {
+            TokenType.Eq => Precedence.Equals,
+            TokenType.NotEq => Precedence.Equals,
+            TokenType.Lt => Precedence.Lessgreater,
+            TokenType.Gt => Precedence.Lessgreater,
+            TokenType.Plus => Precedence.Sum,
+            TokenType.Minus => Precedence.Sum,
+            TokenType.Slash => Precedence.Product,
+            TokenType.Asterisk => Precedence.Product,
+            TokenType.LParen => Precedence.Call,
+            TokenType.LBracket => Precedence.Index,
+            else => Precedence.Lowest,
+        };
+    }
+
+    fn get_current_operator(self: *Parser) !Operator {
+        return switch (self.cur_token.type) {
+            TokenType.Plus => Operator.Plus,
+            TokenType.Minus => Operator.Minus,
+            TokenType.Asterisk => Operator.Asterisk,
+            TokenType.Slash => Operator.Slash,
+            TokenType.Gt => Operator.Gt,
+            TokenType.Lt => Operator.Lt,
+            TokenType.Eq => Operator.Eq,
+            TokenType.NotEq => Operator.NotEq,
+            else => {
+                std.debug.print("unknown operator: {any}\n", .{self.cur_token.type});
+                return error.NoOperatorFound;
+            },
+        };
     }
 };
 
@@ -447,15 +575,7 @@ pub fn main() !void {
 
     var lexer = try Lexer.init(arenaAllocator, content);
 
-    // while (true) {
-    //     const token = try lexer.next();
-    //     std.debug.print("{any} --> {s}\n", .{ token.type, token.literal });
-    //     if (token.type == TokenType.Eof) {
-    //         break;
-    //     }
-    // }
-
-    var parser = try Parser.init(&lexer);
+    var parser = try Parser.init(&lexer, arenaAllocator);
     const program = try parser.parse_program(arenaAllocator);
 
     std.debug.print("{any}\n", .{program.items});
