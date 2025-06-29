@@ -1,6 +1,7 @@
 x = 5
 y = "hello world"
 z = 3.1415
+return z
 x == z
 x != z
 a = true
