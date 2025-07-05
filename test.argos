@@ -10,3 +10,10 @@ a + b * c + d / e - f
 !!!true
 -3
 +1
+fnc(a, b) {
+    return a + b 
+}
+f = fnc(a, b) {
+    return a * b
+}
+a = 7 + 6

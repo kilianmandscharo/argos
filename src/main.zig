@@ -27,6 +27,7 @@ const TokenType = enum {
     Return,
     If,
     Else,
+    Function,
 
     NewLine,
     Eof,
@@ -205,6 +206,10 @@ const Lexer = struct {
             return Token{ .type = TokenType.Return, .literal = arena_copy };
         }
 
+        if (std.mem.eql(u8, result, "fnc")) {
+            return Token{ .type = TokenType.Function, .literal = arena_copy };
+        }
+
         return Token{ .type = TokenType.Identifier, .literal = arena_copy };
     }
 
@@ -235,7 +240,7 @@ const Statement = union(enum) {
     AssignmentStatement: AssignmentStatement,
     ReturnStatement: ReturnStatement,
     ExpressionStatement: ExpressionStatement,
-    BlockStatement,
+    BlockStatement: BlockStatement,
 
     pub fn format(
         self: @This(),
@@ -267,6 +272,10 @@ const ExpressionStatement = struct {
     expression: *const Expression,
 };
 
+const BlockStatement = struct {
+    statements: std.ArrayList(Statement),
+};
+
 // const ExpressionType = enum {
 //     Identifier,
 //     Prefix,
@@ -291,6 +300,7 @@ const Expression = union(enum) {
     BooleanLiteral: bool,
     InfixExpression: InfixExpression,
     PrefixExpression: PrefixExpression,
+    FunctionLiteral: FunctionLiteral,
 
     pub fn format(
         self: @This(),
@@ -308,6 +318,23 @@ const Expression = union(enum) {
             .BooleanLiteral => |v| try writer.print("{}", .{v}),
             .InfixExpression => |v| try writer.print("({any} {any} {any})", .{ v.left, v.operator, v.right }),
             .PrefixExpression => |v| try writer.print("({any}{any})", .{ v.operator, v.expression }),
+            .FunctionLiteral => |v| {
+                try writer.print("fnc(", .{});
+                for (v.params.items, 0..) |param, i| {
+                    if (i > 0) {
+                        try writer.print(", ", .{});
+                    }
+                    try writer.print("{any}", .{param});
+                }
+                try writer.print(") {{\n", .{});
+                for (v.body.statements.items, 0..) |statement, i| {
+                    if (i > 0) {
+                        try writer.print("\n", .{});
+                    }
+                    try writer.print("    {any}", .{statement});
+                }
+                try writer.print("\n}}", .{});
+            },
         }
     }
 };
@@ -354,6 +381,11 @@ const InfixExpression = struct {
 const PrefixExpression = struct {
     operator: Operator,
     expression: *const Expression,
+};
+
+const FunctionLiteral = struct {
+    params: std.ArrayList(*Expression),
+    body: BlockStatement,
 };
 
 const Precedence = enum(u8) {
@@ -425,7 +457,7 @@ const Parser = struct {
         var list = std.ArrayList(Statement).init(allocator);
         while (self.cur_token.type != TokenType.Eof) {
             const statement = try self.parse_statement();
-            std.debug.print("Statement: {any}\n", .{statement});
+            std.debug.print("{any}\n", .{statement});
             try list.append(statement);
         }
         return list;
@@ -483,7 +515,45 @@ const Parser = struct {
                 const prefix_expression = PrefixExpression{ .operator = operator, .expression = expression };
                 return Expression{ .PrefixExpression = prefix_expression };
             },
-            else => error.UnknownTokenType,
+            TokenType.Function => {
+                try self.advance_and_expect(TokenType.LParen);
+                try self.advance();
+
+                var params = std.ArrayList(*Expression).init(self.allocator);
+                while (!self.current_token_is(TokenType.RParen)) {
+                    if (self.current_token_is(TokenType.Eof)) {
+                        return error.ReachedEndOfFile;
+                    }
+
+                    try params.append(try self.parse_expression(Precedence.Lowest));
+
+                    if (!self.peek_token_is(TokenType.RParen)) {
+                        try self.advance_and_expect(TokenType.Comma);
+                        try self.advance();
+                    } else {
+                        try self.advance();
+                    }
+                }
+
+                try self.advance_and_expect(TokenType.LBrace);
+                try self.advance_and_expect(TokenType.NewLine);
+                try self.advance();
+
+                var statements = std.ArrayList(Statement).init(self.allocator);
+                while (!self.current_token_is(TokenType.RBrace)) {
+                    if (self.current_token_is(TokenType.Eof)) {
+                        return error.ReachedEndOfFile;
+                    }
+
+                    try statements.append(try self.parse_statement());
+                }
+
+                return Expression{ .FunctionLiteral = FunctionLiteral{ .params = params, .body = BlockStatement{ .statements = statements } } };
+            },
+            else => {
+                std.debug.print("unknown token type: {any}\n", .{self.cur_token.type});
+                return error.UnknownTokenType;
+            },
         };
     }
 
@@ -531,6 +601,14 @@ const Parser = struct {
         }
 
         return left_owned;
+    }
+
+    fn current_token_is(self: *Parser, token_type: TokenType) bool {
+        return self.cur_token.type == token_type;
+    }
+
+    fn peek_token_is(self: *Parser, token_type: TokenType) bool {
+        return self.peek_token.type == token_type;
     }
 
     fn get_current_precedence(self: *Parser) Precedence {
@@ -600,6 +678,5 @@ pub fn main() !void {
 
     var parser = try Parser.init(&lexer, arenaAllocator);
     const program = try parser.parse_program(arenaAllocator);
-
-    std.debug.print("{any}\n", .{program.items});
+    _ = program;
 }
