@@ -256,15 +256,15 @@ const Statement = union(enum) {
 
 const AssignmentStatement = struct {
     identifier: Token,
-    expression: Expression,
+    expression: *const Expression,
 };
 
 const ReturnStatement = struct {
-    expression: Expression,
+    expression: *const Expression,
 };
 
 const ExpressionStatement = struct {
-    expression: Expression,
+    expression: *const Expression,
 };
 
 // const ExpressionType = enum {
@@ -290,6 +290,7 @@ const Expression = union(enum) {
     FloatLiteral: f64,
     BooleanLiteral: bool,
     InfixExpression: InfixExpression,
+    PrefixExpression: PrefixExpression,
 
     pub fn format(
         self: @This(),
@@ -306,6 +307,7 @@ const Expression = union(enum) {
             .IntegerLiteral => |v| try writer.print("{}", .{v}),
             .BooleanLiteral => |v| try writer.print("{}", .{v}),
             .InfixExpression => |v| try writer.print("({any} {any} {any})", .{ v.left, v.operator, v.right }),
+            .PrefixExpression => |v| try writer.print("({any}{any})", .{ v.operator, v.expression }),
         }
     }
 };
@@ -319,12 +321,39 @@ const Operator = enum {
     Lt,
     Eq,
     NotEq,
+    Bang,
+
+    pub fn format(
+        self: @This(),
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        switch (self) {
+            Operator.Plus => try writer.print("+", .{}),
+            Operator.Minus => try writer.print("-", .{}),
+            Operator.Asterisk => try writer.print("*", .{}),
+            Operator.Slash => try writer.print("/", .{}),
+            Operator.Gt => try writer.print(">", .{}),
+            Operator.Lt => try writer.print("<", .{}),
+            Operator.Eq => try writer.print("==", .{}),
+            Operator.NotEq => try writer.print("!=", .{}),
+            Operator.Bang => try writer.print("!", .{}),
+        }
+    }
 };
 
 const InfixExpression = struct {
     operator: Operator,
     left: *const Expression,
     right: *const Expression,
+};
+
+const PrefixExpression = struct {
+    operator: Operator,
+    expression: *const Expression,
 };
 
 const Precedence = enum(u8) {
@@ -439,7 +468,7 @@ const Parser = struct {
         return Statement{ .AssignmentStatement = AssignmentStatement{ .identifier = identifier, .expression = expression } };
     }
 
-    fn get_prefix_expression(self: *Parser) !Expression {
+    fn parse_prefix_expresion(self: *Parser) !Expression {
         return switch (self.cur_token.type) {
             TokenType.Identifier => Expression{ .Identifier = self.cur_token.literal },
             TokenType.String => Expression{ .StringLiteral = self.cur_token.literal },
@@ -447,68 +476,61 @@ const Parser = struct {
             TokenType.Float => Expression{ .FloatLiteral = try std.fmt.parseFloat(f64, self.cur_token.literal) },
             TokenType.False => Expression{ .BooleanLiteral = false },
             TokenType.True => Expression{ .BooleanLiteral = true },
+            TokenType.Bang, TokenType.Plus, TokenType.Minus => {
+                const operator = try self.get_current_operator();
+                try self.advance();
+                const expression = try self.parse_expression(Precedence.Lowest);
+                const prefix_expression = PrefixExpression{ .operator = operator, .expression = expression };
+                return Expression{ .PrefixExpression = prefix_expression };
+            },
             else => error.UnknownTokenType,
         };
     }
 
-    fn get_infix_expression(self: *Parser, left: Expression) !Expression {
+    fn parse_infix_expression(self: *Parser, left: Expression) !Expression {
         return switch (self.cur_token.type) {
-            TokenType.Plus => self.parse_infix_expression(left),
-            TokenType.Minus => self.parse_infix_expression(left),
-            TokenType.Slash => self.parse_infix_expression(left),
-            TokenType.Asterisk => self.parse_infix_expression(left),
-            TokenType.Eq => self.parse_infix_expression(left),
-            TokenType.NotEq => self.parse_infix_expression(left),
-            TokenType.Lt => self.parse_infix_expression(left),
-            TokenType.Gt => self.parse_infix_expression(left),
+            TokenType.Plus, TokenType.Minus, TokenType.Slash, TokenType.Asterisk, TokenType.Eq, TokenType.NotEq, TokenType.Lt, TokenType.Gt => {
+                const precedence = self.get_current_precedence();
+                const operator = try self.get_current_operator();
+
+                const left_owned = try self.allocator.create(Expression);
+                left_owned.* = left;
+
+                try self.advance();
+
+                const right = try self.parse_expression(precedence);
+
+                const infix_expression = InfixExpression{
+                    .operator = operator,
+                    .left = left_owned,
+                    .right = right,
+                };
+
+                return Expression{ .InfixExpression = infix_expression };
+            },
             else => error.NoInfixFunctionFound,
         };
     }
 
-    fn parse_infix_expression(self: *Parser, left: Expression) !Expression {
-        const precedence = self.get_current_precedence();
-        const operator = try self.get_current_operator();
+    fn parse_expression(self: *Parser, precedence: Precedence) anyerror!*Expression {
+        var left = try self.parse_prefix_expresion();
         const left_owned = try self.allocator.create(Expression);
-        left_owned.* = left;
 
-        std.debug.print("parse infix {any}\n", .{operator});
-
-        try self.advance();
-
-        const right = try self.parse_expression(precedence);
-        const right_owned = try self.allocator.create(Expression);
-        right_owned.* = right;
-
-        const infix_expression = InfixExpression{
-            .operator = operator,
-            .left = left_owned,
-            .right = right_owned,
-        };
-
-        return Expression{ .InfixExpression = infix_expression };
-    }
-
-    fn parse_expression(self: *Parser, precedence: Precedence) anyerror!Expression {
-        var left: Expression = try self.get_prefix_expression();
-
-        std.debug.print("{any}\n", .{self.cur_token});
-        std.debug.print("{any}\n", .{self.peek_token.type});
-
-        std.debug.print("{any} < {any}\n", .{ @intFromEnum(precedence), @intFromEnum(self.get_peek_precedence()) });
+        defer {
+            left_owned.* = left;
+        }
 
         while (self.peek_token.type != TokenType.NewLine and @intFromEnum(precedence) < @intFromEnum(self.get_peek_precedence())) {
             try self.advance();
-            left = self.get_infix_expression(left) catch |err| {
+            left = self.parse_infix_expression(left) catch |err| {
                 switch (err) {
-                    error.NoInfixFunctionFound => return left,
+                    error.NoInfixFunctionFound => return left_owned,
                     else => return err,
                 }
             };
         }
 
-        std.debug.print("Returning {any}\n", .{left});
-
-        return left;
+        return left_owned;
     }
 
     fn get_current_precedence(self: *Parser) Precedence {
@@ -545,6 +567,7 @@ const Parser = struct {
             TokenType.Lt => Operator.Lt,
             TokenType.Eq => Operator.Eq,
             TokenType.NotEq => Operator.NotEq,
+            TokenType.Bang => Operator.Bang,
             else => {
                 std.debug.print("unknown operator: {any}\n", .{self.cur_token.type});
                 return error.NoOperatorFound;
