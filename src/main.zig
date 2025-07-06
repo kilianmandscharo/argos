@@ -403,9 +403,9 @@ const Parser = struct {
     cur_token: Token,
     peek_token: Token,
     lexer: *Lexer,
-    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
 
-    fn init(lexer: *Lexer, allocator: std.mem.Allocator) !Parser {
+    fn init(lexer: *Lexer, arena: std.mem.Allocator) !Parser {
         const cur_token = try lexer.next();
         if (cur_token.type == TokenType.Eof) {
             return error.NoTokens;
@@ -415,7 +415,7 @@ const Parser = struct {
             .lexer = lexer,
             .cur_token = cur_token,
             .peek_token = peek_token,
-            .allocator = allocator,
+            .arena = arena,
         };
     }
 
@@ -453,8 +453,8 @@ const Parser = struct {
         try self.advance();
     }
 
-    fn parse_program(self: *Parser, allocator: std.mem.Allocator) !std.ArrayList(Statement) {
-        var list = std.ArrayList(Statement).init(allocator);
+    fn parse_program(self: *Parser) !std.ArrayList(Statement) {
+        var list = std.ArrayList(Statement).init(self.arena);
         while (self.cur_token.type != TokenType.Eof) {
             const statement = try self.parse_statement();
             std.debug.print("{any}\n", .{statement});
@@ -519,7 +519,7 @@ const Parser = struct {
                 try self.advance_and_expect(TokenType.LParen);
                 try self.advance();
 
-                var params = std.ArrayList(*Expression).init(self.allocator);
+                var params = std.ArrayList(*Expression).init(self.arena);
                 while (!self.current_token_is(TokenType.RParen)) {
                     if (self.current_token_is(TokenType.Eof)) {
                         return error.ReachedEndOfFile;
@@ -539,7 +539,7 @@ const Parser = struct {
                 try self.advance_and_expect(TokenType.NewLine);
                 try self.advance();
 
-                var statements = std.ArrayList(Statement).init(self.allocator);
+                var statements = std.ArrayList(Statement).init(self.arena);
                 while (!self.current_token_is(TokenType.RBrace)) {
                     if (self.current_token_is(TokenType.Eof)) {
                         return error.ReachedEndOfFile;
@@ -563,7 +563,7 @@ const Parser = struct {
                 const precedence = self.get_current_precedence();
                 const operator = try self.get_current_operator();
 
-                const left_owned = try self.allocator.create(Expression);
+                const left_owned = try self.arena.create(Expression);
                 left_owned.* = left;
 
                 try self.advance();
@@ -584,7 +584,7 @@ const Parser = struct {
 
     fn parse_expression(self: *Parser, precedence: Precedence) anyerror!*Expression {
         var left = try self.parse_prefix_expresion();
-        const left_owned = try self.allocator.create(Expression);
+        const left_owned = try self.arena.create(Expression);
 
         defer {
             left_owned.* = left;
@@ -654,6 +654,215 @@ const Parser = struct {
     }
 };
 
+const Node = union(enum) {
+    Program: std.ArrayList(Statement),
+    Expression: Expression,
+    Statement: Statement,
+};
+
+const Object = union(enum) {
+    Integer: Integer,
+    Float: Float,
+    String: String,
+    Boolean: Boolean,
+    ReturnValue: ReturnValue,
+    Error: Error,
+    Null: Null,
+
+    fn get_type(self: Object) []const u8 {
+        return switch (self) {
+            .Integer => "Integer",
+            .Float => "Float",
+            .String => "String",
+            .Boolean => "Boolean",
+            .ReturnValue => "ReturnValue",
+            .Error => "Error",
+            .Null => "Null",
+        };
+    }
+
+    pub fn format(
+        self: @This(),
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        switch (self) {
+            .Integer => |v| try writer.print("{d}", .{v.value}),
+            .Float => |v| try writer.print("{d}", .{v.value}),
+            .String => |v| try writer.print("{s}", .{v.value}),
+            .Boolean => |v| try writer.print("{}", .{v.value}),
+            .ReturnValue => |v| try writer.print("{any}", .{v.value}),
+            .Error => |v| try writer.print("{s}", .{v.value}),
+            .Null => try writer.print("Null", .{}),
+        }
+    }
+};
+
+const Integer = struct {
+    value: i64,
+};
+
+const Float = struct {
+    value: f64,
+};
+
+const String = struct {
+    value: []const u8,
+};
+
+const Boolean = struct {
+    value: bool,
+};
+
+const ReturnValue = struct {
+    value: *const Object,
+};
+
+const Error = struct {
+    value: []const u8,
+};
+
+const Null = struct {};
+
+const Evaluator = struct {
+    gpa: std.mem.Allocator,
+
+    fn init(gpa: std.mem.Allocator) Evaluator {
+        return Evaluator{
+            .gpa = gpa,
+        };
+    }
+
+    fn eval(self: *Evaluator, node: Node) Object {
+        return switch (node) {
+            .Program => |statements| {
+                return self.eval_program(statements);
+            },
+            .Statement => |statement| {
+                switch (statement) {
+                    .ExpressionStatement => |expression_statement| {
+                        return self.eval(Node{ .Expression = expression_statement.expression.* });
+                    },
+                    else => return Object{ .Error = .{ .value = "Unknown statement" } },
+                }
+            },
+            .Expression => |expression| {
+                switch (expression) {
+                    .IntegerLiteral => |integer| return Object{ .Integer = .{ .value = integer } },
+                    .FloatLiteral => |float| return Object{ .Float = .{ .value = float } },
+                    .BooleanLiteral => |boolean| return Object{ .Boolean = .{ .value = boolean } },
+                    .InfixExpression => |infix| {
+                        const left = self.eval(Node{ .Expression = infix.left.* });
+                        const right = self.eval(Node{ .Expression = infix.right.* });
+                        return self.eval_infix_expression(left, right, infix.operator);
+                    },
+                    else => return Object{ .Error = .{ .value = "Unknown expression" } },
+                }
+            },
+        };
+    }
+
+    fn eval_program(self: *Evaluator, statements: std.ArrayList(Statement)) Object {
+        var result = Object{ .Null = .{} };
+        for (statements.items) |statement| {
+            result = self.eval(Node{ .Statement = statement });
+            switch (result) {
+                .ReturnValue => |retVal| return retVal.value.*,
+                .Error => return result,
+                else => {},
+            }
+        }
+        return result;
+    }
+
+    fn eval_infix_expression(self: *Evaluator, left: Object, right: Object, operator: Operator) Object {
+        switch (left) {
+            .Integer => |left_int| {
+                switch (right) {
+                    .Integer => |right_int| {
+                        return self.eval_integer_infix_expression(left_int.value, right_int.value, operator);
+                    },
+                    .Float => |right_float| {
+                        return self.eval_float_infix_expression(@floatFromInt(left_int.value), right_float.value, operator);
+                    },
+                    else => return self.create_error("type mismatch: {s} <> {s}", .{ left.get_type(), right.get_type() }),
+                }
+            },
+            .Float => |left_float| {
+                switch (right) {
+                    .Integer => |right_int| {
+                        return self.eval_float_infix_expression(left_float.value, @floatFromInt(right_int.value), operator);
+                    },
+                    .Float => |right_float| {
+                        return self.eval_float_infix_expression(left_float.value, right_float.value, operator);
+                    },
+                    else => return self.create_error("type mismatch: {s} <> {s}", .{ left.get_type(), right.get_type() }),
+                }
+            },
+            .Boolean => |left_bool| {
+                switch (right) {
+                    .Boolean => |right_bool| {
+                        return self.eval_boolean_infix_expression(left_bool.value, right_bool.value, operator);
+                    },
+                    else => return self.create_error("type mismatch: {s} <> {s}", .{ left.get_type(), right.get_type() }),
+                }
+            },
+            else => return Object{ .Error = .{ .value = "Unknown left expression type" } },
+        }
+    }
+
+    fn eval_boolean_infix_expression(self: *Evaluator, left: bool, right: bool, operator: Operator) Object {
+        return switch (operator) {
+            .Eq => Object{ .Boolean = .{ .value = left == right } },
+            .NotEq => Object{ .Boolean = .{ .value = left != right } },
+            else => self.create_error("invalid operator '{any}' for type Boolean", .{operator}),
+        };
+    }
+
+    fn eval_float_infix_expression(self: *Evaluator, left: f64, right: f64, operator: Operator) Object {
+        return switch (operator) {
+            .Plus => Object{ .Float = .{ .value = left + right } },
+            .Minus => Object{ .Float = .{ .value = left - right } },
+            .Slash => Object{ .Float = .{ .value = left / right } },
+            .Asterisk => Object{ .Float = .{ .value = left * right } },
+            .Gt => Object{ .Boolean = .{ .value = left > right } },
+            .Lt => Object{ .Boolean = .{ .value = left < right } },
+            .Eq => Object{ .Boolean = .{ .value = left == right } },
+            .NotEq => Object{ .Boolean = .{ .value = left != right } },
+            else => self.create_error("invalid operator '{any}' for type Float", .{operator}),
+        };
+    }
+
+    fn eval_integer_infix_expression(self: *Evaluator, left: i64, right: i64, operator: Operator) Object {
+        return switch (operator) {
+            .Plus => Object{ .Integer = .{ .value = left + right } },
+            .Minus => Object{ .Integer = .{ .value = left - right } },
+            .Slash => {
+                const left_float: f64 = @floatFromInt(left);
+                const right_float: f64 = @floatFromInt(right);
+                return Object{ .Float = .{ .value = left_float / right_float } };
+            },
+            .Asterisk => Object{ .Integer = .{ .value = left * right } },
+            .Gt => Object{ .Boolean = .{ .value = left > right } },
+            .Lt => Object{ .Boolean = .{ .value = left < right } },
+            .Eq => Object{ .Boolean = .{ .value = left == right } },
+            .NotEq => Object{ .Boolean = .{ .value = left != right } },
+            else => self.create_error("invalid operator '{any}' for type Integer", .{operator}),
+        };
+    }
+
+    fn create_error(self: *Evaluator, comptime fmt: []const u8, args: anytype) Object {
+        const error_message = std.fmt.allocPrint(self.gpa, fmt, args) catch |err| {
+            std.debug.print("failed to alloc error message: {}", .{err});
+            return Object{ .Error = .{ .value = "Unknown error" } };
+        };
+        return Object{ .Error = .{ .value = error_message } };
+    }
+};
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const gpaAllocator = gpa.allocator();
@@ -677,6 +886,9 @@ pub fn main() !void {
     var lexer = try Lexer.init(arenaAllocator, content);
 
     var parser = try Parser.init(&lexer, arenaAllocator);
-    const program = try parser.parse_program(arenaAllocator);
-    _ = program;
+    const program = try parser.parse_program();
+
+    var evaluator = Evaluator.init(gpaAllocator);
+    const result = evaluator.eval(Node{ .Program = program });
+    std.debug.print("Result: {any}\n", .{result});
 }
