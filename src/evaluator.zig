@@ -1,9 +1,12 @@
 const std = @import("std");
 
+// TODO: clean up the error handling in the evaluator
+
 const parser_module = @import("parser.zig");
 const Statement = parser_module.Statement;
 const Expression = parser_module.Expression;
 const Operator = parser_module.Operator;
+const BlockStatement = parser_module.BlockStatement;
 
 pub const Node = union(enum) {
     Program: std.ArrayList(Statement),
@@ -11,14 +14,22 @@ pub const Node = union(enum) {
     Statement: Statement,
 };
 
-const Object = union(enum) {
+pub const Object = union(enum) {
     Integer: Integer,
     Float: Float,
     String: String,
     Boolean: Boolean,
     ReturnValue: ReturnValue,
     Error: Error,
+    Function: Function,
     Null: Null,
+
+    fn isError(self: Object) bool {
+        return switch (self) {
+            .Error => true,
+            else => false,
+        };
+    }
 
     fn getType(self: Object) []const u8 {
         return switch (self) {
@@ -28,6 +39,7 @@ const Object = union(enum) {
             .Boolean => "Boolean",
             .ReturnValue => "ReturnValue",
             .Error => "Error",
+            .Function => "Function",
             .Null => "Null",
         };
     }
@@ -47,6 +59,7 @@ const Object = union(enum) {
             .Boolean => |v| try writer.print("{}", .{v.value}),
             .ReturnValue => |v| try writer.print("{any}", .{v.value}),
             .Error => |v| try writer.print("{s}", .{v.value}),
+            .Function => try writer.print("Function", .{}),
             .Null => try writer.print("Null", .{}),
         }
     }
@@ -76,6 +89,12 @@ const Error = struct {
     value: []const u8,
 };
 
+const Function = struct {
+    params: std.ArrayList([]const u8),
+    body: BlockStatement,
+    env: *Environment,
+};
+
 const Null = struct {};
 
 pub const Evaluator = struct {
@@ -87,28 +106,108 @@ pub const Evaluator = struct {
         };
     }
 
-    pub fn eval(self: *Evaluator, node: Node) Object {
+    pub fn eval(self: *Evaluator, node: Node, env: *Environment) Object {
         return switch (node) {
             .Program => |statements| {
-                return self.evalProgram(statements);
+                return self.evalProgram(statements, env);
             },
             .Statement => |statement| {
                 switch (statement) {
                     .ExpressionStatement => |expression_statement| {
-                        return self.eval(Node{ .Expression = expression_statement.expression.* });
+                        return self.eval(Node{ .Expression = expression_statement.expression.* }, env);
                     },
-                    else => return Object{ .Error = .{ .value = "Unknown statement" } },
+                    .AssignmentStatement => |assignment| {
+                        const val = self.eval(Node{ .Expression = assignment.expression.* }, env);
+                        if (val.isError()) {
+                            return val;
+                        }
+                        env.set(assignment.identifier.literal, val) catch {
+                            return self.createError("failed to assign value", .{});
+                        };
+                        return val;
+                    },
+                    .BlockStatement => |block| {
+                        var result = Object{ .Null = .{} };
+                        for (block.statements.items) |item| {
+                            result = self.eval(Node{ .Statement = item }, env);
+                            switch (result) {
+                                .ReturnValue => return result,
+                                .Error => return result,
+                                else => {},
+                            }
+                        }
+                        return result;
+                    },
+                    .ReturnStatement => |return_statement| {
+                        const value = self.eval(Node{ .Expression = return_statement.expression.* }, env);
+                        if (value.isError()) {
+                            return value;
+                        }
+                        const owned = self.gpa.create(Object) catch {
+                            return self.createError("could not return", .{});
+                        };
+                        owned.* = value;
+                        return Object{ .ReturnValue = .{ .value = owned } };
+                    },
                 }
             },
             .Expression => |expression| {
                 switch (expression) {
+                    .Identifier => |identifier| {
+                        const val = env.get(identifier) orelse self.createError("identifier '{s}' not found", .{identifier});
+                        return val;
+                    },
                     .IntegerLiteral => |integer| return Object{ .Integer = .{ .value = integer } },
                     .FloatLiteral => |float| return Object{ .Float = .{ .value = float } },
                     .BooleanLiteral => |boolean| return Object{ .Boolean = .{ .value = boolean } },
                     .InfixExpression => |infix| {
-                        const left = self.eval(Node{ .Expression = infix.left.* });
-                        const right = self.eval(Node{ .Expression = infix.right.* });
+                        const left = self.eval(Node{ .Expression = infix.left.* }, env);
+                        if (left.isError()) {
+                            return left;
+                        }
+                        const right = self.eval(Node{ .Expression = infix.right.* }, env);
+                        if (right.isError()) {
+                            return right;
+                        }
                         return self.evalInfixExpression(left, right, infix.operator);
+                    },
+                    .FunctionLiteral => |function| {
+                        return Object{ .Function = .{ .params = function.params, .body = function.body, .env = env } };
+                    },
+                    .CallExpression => |call_expression| {
+                        const func = self.eval(Node{ .Expression = call_expression.function.* }, env);
+                        if (func.isError()) {
+                            return func;
+                        }
+
+                        var args = std.ArrayList(Object).init(self.gpa);
+                        for (call_expression.args.items) |arg| {
+                            const evaluated = self.eval(Node{ .Expression = arg.* }, env);
+                            if (evaluated.isError()) {
+                                return evaluated;
+                            }
+                            args.append(evaluated) catch {
+                                return self.createError("failed to call function", .{});
+                            };
+                        }
+
+                        switch (func) {
+                            .Function => |function| {
+                                const extended_env = Environment.initEnclosed(self.gpa, env) catch {
+                                    return self.createError("failed to call function", .{});
+                                };
+                                for (0..function.params.items.len) |i| {
+                                    const name = function.params.items[i];
+                                    const arg = args.items[i];
+                                    extended_env.set(name, arg) catch {
+                                        return self.createError("failed to call function", .{});
+                                    };
+                                }
+                                const result = self.eval(Node{ .Statement = Statement{ .BlockStatement = function.body } }, extended_env);
+                                return result;
+                            },
+                            else => return self.createError("can't call a non-function", .{}),
+                        }
                     },
                     else => return Object{ .Error = .{ .value = "Unknown expression" } },
                 }
@@ -116,10 +215,10 @@ pub const Evaluator = struct {
         };
     }
 
-    fn evalProgram(self: *Evaluator, statements: std.ArrayList(Statement)) Object {
+    fn evalProgram(self: *Evaluator, statements: std.ArrayList(Statement), env: *Environment) Object {
         var result = Object{ .Null = .{} };
         for (statements.items) |statement| {
-            result = self.eval(Node{ .Statement = statement });
+            result = self.eval(Node{ .Statement = statement }, env);
             switch (result) {
                 .ReturnValue => |retVal| return retVal.value.*,
                 .Error => return result,
@@ -211,5 +310,39 @@ pub const Evaluator = struct {
             return Object{ .Error = .{ .value = "Unknown error" } };
         };
         return Object{ .Error = .{ .value = error_message } };
+    }
+};
+
+pub const Environment = struct {
+    store: std.StringHashMap(Object),
+    outer: ?*Environment,
+
+    pub fn init(gpa: std.mem.Allocator) !*Environment {
+        const store = std.StringHashMap(Object).init(gpa);
+        const env = try gpa.create(Environment);
+        env.* = Environment{ .store = store, .outer = null };
+        return env;
+    }
+
+    pub fn initEnclosed(gpa: std.mem.Allocator, environment: *Environment) !*Environment {
+        const store = std.StringHashMap(Object).init(gpa);
+        const env = try gpa.create(Environment);
+        env.* = Environment{ .store = store, .outer = environment };
+        return env;
+    }
+
+    pub fn get(self: *Environment, key: []const u8) ?Object {
+        const val = self.store.get(key);
+        if (val != null) {
+            return val;
+        }
+        if (self.outer) |outer| {
+            return outer.get(key);
+        }
+        return null;
+    }
+
+    pub fn set(self: *Environment, key: []const u8, val: Object) !void {
+        try self.store.put(key, val);
     }
 };

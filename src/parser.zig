@@ -40,7 +40,7 @@ const ExpressionStatement = struct {
     expression: *const Expression,
 };
 
-const BlockStatement = struct {
+pub const BlockStatement = struct {
     statements: std.ArrayList(Statement),
 };
 
@@ -53,6 +53,7 @@ pub const Expression = union(enum) {
     InfixExpression: InfixExpression,
     PrefixExpression: PrefixExpression,
     FunctionLiteral: FunctionLiteral,
+    CallExpression: CallExpression,
 
     pub fn format(
         self: @This(),
@@ -71,12 +72,12 @@ pub const Expression = union(enum) {
             .InfixExpression => |v| try writer.print("({any} {any} {any})", .{ v.left, v.operator, v.right }),
             .PrefixExpression => |v| try writer.print("({any}{any})", .{ v.operator, v.expression }),
             .FunctionLiteral => |v| {
-                try writer.print("fnc(", .{});
+                try writer.print("fnc {s}(", .{v.name});
                 for (v.params.items, 0..) |param, i| {
                     if (i > 0) {
                         try writer.print(", ", .{});
                     }
-                    try writer.print("{any}", .{param});
+                    try writer.print("{s}", .{param});
                 }
                 try writer.print(") {{\n", .{});
                 for (v.body.statements.items, 0..) |statement, i| {
@@ -86,6 +87,16 @@ pub const Expression = union(enum) {
                     try writer.print("    {any}", .{statement});
                 }
                 try writer.print("\n}}", .{});
+            },
+            .CallExpression => |v| {
+                try writer.print("{any}(", .{v.function});
+                for (v.args.items, 0..) |arg, i| {
+                    if (i > 0) {
+                        try writer.print(", ", .{});
+                    }
+                    try writer.print("{any}", .{arg});
+                }
+                try writer.print(")", .{});
             },
         }
     }
@@ -136,8 +147,14 @@ const PrefixExpression = struct {
 };
 
 const FunctionLiteral = struct {
-    params: std.ArrayList(*Expression),
+    name: []const u8,
+    params: std.ArrayList([]const u8),
     body: BlockStatement,
+};
+
+const CallExpression = struct {
+    function: *const Expression,
+    args: std.ArrayList(*Expression),
 };
 
 const Precedence = enum(u8) {
@@ -268,23 +285,29 @@ pub const Parser = struct {
                 return Expression{ .PrefixExpression = prefix_expression };
             },
             TokenType.Function => {
+                var name: []const u8 = "";
+                if (self.peek_token_is(.Identifier)) {
+                    try self.advance();
+                    name = self.cur_token.literal;
+                }
+
                 try self.advance_and_expect(TokenType.LParen);
                 try self.advance();
 
-                var params = std.ArrayList(*Expression).init(self.arena);
+                var params = std.ArrayList([]const u8).init(self.arena);
                 while (!self.current_token_is(TokenType.RParen)) {
                     if (self.current_token_is(TokenType.Eof)) {
                         return error.ReachedEndOfFile;
                     }
 
-                    try params.append(try self.parse_expression(Precedence.Lowest));
+                    try self.expect_token(TokenType.Identifier);
+                    try params.append(self.cur_token.literal);
 
                     if (!self.peek_token_is(TokenType.RParen)) {
                         try self.advance_and_expect(TokenType.Comma);
-                        try self.advance();
-                    } else {
-                        try self.advance();
                     }
+
+                    try self.advance();
                 }
 
                 try self.advance_and_expect(TokenType.LBrace);
@@ -300,7 +323,9 @@ pub const Parser = struct {
                     try statements.append(try self.parse_statement());
                 }
 
-                return Expression{ .FunctionLiteral = FunctionLiteral{ .params = params, .body = BlockStatement{ .statements = statements } } };
+                try self.advance();
+
+                return Expression{ .FunctionLiteral = FunctionLiteral{ .name = name, .params = params, .body = BlockStatement{ .statements = statements } } };
             },
             else => {
                 std.debug.print("unknown token type: {any}\n", .{self.cur_token.type});
@@ -329,6 +354,29 @@ pub const Parser = struct {
                 };
 
                 return Expression{ .InfixExpression = infix_expression };
+            },
+            TokenType.LParen => {
+                try self.advance();
+
+                var args = std.ArrayList(*Expression).init(self.arena);
+                while (!self.current_token_is(TokenType.RParen)) {
+                    if (self.current_token_is(TokenType.Eof)) {
+                        return error.ReachedEndOfFile;
+                    }
+
+                    try args.append(try self.parse_expression(Precedence.Lowest));
+
+                    if (!self.peek_token_is(TokenType.RParen)) {
+                        try self.advance_and_expect(TokenType.Comma);
+                    }
+
+                    try self.advance();
+                }
+
+                const left_owned = try self.arena.create(Expression);
+                left_owned.* = left;
+
+                return Expression{ .CallExpression = .{ .function = left_owned, .args = args } };
             },
             else => error.NoInfixFunctionFound,
         };

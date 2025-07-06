@@ -1,1 +1,9 @@
-5 > 1
+test = fnc(a, cb) {
+    return cb(a)
+}
+
+callback = fnc(a) {
+    return a * a
+}
+
+test(5, callback)
