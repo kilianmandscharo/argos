@@ -316,18 +316,32 @@ pub const Evaluator = struct {
 pub const Environment = struct {
     store: std.StringHashMap(Object),
     outer: ?*Environment,
+    children: std.ArrayList(*Environment),
+    gpa: std.mem.Allocator,
 
     pub fn init(gpa: std.mem.Allocator) !*Environment {
+        const children = std.ArrayList(*Environment).init(gpa);
         const store = std.StringHashMap(Object).init(gpa);
         const env = try gpa.create(Environment);
-        env.* = Environment{ .store = store, .outer = null };
+        env.* = Environment{ .store = store, .outer = null, .children = children, .gpa = gpa };
         return env;
     }
 
+    pub fn deinit(self: *Environment) void {
+        for (self.children.items) |child| {
+            child.deinit();
+        }
+        self.children.deinit();
+        self.store.deinit();
+        self.gpa.destroy(self);
+    }
+
     pub fn initEnclosed(gpa: std.mem.Allocator, environment: *Environment) !*Environment {
+        const children = std.ArrayList(*Environment).init(gpa);
         const store = std.StringHashMap(Object).init(gpa);
         const env = try gpa.create(Environment);
-        env.* = Environment{ .store = store, .outer = environment };
+        env.* = Environment{ .store = store, .outer = environment, .children = children, .gpa = gpa };
+        try environment.children.append(env);
         return env;
     }
 

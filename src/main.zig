@@ -41,6 +41,8 @@ pub fn main() !void {
     const program = try parser.parse_program();
 
     const env = try Environment.init(gpaAllocator);
+    defer env.deinit();
+
     var evaluator = Evaluator.init(gpaAllocator);
     const result = evaluator.eval(Node{ .Program = program }, env);
     std.debug.print("Result: {any}\n", .{result});
