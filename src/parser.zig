@@ -232,6 +232,17 @@ pub const Parser = struct {
         return list;
     }
 
+    pub fn printProgram(program: std.ArrayList(Statement), arena: std.mem.Allocator) ![]const u8 {
+        var buffer = std.ArrayList(u8).init(arena);
+        for (program.items, 0..) |statement, i| {
+            try std.fmt.format(buffer.writer(), "{any}", .{statement});
+            if (i < program.items.len - 1) {
+                try buffer.append('\n');
+            }
+        }
+        return buffer.items;
+    }
+
     fn parseStatement(self: *Parser) !Statement {
         return switch (self.cur_token.type) {
             .Identifier => {
@@ -252,7 +263,7 @@ pub const Parser = struct {
         if (self.currentTokenIs(.Eof)) {
             return statement;
         }
-        try self.expectAndAdvance(.NewLine);
+        try self.advance();
         return statement;
     }
 
@@ -268,9 +279,13 @@ pub const Parser = struct {
         const identifier = try self.get_and_advance();
         try self.expectAndAdvance(TokenType.Assign);
         const expression = try self.parseExpression(Precedence.Lowest);
-        try self.advanceAndExpect(TokenType.NewLine);
+        const statement = Statement{ .AssignmentStatement = AssignmentStatement{ .identifier = identifier, .expression = expression } };
         try self.advance();
-        return Statement{ .AssignmentStatement = AssignmentStatement{ .identifier = identifier, .expression = expression } };
+        if (self.currentTokenIs(.Eof)) {
+            return statement;
+        }
+        try self.advance();
+        return statement;
     }
 
     fn parsePrefixExpression(self: *Parser) !Expression {
@@ -331,8 +346,6 @@ pub const Parser = struct {
                         try self.advance();
                     }
                 }
-
-                try self.advance();
 
                 return Expression{ .FunctionLiteral = FunctionLiteral{ .name = name, .params = params, .body = BlockStatement{ .statements = statements } } };
             },

@@ -38,7 +38,7 @@ pub fn main() !void {
 
     var lexer = try Lexer.init(arenaAllocator, content);
     var parser = try Parser.init(&lexer, arenaAllocator);
-    const program = try parser.parse_program();
+    const program = try parser.parseProgram();
 
     const env = try Environment.init(gpaAllocator);
     defer env.deinit();

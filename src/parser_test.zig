@@ -7,7 +7,26 @@ const Lexer = lexer_module.Lexer;
 const parser_module = @import("parser.zig");
 const Parser = parser_module.Parser;
 const Expression = parser_module.Expression;
+const Statement = parser_module.Statement;
 const Operator = parser_module.Operator;
+
+fn getProgram(arena: std.mem.Allocator, content: []const u8) !std.ArrayList(Statement) {
+    var lexer = try Lexer.init(arena, content);
+    var parser = try Parser.init(&lexer, arena);
+
+    const program = try parser.parseProgram();
+    return program;
+}
+
+fn expectFormattedProgram(arena: std.mem.Allocator, input: []const u8, expected_output: []const u8) !void {
+    var lexer = try Lexer.init(arena, input);
+    var parser = try Parser.init(&lexer, arena);
+
+    const program = try parser.parseProgram();
+    const parsed = try Parser.printProgram(program, arena);
+
+    try std.testing.expectEqualStrings(expected_output, parsed);
+}
 
 fn getExpression(arena: std.mem.Allocator, content: []const u8) !*const Expression {
     var lexer = try Lexer.init(arena, content);
@@ -46,6 +65,28 @@ fn expectFloatLiteral(expression: *const Expression, value: f64) !void {
 fn expectBooleanLiteral(expression: *const Expression, value: bool) !void {
     try expect(expression.* == .BooleanLiteral);
     try expect(expression.*.BooleanLiteral == value);
+}
+
+fn expectStatement(want: Statement, got: Statement) !void {
+    try expect(@tagName(want) == @tagName(got));
+
+    switch (want) {
+        .AssignmentStatement => |v| {
+            expect(std.mem.eql(u8, v.identifier.literal, got.AssignmentStatement.identifier.literal));
+            expect(std.meta.eql(v.expression.*, got.AssignmentStatement.expression.*));
+        },
+        .ReturnStatement => |v| {
+            expect(std.meta.eql(v.expression.*, got.ReturnStatement.expression.*));
+        },
+        .ExpressionStatement => |v| {
+            expect(std.meta.eql(v.expression.*, got.ExpressionStatement.expression.*));
+        },
+        .BlockStatement => |v| {
+            for (0..v.statements.items.len) |i| {
+                try expectStatement(v.statements.items[i], got.BlockStatement.statements.items[i]);
+            }
+        },
+    }
 }
 
 test "should parse identifier" {
@@ -155,10 +196,90 @@ test "should parse infix expression" {
     };
 
     const test_cases = [_]TestCase{
-        .{ .content = "1 + 1", .operator = .Plus, .left = Expression{ .IntegerLiteral = 1 }, .right = Expression{ .IntegerLiteral = 1 } },
-        .{ .content = "40 - 22", .operator = .Minus, .left = Expression{ .IntegerLiteral = 40 }, .right = Expression{ .IntegerLiteral = 22 } },
-        .{ .content = "5 * 66", .operator = .Asterisk, .left = Expression{ .IntegerLiteral = 5 }, .right = Expression{ .IntegerLiteral = 66 } },
-        .{ .content = "6 / 2", .operator = .Slash, .left = Expression{ .IntegerLiteral = 6 }, .right = Expression{ .IntegerLiteral = 2 } },
+        .{
+            .content = "1 + 1",
+            .operator = .Plus,
+            .left = Expression{ .IntegerLiteral = 1 },
+            .right = Expression{ .IntegerLiteral = 1 },
+        },
+        .{
+            .content = "1.1 + 1.35",
+            .operator = .Plus,
+            .left = Expression{ .FloatLiteral = 1.1 },
+            .right = Expression{ .FloatLiteral = 1.35 },
+        },
+        .{
+            .content = "40 - 22",
+            .operator = .Minus,
+            .left = Expression{ .IntegerLiteral = 40 },
+            .right = Expression{ .IntegerLiteral = 22 },
+        },
+        .{
+            .content = "40.54 - 22.33",
+            .operator = .Minus,
+            .left = Expression{ .FloatLiteral = 40.54 },
+            .right = Expression{ .FloatLiteral = 22.33 },
+        },
+        .{
+            .content = "5 * 66",
+            .operator = .Asterisk,
+            .left = Expression{ .IntegerLiteral = 5 },
+            .right = Expression{ .IntegerLiteral = 66 },
+        },
+        .{
+            .content = "5.3 * 66.5",
+            .operator = .Asterisk,
+            .left = Expression{ .FloatLiteral = 5.3 },
+            .right = Expression{ .FloatLiteral = 66.5 },
+        },
+        .{
+            .content = "6 / 2",
+            .operator = .Slash,
+            .left = Expression{ .IntegerLiteral = 6 },
+            .right = Expression{ .IntegerLiteral = 2 },
+        },
+        .{
+            .content = "6.55 / 2.413",
+            .operator = .Slash,
+            .left = Expression{ .FloatLiteral = 6.55 },
+            .right = Expression{ .FloatLiteral = 2.413 },
+        },
+        .{
+            .content = "1 < 5",
+            .operator = .Lt,
+            .left = Expression{ .IntegerLiteral = 1 },
+            .right = Expression{ .IntegerLiteral = 5 },
+        },
+        .{
+            .content = "1 > 5",
+            .operator = .Gt,
+            .left = Expression{ .IntegerLiteral = 1 },
+            .right = Expression{ .IntegerLiteral = 5 },
+        },
+        .{
+            .content = "3 == 3",
+            .operator = .Eq,
+            .left = Expression{ .IntegerLiteral = 3 },
+            .right = Expression{ .IntegerLiteral = 3 },
+        },
+        .{
+            .content = "3 != 3",
+            .operator = .NotEq,
+            .left = Expression{ .IntegerLiteral = 3 },
+            .right = Expression{ .IntegerLiteral = 3 },
+        },
+        .{
+            .content = "true == false",
+            .operator = .Eq,
+            .left = Expression{ .BooleanLiteral = true },
+            .right = Expression{ .BooleanLiteral = false },
+        },
+        .{
+            .content = "true != false",
+            .operator = .NotEq,
+            .left = Expression{ .BooleanLiteral = true },
+            .right = Expression{ .BooleanLiteral = false },
+        },
     };
 
     for (test_cases) |test_case| {
@@ -170,6 +291,42 @@ test "should parse infix expression" {
         try expect(std.meta.eql(expression.*.InfixExpression.left.*, test_case.left));
         try expect(std.meta.eql(expression.*.InfixExpression.right.*, test_case.right));
     }
+}
+
+// fn expectFunction(expression: *const Expression, name: []const u8, params: [][]const u8, statements: []Statement) !void {
+//     try expect(expression.* == .FunctionLiteral);
+//     const function_literal = expression.FunctionLiteral;
+//
+//     try expect(std.mem.eql(u8, function_literal.name, name));
+//
+//     try expect(function_literal.params.items.len == params.len);
+//     for (0..params.len) |i| {
+//         try expect(std.mem.eql(u8, function_literal.params.items[i], params[i]));
+//     }
+//
+//     try expect(function_literal.body.statements.items.len == statements.len);
+//     for (0..statements.len) |i| {
+//         try expectStatement(function_literal.body.statements[i], statements[i]);
+//     }
+// }
+
+test "should parse function call" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const content =
+        \\val = fnc test(a, b) {
+        \\    return a + b
+        \\}(1, 2)
+    ;
+
+    const expected_output =
+        \\val = fnc test(a, b) {
+        \\    return (a + b)
+        \\}(1, 2)
+    ;
+
+    try expectFormattedProgram(arena.allocator(), content, expected_output);
 }
 
 test "should parse function declaration" {
