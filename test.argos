@@ -1,9 +1,5 @@
-test = fnc(a, cb) {
-    return cb(a)
+test = fnc(a, b) {
+    return a + b
 }
 
-callback = fnc(a) {
-    return a * a
-}
-
-test(5, callback)
+test(5, 10)
