@@ -9,6 +9,7 @@ const Parser = parser_module.Parser;
 const Expression = parser_module.Expression;
 const Statement = parser_module.Statement;
 const Operator = parser_module.Operator;
+const ParserError = parser_module.ParserError;
 
 fn getProgram(arena: std.mem.Allocator, content: []const u8) !std.ArrayList(Statement) {
     var lexer = try Lexer.init(arena, content);
@@ -293,22 +294,184 @@ test "should parse infix expression" {
     }
 }
 
-// fn expectFunction(expression: *const Expression, name: []const u8, params: [][]const u8, statements: []Statement) !void {
-//     try expect(expression.* == .FunctionLiteral);
-//     const function_literal = expression.FunctionLiteral;
-//
-//     try expect(std.mem.eql(u8, function_literal.name, name));
-//
-//     try expect(function_literal.params.items.len == params.len);
-//     for (0..params.len) |i| {
-//         try expect(std.mem.eql(u8, function_literal.params.items[i], params[i]));
-//     }
-//
-//     try expect(function_literal.body.statements.items.len == statements.len);
-//     for (0..statements.len) |i| {
-//         try expectStatement(function_literal.body.statements[i], statements[i]);
-//     }
-// }
+test "function declaration" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected: []const u8,
+        expected_error: ?ParserError,
+    };
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "empty function one line",
+            .input =
+            \\fnc test() {}
+            ,
+            .expected =
+            \\fnc test() { }
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "empty function multi lines",
+            .input =
+            \\fnc test() {
+            \\
+            \\}
+            ,
+            .expected =
+            \\fnc test() {
+            \\
+            \\}
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "one liner with params",
+            .input =
+            \\fnc test(a, b) { return a + b }
+            ,
+            .expected =
+            \\fnc test(a, b) { return (a + b) }
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "multi liner with params and one statement",
+            .input =
+            \\fnc test(a, b) {
+            \\    return a + b 
+            \\}
+            ,
+            .expected =
+            \\fnc test(a, b) {
+            \\    return (a + b)
+            \\}
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "multi liner with params and multiple statements",
+            .input =
+            \\fnc test(a, b) {
+            \\    x = a * b
+            \\    y = a / b
+            \\    return x + y
+            \\}
+            ,
+            .expected =
+            \\fnc test(a, b) {
+            \\    x = (a * b)
+            \\    y = (a / b)
+            \\    return (x + y)
+            \\}
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "multi liner with gaps",
+            .input =
+            \\fnc test(a, b) {
+            \\    x = a * b
+            \\    y = a / b
+            \\    return x + y
+            \\}
+            ,
+            .expected =
+            \\fnc test(a, b) {
+            \\    x = (a * b)
+            \\    y = (a / b)
+            \\    return (x + y)
+            \\}
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "one liner without return",
+            .input =
+            \\fnc test(a, b) { a - b }
+            ,
+            .expected =
+            \\fnc test(a, b) { (a - b) }
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "multi liner without return",
+            .input =
+            \\fnc test(a, b) {
+            \\    x = a * b
+            \\    y = a / b
+            \\    x + y
+            \\}
+            ,
+            .expected =
+            \\fnc test(a, b) {
+            \\    x = (a * b)
+            \\    y = (a / b)
+            \\    (x + y)
+            \\}
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "new line before closing brace is needed for multi liner",
+            .input =
+            \\fnc test(a, b) {
+            \\    x = a * b
+            \\    y = a / b
+            \\    x + y }
+            ,
+            .expected = "",
+            .expected_error = ParserError.UnexpectedTokenType,
+        },
+        .{
+            .description = "new line after opening brace is needed for multi liner",
+            .input =
+            \\fnc test(a, b) { x = a * b
+            \\    y = a / b
+            \\    x + y 
+            \\}
+            ,
+            .expected = "",
+            .expected_error = ParserError.UnexpectedTokenType,
+        },
+    };
+
+    std.debug.print("--- start function declaration tests ---\n", .{});
+    for (test_cases) |test_case| {
+        std.debug.print("  --> {s}\n", .{test_case.description});
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const result = expectFormattedProgram(arena.allocator(), test_case.input, test_case.expected);
+        if (test_case.expected_error == null) {
+            try result;
+        } else {
+            try std.testing.expectError(ParserError.UnexpectedTokenType, result);
+        }
+    }
+    std.debug.print("--- end function declaration tests ---\n", .{});
+}
+
+test "should parse function assignment" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const content =
+        \\val = fnc test(a, b) {
+        \\    return a + b
+        \\}(1, 2)
+    ;
+
+    const expected_output =
+        \\val = fnc test(a, b) {
+        \\    return (a + b)
+        \\}(1, 2)
+    ;
+
+    try expectFormattedProgram(arena.allocator(), content, expected_output);
+}
 
 test "should parse function call" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -324,6 +487,21 @@ test "should parse function call" {
         \\val = fnc test(a, b) {
         \\    return (a + b)
         \\}(1, 2)
+    ;
+
+    try expectFormattedProgram(arena.allocator(), content, expected_output);
+}
+
+test "should parse empty one liner function call" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const content =
+        \\val = fnc test(a, b) { return a + b }(1, 2)
+    ;
+
+    const expected_output =
+        \\val = fnc test(a, b) { return (a + b) }(1, 2)
     ;
 
     try expectFormattedProgram(arena.allocator(), content, expected_output);

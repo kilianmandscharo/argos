@@ -43,12 +43,8 @@ pub const Token = struct {
 
     pub fn format(
         self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        _ = fmt;
-        _ = options;
         try writer.print("Token {any} --> {s}", .{ self.type, self.literal });
     }
 };
@@ -90,7 +86,7 @@ pub const Lexer = struct {
             ']' => Token{ .type = TokenType.RBracket, .literal = "]" },
             '{' => Token{ .type = TokenType.LBrace, .literal = "{" },
             '}' => Token{ .type = TokenType.RBrace, .literal = "}" },
-            '\n' => Token{ .type = TokenType.NewLine, .literal = "\n" },
+            '\n' => Token{ .type = TokenType.NewLine, .literal = "<newline>" },
             '<' => Token{ .type = TokenType.Lt, .literal = "<" },
             '>' => Token{ .type = TokenType.Gt, .literal = ">" },
             '!' => {

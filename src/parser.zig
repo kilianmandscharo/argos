@@ -13,16 +13,12 @@ pub const Statement = union(enum) {
 
     pub fn format(
         self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        _ = fmt;
-        _ = options;
         switch (self) {
-            .AssignmentStatement => |v| try writer.print("{s} = {any}", .{ v.identifier.literal, v.expression }),
-            .ReturnStatement => |v| try writer.print("return {any}", .{v.expression}),
-            .ExpressionStatement => |v| try writer.print("{any}", .{v.expression}),
+            .AssignmentStatement => |v| try writer.print("{s} = {f}", .{ v.identifier.literal, v.expression }),
+            .ReturnStatement => |v| try writer.print("return {f}", .{v.expression}),
+            .ExpressionStatement => |v| try writer.print("{f}", .{v.expression}),
             else => try writer.print("no custom formatter yet", .{}),
         }
     }
@@ -58,21 +54,32 @@ pub const Expression = union(enum) {
 
     pub fn format(
         self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        _ = fmt;
-        _ = options;
         switch (self) {
             .Identifier => |v| try writer.print("{s}", .{v}),
             .StringLiteral => |v| try writer.print("\"{s}\"", .{v}),
             .FloatLiteral => |v| try writer.print("{}", .{v}),
             .IntegerLiteral => |v| try writer.print("{}", .{v}),
             .BooleanLiteral => |v| try writer.print("{}", .{v}),
-            .InfixExpression => |v| try writer.print("({any} {any} {any})", .{ v.left, v.operator, v.right }),
-            .PrefixExpression => |v| try writer.print("({any}{any})", .{ v.operator, v.expression }),
+            .InfixExpression => |v| try writer.print("({f} {f} {f})", .{ v.left, v.operator, v.right }),
+            .PrefixExpression => |v| try writer.print("({f}{f})", .{ v.operator, v.expression }),
             .FunctionLiteral => |v| {
+                if (v.is_one_liner) {
+                    try writer.print("fnc {s}(", .{v.name});
+                    for (v.params.items, 0..) |param, i| {
+                        if (i > 0) {
+                            try writer.print(", ", .{});
+                        }
+                        try writer.print("{s}", .{param});
+                    }
+                    if (v.body.statements.items.len == 0) {
+                        try writer.print(") {{ }}", .{});
+                    } else {
+                        try writer.print(") {{ {f} }}", .{v.body.statements.items[0]});
+                    }
+                    return;
+                }
                 try writer.print("fnc {s}(", .{v.name});
                 for (v.params.items, 0..) |param, i| {
                     if (i > 0) {
@@ -85,17 +92,17 @@ pub const Expression = union(enum) {
                     if (i > 0) {
                         try writer.print("\n", .{});
                     }
-                    try writer.print("    {any}", .{statement});
+                    try writer.print("    {f}", .{statement});
                 }
                 try writer.print("\n}}", .{});
             },
             .CallExpression => |v| {
-                try writer.print("{any}(", .{v.function});
+                try writer.print("{f}(", .{v.function});
                 for (v.args.items, 0..) |arg, i| {
                     if (i > 0) {
                         try writer.print(", ", .{});
                     }
-                    try writer.print("{any}", .{arg});
+                    try writer.print("{f}", .{arg});
                 }
                 try writer.print(")", .{});
             },
@@ -116,12 +123,8 @@ pub const Operator = enum {
 
     pub fn format(
         self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        _ = fmt;
-        _ = options;
         switch (self) {
             Operator.Plus => try writer.print("+", .{}),
             Operator.Minus => try writer.print("-", .{}),
@@ -149,8 +152,9 @@ const PrefixExpression = struct {
 
 const FunctionLiteral = struct {
     name: []const u8,
-    params: std.ArrayList([]const u8),
+    params: std.ArrayListUnmanaged([]const u8),
     body: BlockStatement,
+    is_one_liner: bool,
 };
 
 const CallExpression = struct {
@@ -169,6 +173,15 @@ const Precedence = enum(u8) {
     Index,
 };
 
+pub const ParserError = error {
+    UnexpectedTokenType,
+    NoInfixFunctionFound,
+    ReachedEndOfFile,
+    UnknownTokenType,
+    NoTokens,
+    NoOperatorFound,
+};
+
 pub const Parser = struct {
     cur_token: Token,
     peek_token: Token,
@@ -178,7 +191,7 @@ pub const Parser = struct {
     pub fn init(lexer: *Lexer, arena: std.mem.Allocator) !Parser {
         const cur_token = try lexer.next();
         if (cur_token.type == TokenType.Eof) {
-            return error.NoTokens;
+            return ParserError.NoTokens;
         }
         const peek_token = try lexer.next();
         return Parser{
@@ -202,8 +215,7 @@ pub const Parser = struct {
 
     fn expectToken(self: *Parser, expected_type: TokenType) !void {
         if (self.cur_token.type != expected_type) {
-            std.debug.print("expected: {any}, got: {any}\n", .{ expected_type, self.cur_token.type });
-            return error.UnexpectedTokenType;
+            return ParserError.UnexpectedTokenType;
         }
     }
 
@@ -211,14 +223,14 @@ pub const Parser = struct {
         try self.advance();
         if (self.cur_token.type != expected_type) {
             std.debug.print("expected: {any}, got: {any}\n", .{ expected_type, self.cur_token.type });
-            return error.UnexpectedTokenType;
+            return ParserError.UnexpectedTokenType;
         }
     }
 
     fn expectAndAdvance(self: *Parser, expected_type: TokenType) !void {
         if (self.cur_token.type != expected_type) {
             std.debug.print("expected: {any}, got: {any}\n", .{ expected_type, self.cur_token.type });
-            return error.UnexpectedTokenType;
+            return ParserError.UnexpectedTokenType;
         }
         try self.advance();
     }
@@ -235,7 +247,7 @@ pub const Parser = struct {
     pub fn printProgram(program: std.ArrayList(Statement), arena: std.mem.Allocator) ![]const u8 {
         var buffer = std.ArrayList(u8).init(arena);
         for (program.items, 0..) |statement, i| {
-            try std.fmt.format(buffer.writer(), "{any}", .{statement});
+            try std.fmt.format(buffer.writer(), "{f}", .{statement});
             if (i < program.items.len - 1) {
                 try buffer.append('\n');
             }
@@ -260,10 +272,6 @@ pub const Parser = struct {
         const expression = try self.parseExpression(.Lowest);
         const statement = Statement{ .ExpressionStatement = .{ .expression = expression } };
         try self.advance();
-        if (self.currentTokenIs(.Eof)) {
-            return statement;
-        }
-        try self.advance();
         return statement;
     }
 
@@ -280,10 +288,6 @@ pub const Parser = struct {
         try self.expectAndAdvance(TokenType.Assign);
         const expression = try self.parseExpression(Precedence.Lowest);
         const statement = Statement{ .AssignmentStatement = AssignmentStatement{ .identifier = identifier, .expression = expression } };
-        try self.advance();
-        if (self.currentTokenIs(.Eof)) {
-            return statement;
-        }
         try self.advance();
         return statement;
     }
@@ -313,14 +317,14 @@ pub const Parser = struct {
                 try self.advanceAndExpect(TokenType.LParen);
                 try self.advance();
 
-                var params = std.ArrayList([]const u8).init(self.arena);
+                var params: std.ArrayListUnmanaged([]const u8) = .{};
                 while (!self.currentTokenIs(TokenType.RParen)) {
                     if (self.currentTokenIs(TokenType.Eof)) {
-                        return error.ReachedEndOfFile;
+                        return ParserError.ReachedEndOfFile;
                     }
 
                     try self.expectToken(TokenType.Identifier);
-                    try params.append(self.cur_token.literal);
+                    try params.append(self.arena, self.cur_token.literal);
 
                     if (!self.peekTokenIs(TokenType.RParen)) {
                         try self.advanceAndExpect(TokenType.Comma);
@@ -329,8 +333,11 @@ pub const Parser = struct {
                     try self.advance();
                 }
 
+                var is_one_liner = true;
+
                 try self.advanceAndExpect(TokenType.LBrace);
                 if (self.peekTokenIs(.NewLine)) {
+                    is_one_liner = false;
                     try self.advance();
                 }
                 try self.advance();
@@ -338,20 +345,30 @@ pub const Parser = struct {
                 var statements = std.ArrayList(Statement).init(self.arena);
                 while (!self.currentTokenIs(TokenType.RBrace)) {
                     if (self.currentTokenIs(TokenType.Eof)) {
-                        return error.ReachedEndOfFile;
+                        return ParserError.ReachedEndOfFile;
+                    }
+
+                    if (self.currentTokenIs(.NewLine)) {
+                        try self.advance();
+                        continue;
                     }
 
                     try statements.append(try self.parseStatement());
-                    if (self.currentTokenIs(.NewLine)) {
-                        try self.advance();
+
+                    if (!is_one_liner) {
+                        try self.expectAndAdvance(.NewLine);
+                    } else if (self.currentTokenIs(.NewLine)) {
+                        return ParserError.UnexpectedTokenType;
                     }
                 }
 
-                return Expression{ .FunctionLiteral = FunctionLiteral{ .name = name, .params = params, .body = BlockStatement{ .statements = statements } } };
+                return Expression{
+                    .FunctionLiteral = FunctionLiteral{ .name = name, .params = params, .body = BlockStatement{ .statements = statements }, .is_one_liner = is_one_liner },
+                };
             },
             else => {
                 std.debug.print("unknown token type: {any}\n", .{self.cur_token.type});
-                return error.UnknownTokenType;
+                return ParserError.UnknownTokenType;
             },
         };
     }
@@ -383,7 +400,7 @@ pub const Parser = struct {
                 var args = std.ArrayList(*Expression).init(self.arena);
                 while (!self.currentTokenIs(TokenType.RParen)) {
                     if (self.currentTokenIs(TokenType.Eof)) {
-                        return error.ReachedEndOfFile;
+                        return ParserError.ReachedEndOfFile;
                     }
 
                     try args.append(try self.parseExpression(Precedence.Lowest));
@@ -400,7 +417,7 @@ pub const Parser = struct {
 
                 return Expression{ .CallExpression = .{ .function = left_owned, .args = args } };
             },
-            else => error.NoInfixFunctionFound,
+            else => ParserError.NoInfixFunctionFound,
         };
     }
 
@@ -416,7 +433,7 @@ pub const Parser = struct {
             try self.advance();
             left = self.parseInfixExpression(left) catch |err| {
                 switch (err) {
-                    error.NoInfixFunctionFound => return left_owned,
+                    ParserError.NoInfixFunctionFound => return left_owned,
                     else => return err,
                 }
             };
@@ -470,7 +487,7 @@ pub const Parser = struct {
             TokenType.Bang => Operator.Bang,
             else => {
                 std.debug.print("unknown operator: {any}\n", .{self.cur_token.type});
-                return error.NoOperatorFound;
+                return ParserError.NoOperatorFound;
             },
         };
     }
