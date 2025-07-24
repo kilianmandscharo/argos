@@ -46,19 +46,15 @@ pub const Object = union(enum) {
 
     pub fn format(
         self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        _ = fmt;
-        _ = options;
         switch (self) {
-            .Integer => |v| try writer.print("{d}", .{v.value}),
-            .Float => |v| try writer.print("{d}", .{v.value}),
-            .String => |v| try writer.print("{s}", .{v.value}),
-            .Boolean => |v| try writer.print("{}", .{v.value}),
-            .ReturnValue => |v| try writer.print("{any}", .{v.value}),
-            .Error => |v| try writer.print("{s}", .{v.value}),
+            .Integer => |v| try writer.print("{d}", .{v}),
+            .Float => |v| try writer.print("{d}", .{v}),
+            .String => |v| try writer.print("{s}", .{v}),
+            .Boolean => |v| try writer.print("{}", .{v}),
+            .ReturnValue => |v| try writer.print("{any}", .{v}),
+            .Error => |v| try writer.print("{s}", .{v}),
             .Function => try writer.print("Function", .{}),
             .Null => try writer.print("Null", .{}),
         }
@@ -66,7 +62,7 @@ pub const Object = union(enum) {
 };
 
 const Function = struct {
-    params: std.ArrayList([]const u8),
+    params: std.ArrayListUnmanaged([]const u8),
     body: BlockStatement,
     env: *Environment,
 };
@@ -161,7 +157,8 @@ pub const Evaluator = struct {
                         return self.evalInfixExpression(left, right, infix.operator);
                     },
                     .FunctionLiteral => |function| {
-                        const object = self.object_store.add(Object{ .Function = .{ .params = function.params, .body = function.body, .env = env } });
+                        const object = try self.object_store.add(Object{ .Function = .{ .params = function.params, .body = function.body, .env = env } });
+                        try env.set(function.name, object);
                         return object;
                     },
                     .CallExpression => |call_expression| {

@@ -1,4 +1,4 @@
-test = fnc(a, b) {
+fnc test(a, b) {
     return a + b
 }
 

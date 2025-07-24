@@ -173,7 +173,7 @@ const Precedence = enum(u8) {
     Index,
 };
 
-pub const ParserError = error {
+pub const ParserError = error{
     UnexpectedTokenType,
     NoInfixFunctionFound,
     ReachedEndOfFile,
@@ -240,6 +240,13 @@ pub const Parser = struct {
         while (self.cur_token.type != TokenType.Eof) {
             const statement = try self.parseStatement();
             try list.append(statement);
+            while (!self.currentTokenIs(.Eof)) {
+                if (self.currentTokenIs(.NewLine)) {
+                    try self.advance();
+                } else {
+                    break;
+                }
+            }
         }
         return list;
     }

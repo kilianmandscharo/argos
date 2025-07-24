@@ -437,6 +437,48 @@ test "function declaration" {
             .expected = "",
             .expected_error = ParserError.UnexpectedTokenType,
         },
+        .{
+            .description = "multi liner with assignment on new line",
+            .input =
+            \\fnc test(a, b) {
+            \\    x = a * b
+            \\    y = a / b
+            \\    x + y
+            \\}
+            \\
+            \\result = test(a, b)
+            ,
+            .expected =
+            \\fnc test(a, b) {
+            \\    x = (a * b)
+            \\    y = (a / b)
+            \\    (x + y)
+            \\}
+            \\result = test(a, b)
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "multi liner with expression on new line",
+            .input =
+            \\fnc test(a, b) {
+            \\    x = a * b
+            \\    y = a / b
+            \\    x + y
+            \\}
+            \\
+            \\test(a, b)
+            ,
+            .expected =
+            \\fnc test(a, b) {
+            \\    x = (a * b)
+            \\    y = (a / b)
+            \\    (x + y)
+            \\}
+            \\test(a, b)
+            ,
+            .expected_error = null,
+        },
     };
 
     std.debug.print("--- start function declaration tests ---\n", .{});
