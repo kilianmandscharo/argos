@@ -19,7 +19,7 @@ pub const Object = union(enum) {
     Float: f64,
     String: []const u8,
     Boolean: bool,
-    ReturnValue: *Object,
+    ReturnValue: usize,
     Error: []const u8,
     Function: Function,
     Null,
@@ -78,9 +78,14 @@ pub const ObjectStore = struct {
         };
     }
 
-    pub fn add(self: *ObjectStore, object: Object) !*Object {
+    pub fn add(self: *ObjectStore, object: Object) !usize {
+        std.debug.print("add to object store: {any}\n", .{object});
         try self.objects.append(self.gpa, object);
-        return &self.objects.items[self.objects.items.len - 1];
+        return self.objects.items.len - 1;
+    }
+
+    pub fn get(self: *ObjectStore, index: usize) Object {
+        return self.objects.items[index];
     }
 };
 
@@ -96,12 +101,13 @@ pub const Evaluator = struct {
         };
     }
 
-    pub fn eval(self: *Evaluator, node: Node, env: *Environment) !*Object {
+    pub fn eval(self: *Evaluator, node: Node, env: *Environment) !Object {
         return switch (node) {
             .Program => |statements| {
                 return try self.evalProgram(statements, env);
             },
             .Statement => |statement| {
+                std.debug.print("eval statement {f}\n", .{statement});
                 switch (statement) {
                     .ExpressionStatement => |expression_statement| {
                         return try self.eval(Node{ .Expression = expression_statement.expression.* }, env);
@@ -115,11 +121,11 @@ pub const Evaluator = struct {
                         return val;
                     },
                     .BlockStatement => |block| {
-                        var result = try self.object_store.add(Object.Null);
+                        var result: Object = Object.Null;
                         for (block.statements.items) |item| {
                             result = try self.eval(Node{ .Statement = item }, env);
-                            switch (result.*) {
-                                .ReturnValue => return result,
+                            switch (result) {
+                                .ReturnValue => |idx| return self.object_store.get(idx),
                                 .Error => return result,
                                 else => {},
                             }
@@ -131,20 +137,22 @@ pub const Evaluator = struct {
                         if (value.isError()) {
                             return value;
                         }
-                        const object = try self.object_store.add(Object{ .ReturnValue = value });
-                        return object;
+                        const object_id = try self.object_store.add(value);
+                        const return_val = Object{ .ReturnValue = object_id };
+                        return return_val;
                     },
                 }
             },
             .Expression => |expression| {
+                std.debug.print("eval expression {f}\n", .{expression});
                 switch (expression) {
                     .Identifier => |identifier| {
                         const val = env.get(identifier) orelse self.createError("identifier '{s}' not found", .{identifier});
                         return val;
                     },
-                    .IntegerLiteral => |integer| return try self.object_store.add(Object{ .Integer = integer }),
-                    .FloatLiteral => |float| return try self.object_store.add(Object{ .Float = float }),
-                    .BooleanLiteral => |boolean| return try self.object_store.add(Object{ .Boolean = boolean }),
+                    .IntegerLiteral => |integer| return Object{ .Integer = integer },
+                    .FloatLiteral => |float| return Object{ .Float = float },
+                    .BooleanLiteral => |boolean| return Object{ .Boolean = boolean },
                     .InfixExpression => |infix| {
                         const left = try self.eval(Node{ .Expression = infix.left.* }, env);
                         if (left.isError()) {
@@ -156,8 +164,12 @@ pub const Evaluator = struct {
                         }
                         return self.evalInfixExpression(left, right, infix.operator);
                     },
+                    .PrefixExpression => |prefix| {
+                        const right = try self.eval(Node{ .Expression = prefix.expression.* }, env);
+                        return self.evalPrefixExpression(right, prefix.operator);
+                    },
                     .FunctionLiteral => |function| {
-                        const object = try self.object_store.add(Object{ .Function = .{ .params = function.params, .body = function.body, .env = env } });
+                        const object = Object{ .Function = .{ .params = function.params, .body = function.body, .env = env } };
                         try env.set(function.name, object);
                         return object;
                     },
@@ -167,7 +179,7 @@ pub const Evaluator = struct {
                             return func;
                         }
 
-                        var args: std.ArrayListUnmanaged(*Object) = .{};
+                        var args: std.ArrayListUnmanaged(Object) = .{};
                         for (call_expression.args.items) |arg| {
                             const evaluated = try self.eval(Node{ .Expression = arg.* }, env);
                             if (evaluated.isError()) {
@@ -176,35 +188,32 @@ pub const Evaluator = struct {
                             try args.append(self.gpa, evaluated);
                         }
 
-                        switch (func.*) {
+                        switch (func) {
                             .Function => |function| {
-                                const extended_env = Environment.initEnclosed(self.gpa, env) catch {
-                                    return self.createError("failed to call function", .{});
-                                };
+                                const extended_env = try Environment.initEnclosed(self.gpa, function.env);
                                 for (0..function.params.items.len) |i| {
                                     const name = function.params.items[i];
                                     const arg = args.items[i];
-                                    extended_env.set(name, arg) catch {
-                                        return self.createError("failed to call function", .{});
-                                    };
+                                    try extended_env.set(name, arg);
                                 }
+
                                 const result = self.eval(Node{ .Statement = Statement{ .BlockStatement = function.body } }, extended_env);
                                 return result;
                             },
                             else => return self.createError("can't call a non-function", .{}),
                         }
                     },
-                    else => return try self.object_store.add(Object{ .Error = "Unknown expression" }),
+                    else => return Object{ .Error = "Unknown expression" },
                 }
             },
         };
     }
 
-    fn evalProgram(self: *Evaluator, statements: std.ArrayList(Statement), env: *Environment) anyerror!*Object {
-        var result = try self.object_store.add(Object.Null);
+    fn evalProgram(self: *Evaluator, statements: std.ArrayList(Statement), env: *Environment) anyerror!Object {
+        var result: Object = Object.Null;
         for (statements.items) |statement| {
             result = try self.eval(Node{ .Statement = statement }, env);
-            switch (result.*) {
+            switch (result) {
                 .ReturnValue => return result,
                 .Error => return result,
                 else => {},
@@ -213,10 +222,29 @@ pub const Evaluator = struct {
         return result;
     }
 
-    fn evalInfixExpression(self: *Evaluator, left: *Object, right: *Object, operator: Operator) !*Object {
-        switch (left.*) {
+    fn evalPrefixExpression(self: *Evaluator, right: Object, operator: Operator) !Object {
+        switch (operator) {
+            .Bang => {
+                switch (right) {
+                    .Boolean => |v| return Object{ .Boolean = !v },
+                    else => return try self.createError("invalid type for bang operator: {s}", .{right.getType()}),
+                }
+            },
+            .Minus => {
+                switch (right) {
+                    .Integer => |v| return Object{ .Integer = -1 * v },
+                    .Float => |v| return Object{ .Float = -1 * v },
+                    else => return try self.createError("invalid type for minus operator: {s}", .{right.getType()}),
+                }
+            },
+            else => return try self.createError("invalid operator in prefix position: {any}", .{Operator}),
+        }
+    }
+
+    fn evalInfixExpression(self: *Evaluator, left: Object, right: Object, operator: Operator) !Object {
+        switch (left) {
             .Integer => |left_int| {
-                switch (right.*) {
+                switch (right) {
                     .Integer => |right_int| {
                         return try self.evalIntegerInfixExpression(left_int, right_int, operator);
                     },
@@ -227,7 +255,7 @@ pub const Evaluator = struct {
                 }
             },
             .Float => |left_float| {
-                switch (right.*) {
+                switch (right) {
                     .Integer => |right_int| {
                         return try self.evalFloatInfixExpression(left_float, @floatFromInt(right_int), operator);
                     },
@@ -238,28 +266,27 @@ pub const Evaluator = struct {
                 }
             },
             .Boolean => |left_bool| {
-                switch (right.*) {
+                switch (right) {
                     .Boolean => |right_bool| {
                         return self.evalBooleanInfixExpression(left_bool, right_bool, operator);
                     },
                     else => return self.createError("type mismatch: {s} <> {s}", .{ left.getType(), right.getType() }),
                 }
             },
-            else => return self.object_store.add(Object{ .Error = "Unknown left expression type" }),
+            else => return Object{ .Error = "Unknown left expression type" },
         }
     }
 
-    fn evalBooleanInfixExpression(self: *Evaluator, left: bool, right: bool, operator: Operator) !*Object {
-        const object = switch (operator) {
+    fn evalBooleanInfixExpression(self: *Evaluator, left: bool, right: bool, operator: Operator) !Object {
+        return switch (operator) {
             .Eq => Object{ .Boolean = left == right },
             .NotEq => Object{ .Boolean = left != right },
-            else => return try self.createError("invalid operator '{any}' for type Boolean", .{operator}),
+            else => return try self.createError("invalid operator '{f}' for type Boolean", .{operator}),
         };
-        return try self.object_store.add(object);
     }
 
-    fn evalFloatInfixExpression(self: *Evaluator, left: f64, right: f64, operator: Operator) !*Object {
-        const object = switch (operator) {
+    fn evalFloatInfixExpression(self: *Evaluator, left: f64, right: f64, operator: Operator) !Object {
+        return switch (operator) {
             .Plus => Object{ .Float = left + right },
             .Minus => Object{ .Float = left - right },
             .Slash => Object{ .Float = left / right },
@@ -268,13 +295,12 @@ pub const Evaluator = struct {
             .Lt => Object{ .Boolean = left < right },
             .Eq => Object{ .Boolean = left == right },
             .NotEq => Object{ .Boolean = left != right },
-            else => return self.createError("invalid operator '{any}' for type Float", .{operator}),
+            else => return try self.createError("invalid operator '{f}' for type Float", .{operator}),
         };
-        return try self.object_store.add(object);
     }
 
-    fn evalIntegerInfixExpression(self: *Evaluator, left: i64, right: i64, operator: Operator) !*Object {
-        const object = switch (operator) {
+    fn evalIntegerInfixExpression(self: *Evaluator, left: i64, right: i64, operator: Operator) !Object {
+        return switch (operator) {
             .Plus => Object{ .Integer = left + right },
             .Minus => Object{ .Integer = left - right },
             .Slash => blk: {
@@ -287,20 +313,19 @@ pub const Evaluator = struct {
             .Lt => Object{ .Boolean = left < right },
             .Eq => Object{ .Boolean = left == right },
             .NotEq => Object{ .Boolean = left != right },
-            else => return try self.createError("invalid operator '{any}' for type Integer", .{operator}),
+            else => return try self.createError("invalid operator '{f}' for type Integer", .{operator}),
         };
-        return try self.object_store.add(object);
     }
 
-    fn createError(self: *Evaluator, comptime fmt: []const u8, args: anytype) !*Object {
+    fn createError(self: *Evaluator, comptime fmt: []const u8, args: anytype) !Object {
         const error_message = try std.fmt.allocPrint(self.gpa, fmt, args);
-        return try self.object_store.add(Object{ .Error = error_message });
+        return Object{ .Error = error_message };
     }
 };
 
 pub const Environment = struct {
     gpa: std.mem.Allocator,
-    store: std.StringHashMapUnmanaged(*Object),
+    store: std.StringHashMapUnmanaged(Object),
     children: std.ArrayListUnmanaged(*Environment),
     outer: ?*Environment,
 
@@ -324,7 +349,7 @@ pub const Environment = struct {
         return env;
     }
 
-    pub fn get(self: *Environment, key: []const u8) ?*Object {
+    pub fn get(self: *Environment, key: []const u8) ?Object {
         const val = self.store.get(key);
         if (val != null) {
             return val;
@@ -335,7 +360,7 @@ pub const Environment = struct {
         return null;
     }
 
-    pub fn set(self: *Environment, key: []const u8, val: *Object) !void {
+    pub fn set(self: *Environment, key: []const u8, val: Object) !void {
         try self.store.put(self.gpa, key, val);
     }
 };

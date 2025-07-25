@@ -604,3 +604,144 @@ test "should parse function declaration in one line" {
     try expect(std.mem.eql(u8, infix_expression.left.*.Identifier, "a"));
     try expect(std.mem.eql(u8, infix_expression.right.*.Identifier, "b"));
 }
+
+test "if expressions" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected: []const u8,
+        expected_error: ?ParserError,
+    };
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "single line empty no else",
+            .input =
+            \\if 5 == 5 {}
+            ,
+            .expected =
+            \\if (5 == 5) { }
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "single line empty with else",
+            .input =
+            \\if 5 == 5 {} else {}
+            ,
+            .expected =
+            \\if (5 == 5) { } else { }
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "single line no else",
+            .input =
+            \\if 5 == 5 { 3 + 2 }
+            ,
+            .expected =
+            \\if (5 == 5) { (3 + 2) }
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "multi line empty no else with empty line",
+            .input =
+            \\if 5 == 5 { 
+            \\
+            \\}
+            ,
+            .expected =
+            \\if (5 == 5) {
+            \\
+            \\}
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "multi line empty no else",
+            .input =
+            \\if 5 == 5 { 
+            \\}
+            ,
+            .expected =
+            \\if (5 == 5) {
+            \\
+            \\}
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "multi line empty with else",
+            .input =
+            \\if 5 == 5 { 
+            \\} else {
+            \\}
+            ,
+            .expected =
+            \\if (5 == 5) {
+            \\
+            \\} else {
+            \\
+            \\}
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "multi line no else",
+            .input =
+            \\if 5 == 5 { 
+            \\    3 + 2 
+            \\}
+            ,
+            .expected =
+            \\if (5 == 5) {
+            \\    (3 + 2)
+            \\}
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "single line with else",
+            .input =
+            \\if 5 == 5 { 3 + 2 } else { 1 * 1 }
+            ,
+            .expected =
+            \\if (5 == 5) { (3 + 2) } else { (1 * 1) }
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "multi line with else",
+            .input =
+            \\if 5 == 5 { 
+            \\    3 + 2 
+            \\} else {
+            \\    1 * 1
+            \\}
+            ,
+            .expected =
+            \\if (5 == 5) {
+            \\    (3 + 2)
+            \\} else {
+            \\    (1 * 1)
+            \\}
+            ,
+            .expected_error = null,
+        },
+    };
+
+    std.debug.print("--- start if expressions tests ---\n", .{});
+    for (test_cases) |test_case| {
+        std.debug.print("  --> {s}\n", .{test_case.description});
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const result = expectFormattedProgram(arena.allocator(), test_case.input, test_case.expected);
+        if (test_case.expected_error == null) {
+            try result;
+        } else {
+            try std.testing.expectError(ParserError.UnexpectedTokenType, result);
+        }
+    }
+    std.debug.print("--- end if expressions tests ---\n", .{});
+}

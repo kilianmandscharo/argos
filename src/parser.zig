@@ -51,7 +51,9 @@ pub const Expression = union(enum) {
     PrefixExpression: PrefixExpression,
     FunctionLiteral: FunctionLiteral,
     CallExpression: CallExpression,
+    IfExpression: IfExpression,
 
+    // TODO: factor out some of the block statement printing
     pub fn format(
         self: @This(),
         writer: anytype,
@@ -105,6 +107,47 @@ pub const Expression = union(enum) {
                     try writer.print("{f}", .{arg});
                 }
                 try writer.print(")", .{});
+            },
+            .IfExpression => |v| {
+                if (v.is_one_liner) {
+                    try writer.print("if {f} ", .{v.condition});
+                    if (v.block.statements.items.len == 0) {
+                        try writer.print("{{ }}", .{});
+                    } else {
+                        try writer.print("{{ {f} }}", .{v.block.statements.items[0]});
+                    }
+                    if (v.alternative == null) {
+                        return;
+                    }
+                    const alternative = v.alternative.?;
+                    try writer.print(" else ", .{});
+                    if (alternative.statements.items.len == 0) {
+                        try writer.print("{{ }}", .{});
+                    } else {
+                        try writer.print("{{ {f} }}", .{alternative.statements.items[0]});
+                    }
+                    return;
+                }
+                try writer.print("if {f} {{\n", .{v.condition});
+                for (v.block.statements.items, 0..) |statement, i| {
+                    if (i > 0) {
+                        try writer.print("\n", .{});
+                    }
+                    try writer.print("    {f}", .{statement});
+                }
+                try writer.print("\n}}", .{});
+                if (v.alternative == null) {
+                    return;
+                }
+                const alternative = v.alternative.?;
+                try writer.print(" else {{\n", .{});
+                for (alternative.statements.items, 0..) |statement, i| {
+                    if (i > 0) {
+                        try writer.print("\n", .{});
+                    }
+                    try writer.print("    {f}", .{statement});
+                }
+                try writer.print("\n}}", .{});
             },
         }
     }
@@ -162,6 +205,13 @@ const CallExpression = struct {
     args: std.ArrayList(*Expression),
 };
 
+const IfExpression = struct {
+    condition: *const Expression,
+    block: BlockStatement,
+    alternative: ?BlockStatement,
+    is_one_liner: bool,
+};
+
 const Precedence = enum(u8) {
     Lowest = 1,
     Equals,
@@ -205,6 +255,7 @@ pub const Parser = struct {
     fn advance(self: *Parser) !void {
         self.cur_token = self.peek_token;
         self.peek_token = try self.lexer.next();
+        std.debug.print("cur token: {f}\n", .{self.cur_token});
     }
 
     fn get_and_advance(self: *Parser) !Token {
@@ -372,6 +423,78 @@ pub const Parser = struct {
                 return Expression{
                     .FunctionLiteral = FunctionLiteral{ .name = name, .params = params, .body = BlockStatement{ .statements = statements }, .is_one_liner = is_one_liner },
                 };
+            },
+            // TODO: factor out block statement parsing
+            .If => {
+                try self.advance();
+
+                const condition = try self.parseExpression(.Lowest);
+
+                var is_one_liner = true;
+
+                try self.advanceAndExpect(TokenType.LBrace);
+                if (self.peekTokenIs(.NewLine)) {
+                    is_one_liner = false;
+                    try self.advance();
+                }
+                try self.advance();
+
+                var statements = std.ArrayList(Statement).init(self.arena);
+                while (!self.currentTokenIs(TokenType.RBrace)) {
+                    if (self.currentTokenIs(TokenType.Eof)) {
+                        return ParserError.ReachedEndOfFile;
+                    }
+
+                    if (self.currentTokenIs(.NewLine)) {
+                        try self.advance();
+                        continue;
+                    }
+
+                    try statements.append(try self.parseStatement());
+
+                    if (!is_one_liner) {
+                        try self.expectAndAdvance(.NewLine);
+                    } else if (self.currentTokenIs(.NewLine)) {
+                        return ParserError.UnexpectedTokenType;
+                    }
+                }
+
+                var if_expression = Expression{ .IfExpression = .{ .condition = condition, .block = BlockStatement{ .statements = statements }, .alternative = null, .is_one_liner = is_one_liner } };
+
+                try self.advance();
+
+                if (!self.currentTokenIs(.Else)) {
+                    if (!self.currentTokenIs(.Eof)) {
+                        try self.expectAndAdvance(.NewLine);
+                    }
+                    return if_expression;
+                }
+
+                try self.advanceAndExpect(.LBrace);
+                try self.advance();
+
+                var alternative = std.ArrayList(Statement).init(self.arena);
+                while (!self.currentTokenIs(TokenType.RBrace)) {
+                    if (self.currentTokenIs(TokenType.Eof)) {
+                        return ParserError.ReachedEndOfFile;
+                    }
+
+                    if (self.currentTokenIs(.NewLine)) {
+                        try self.advance();
+                        continue;
+                    }
+
+                    try alternative.append(try self.parseStatement());
+
+                    if (!is_one_liner) {
+                        try self.expectAndAdvance(.NewLine);
+                    } else if (self.currentTokenIs(.NewLine)) {
+                        return ParserError.UnexpectedTokenType;
+                    }
+                }
+
+                if_expression.IfExpression.alternative = BlockStatement{ .statements = alternative };
+                return if_expression;
             },
             else => {
                 std.debug.print("unknown token type: {any}\n", .{self.cur_token.type});
