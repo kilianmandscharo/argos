@@ -203,6 +203,21 @@ pub const Evaluator = struct {
                             else => return self.createError("can't call a non-function", .{}),
                         }
                     },
+                    .IfExpression => |if_expression| {
+                        const condition = try self.eval(Node{ .Expression = if_expression.condition.* }, env);
+                        switch (condition) {
+                            .Boolean => |val| {
+                                if (val) {
+                                    return try self.eval(Node{ .Statement = .{ .BlockStatement = if_expression.body } }, env);
+                                }
+                                if (if_expression.alternative) |alternative| {
+                                    return try self.eval(Node{ .Statement = .{ .BlockStatement = alternative } }, env);
+                                }
+                                return Object.Null;
+                            },
+                            else => return try self.createError("can only evaluate boolean if-conditions", .{}),
+                        }
+                    },
                     else => return Object{ .Error = "Unknown expression" },
                 }
             },

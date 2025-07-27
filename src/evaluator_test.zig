@@ -25,6 +25,8 @@ pub fn getResult(arena: std.mem.Allocator, input: []const u8) !Object {
     return result;
 }
 
+// TODO: Add descriptions to each test
+
 test "infix expressions" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -224,4 +226,111 @@ test "function calls" {
             return err;
         };
     }
+}
+
+test "if expressions" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected_output: Object,
+    };
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "single line no else true",
+            .input =
+            \\if true { 5 }
+            ,
+            .expected_output = Object{ .Integer = 5 },
+        },
+        .{
+            .description = "single line no else false",
+            .input =
+            \\if false { 5 }
+            ,
+            .expected_output = Object.Null,
+        },
+        .{
+            .description = "single line with else true",
+            .input =
+            \\if true { 5 } else { 7 }
+            ,
+            .expected_output = Object{ .Integer = 5 },
+        },
+        .{
+            .description = "single line with else false",
+            .input =
+            \\if false { 5 } else { 7 }
+            ,
+            .expected_output = Object{ .Integer = 7 },
+        },
+        .{
+            .description = "multi line no else true",
+            .input =
+            \\if true { 
+            \\    5 
+            \\}
+            ,
+            .expected_output = Object{ .Integer = 5 },
+        },
+        .{
+            .description = "multi line no else false",
+            .input =
+            \\if false { 
+            \\    5 
+            \\}
+            ,
+            .expected_output = Object.Null,
+        },
+        .{
+            .description = "multi line with else true",
+            .input =
+            \\if true { 
+            \\    5 
+            \\} else {
+            \\    7
+            \\}
+            ,
+            .expected_output = Object{ .Integer = 5 },
+        },
+        .{
+            .description = "multi line with else false",
+            .input =
+            \\if false { 
+            \\    5 
+            \\} else {
+            \\    7
+            \\}
+            ,
+            .expected_output = Object{ .Integer = 7 },
+        },
+        .{
+            .description = "in context",
+            .input =
+            \\y = 17
+            \\fnc calculate(x) { y * x }
+            \\result = if y < 20 { 
+            \\    calculate(5)
+            \\} else {
+            \\    calculate(3)
+            \\}
+            \\result
+            ,
+            .expected_output = Object{ .Integer = 85 },
+        },
+    };
+
+    std.debug.print("==if expressions start==\n", .{});
+    for (test_cases) |test_case| {
+        std.debug.print("  {s}\n", .{test_case.description});
+        const result = try getResult(arena.allocator(), test_case.input);
+        std.testing.expectEqual(test_case.expected_output, result) catch |err| {
+            std.debug.print("expected {any}, got {any}\n", .{ test_case.expected_output, result });
+            return err;
+        };
+    }
+    std.debug.print("==if expressions end==\n", .{});
 }

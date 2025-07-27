@@ -19,7 +19,7 @@ pub const Statement = union(enum) {
             .AssignmentStatement => |v| try writer.print("{s} = {f}", .{ v.identifier.literal, v.expression }),
             .ReturnStatement => |v| try writer.print("return {f}", .{v.expression}),
             .ExpressionStatement => |v| try writer.print("{f}", .{v.expression}),
-            else => try writer.print("no custom formatter yet", .{}),
+            .BlockStatement => |v| try v.format(writer),
         }
     }
 };
@@ -39,6 +39,21 @@ const ExpressionStatement = struct {
 
 pub const BlockStatement = struct {
     statements: std.ArrayListUnmanaged(Statement),
+    is_one_liner: bool,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        var separator: []const u8 = if (self.is_one_liner) " " else "\n";
+        if (self.statements.items.len == 0) separator = "";
+        const ident = if (self.is_one_liner) "" else "    ";
+        try writer.print("{{{s}", .{separator});
+        for (self.statements.items) |statement| {
+            try writer.print("{s}{f}", .{ ident, statement });
+        }
+        try writer.print("{s}}}", .{separator});
+    }
 };
 
 pub const Expression = union(enum) {
@@ -53,7 +68,6 @@ pub const Expression = union(enum) {
     CallExpression: CallExpression,
     IfExpression: IfExpression,
 
-    // TODO: factor out some of the block statement printing
     pub fn format(
         self: @This(),
         writer: anytype,
@@ -67,21 +81,6 @@ pub const Expression = union(enum) {
             .InfixExpression => |v| try writer.print("({f} {f} {f})", .{ v.left, v.operator, v.right }),
             .PrefixExpression => |v| try writer.print("({f}{f})", .{ v.operator, v.expression }),
             .FunctionLiteral => |v| {
-                if (v.is_one_liner) {
-                    try writer.print("fnc {s}(", .{v.name});
-                    for (v.params.items, 0..) |param, i| {
-                        if (i > 0) {
-                            try writer.print(", ", .{});
-                        }
-                        try writer.print("{s}", .{param});
-                    }
-                    if (v.body.statements.items.len == 0) {
-                        try writer.print(") {{ }}", .{});
-                    } else {
-                        try writer.print(") {{ {f} }}", .{v.body.statements.items[0]});
-                    }
-                    return;
-                }
                 try writer.print("fnc {s}(", .{v.name});
                 for (v.params.items, 0..) |param, i| {
                     if (i > 0) {
@@ -89,14 +88,8 @@ pub const Expression = union(enum) {
                     }
                     try writer.print("{s}", .{param});
                 }
-                try writer.print(") {{\n", .{});
-                for (v.body.statements.items, 0..) |statement, i| {
-                    if (i > 0) {
-                        try writer.print("\n", .{});
-                    }
-                    try writer.print("    {f}", .{statement});
-                }
-                try writer.print("\n}}", .{});
+                try writer.print(") ", .{});
+                try v.body.format(writer);
             },
             .CallExpression => |v| {
                 try writer.print("{f}(", .{v.function});
@@ -109,45 +102,12 @@ pub const Expression = union(enum) {
                 try writer.print(")", .{});
             },
             .IfExpression => |v| {
-                if (v.is_one_liner) {
-                    try writer.print("if {f} ", .{v.condition});
-                    if (v.body.statements.items.len == 0) {
-                        try writer.print("{{ }}", .{});
-                    } else {
-                        try writer.print("{{ {f} }}", .{v.body.statements.items[0]});
-                    }
-                    if (v.alternative == null) {
-                        return;
-                    }
-                    const alternative = v.alternative.?;
+                try writer.print("if {f} ", .{v.condition});
+                try v.body.format(writer);
+                if (v.alternative) |alternative| {
                     try writer.print(" else ", .{});
-                    if (alternative.statements.items.len == 0) {
-                        try writer.print("{{ }}", .{});
-                    } else {
-                        try writer.print("{{ {f} }}", .{alternative.statements.items[0]});
-                    }
-                    return;
+                    try alternative.format(writer);
                 }
-                try writer.print("if {f} {{\n", .{v.condition});
-                for (v.body.statements.items, 0..) |statement, i| {
-                    if (i > 0) {
-                        try writer.print("\n", .{});
-                    }
-                    try writer.print("    {f}", .{statement});
-                }
-                try writer.print("\n}}", .{});
-                if (v.alternative == null) {
-                    return;
-                }
-                const alternative = v.alternative.?;
-                try writer.print(" else {{\n", .{});
-                for (alternative.statements.items, 0..) |statement, i| {
-                    if (i > 0) {
-                        try writer.print("\n", .{});
-                    }
-                    try writer.print("    {f}", .{statement});
-                }
-                try writer.print("\n}}", .{});
             },
         }
     }
@@ -370,7 +330,10 @@ pub const Parser = struct {
                 return ParserError.UnexpectedTokenType;
             }
         }
-        return BlockStatement{ .statements = statements };
+        return BlockStatement{
+            .statements = statements,
+            .is_one_liner = is_one_liner,
+        };
     }
 
     fn parsePrefixExpression(self: *Parser) !Expression {

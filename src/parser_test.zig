@@ -620,7 +620,7 @@ test "if expressions" {
             \\if 5 == 5 {}
             ,
             .expected =
-            \\if (5 == 5) { }
+            \\if (5 == 5) {}
             ,
             .expected_error = null,
         },
@@ -630,7 +630,7 @@ test "if expressions" {
             \\if 5 == 5 {} else {}
             ,
             .expected =
-            \\if (5 == 5) { } else { }
+            \\if (5 == 5) {} else {}
             ,
             .expected_error = null,
         },
@@ -652,9 +652,7 @@ test "if expressions" {
             \\}
             ,
             .expected =
-            \\if (5 == 5) {
-            \\
-            \\}
+            \\if (5 == 5) {}
             ,
             .expected_error = null,
         },
@@ -665,9 +663,7 @@ test "if expressions" {
             \\}
             ,
             .expected =
-            \\if (5 == 5) {
-            \\
-            \\}
+            \\if (5 == 5) {}
             ,
             .expected_error = null,
         },
@@ -679,11 +675,7 @@ test "if expressions" {
             \\}
             ,
             .expected =
-            \\if (5 == 5) {
-            \\
-            \\} else {
-            \\
-            \\}
+            \\if (5 == 5) {} else {}
             ,
             .expected_error = null,
         },
