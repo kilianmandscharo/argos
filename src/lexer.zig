@@ -37,6 +37,7 @@ pub const TokenType = enum {
     Eof,
 };
 
+// TODO: implement col_x, col_y, row to give better debug info
 pub const Token = struct {
     type: TokenType,
     literal: []const u8,
