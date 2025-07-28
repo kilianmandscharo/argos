@@ -41,6 +41,9 @@ pub const TokenType = enum {
 pub const Token = struct {
     type: TokenType,
     literal: []const u8,
+    col_start: usize,
+    col_end: usize,
+    row: usize,
 
     pub fn format(
         self: @This(),
@@ -53,6 +56,7 @@ pub const Token = struct {
 pub const Lexer = struct {
     buf: []const u8,
     pos: usize,
+    row: usize,
     arena: std.mem.Allocator,
 
     pub fn init(arena: std.mem.Allocator, content: []const u8) !Lexer {
@@ -62,7 +66,28 @@ pub const Lexer = struct {
         return Lexer{
             .buf = content,
             .pos = 0,
+            .row = 0,
             .arena = arena,
+        };
+    }
+
+    fn create_single_char_token(self: *Lexer, token_type: TokenType, literal: []const u8) Token {
+        return Token{
+            .type = token_type,
+            .literal = literal,
+            .col_start = self.pos,
+            .col_end = self.pos + 1,
+            .row = self.row,
+        };
+    }
+
+    fn create_token(self: *Lexer, token_type: TokenType, literal: []const u8, start: usize, end: usize) Token {
+        return Token{
+            .type = token_type,
+            .literal = literal,
+            .col_start = start,
+            .col_end = end,
+            .row = self.row,
         };
     }
 
@@ -70,26 +95,30 @@ pub const Lexer = struct {
         self.chopWhiteSpace();
 
         if (self.pos == self.buf.len) {
-            return Token{ .type = TokenType.Eof, .literal = "EOF" };
+            return self.create_single_char_token(.Eof, "EOF");
         }
 
         const char = self.buf[self.pos];
 
         const token = switch (char) {
-            ',' => Token{ .type = TokenType.Comma, .literal = "," },
-            '+' => Token{ .type = TokenType.Plus, .literal = "+" },
-            '-' => Token{ .type = TokenType.Minus, .literal = "-" },
-            '/' => Token{ .type = TokenType.Slash, .literal = "/" },
-            '*' => Token{ .type = TokenType.Asterisk, .literal = "*" },
-            '(' => Token{ .type = TokenType.LParen, .literal = "(" },
-            ')' => Token{ .type = TokenType.RParen, .literal = ")" },
-            '[' => Token{ .type = TokenType.LBracket, .literal = "[" },
-            ']' => Token{ .type = TokenType.RBracket, .literal = "]" },
-            '{' => Token{ .type = TokenType.LBrace, .literal = "{" },
-            '}' => Token{ .type = TokenType.RBrace, .literal = "}" },
-            '\n' => Token{ .type = TokenType.NewLine, .literal = "<newline>" },
-            '<' => Token{ .type = TokenType.Lt, .literal = "<" },
-            '>' => Token{ .type = TokenType.Gt, .literal = ">" },
+            ',' => self.create_single_char_token(.Comma, ","),
+            '+' => self.create_single_char_token(.Plus, "+"),
+            '-' => self.create_single_char_token(.Minus, "-"),
+            '/' => self.create_single_char_token(.Slash, "/"),
+            '*' => self.create_single_char_token(.Asterisk, "*"),
+            '(' => self.create_single_char_token(.LParen, "("),
+            ')' => self.create_single_char_token(.RParen, ")"),
+            '[' => self.create_single_char_token(.LBracket, "["),
+            ']' => self.create_single_char_token(.RBracket, "]"),
+            '{' => self.create_single_char_token(.LBrace, "{"),
+            '}' => self.create_single_char_token(.RBrace, "}"),
+            '<' => self.create_single_char_token(.Lt, "<"),
+            '>' => self.create_single_char_token(.Gt, ">"),
+            '\n' => newline: {
+                const token = self.create_single_char_token(.NewLine, "<newline>");
+                self.row += 1;
+                break :newline token;
+            },
             '!' => {
                 return self.scanBangChar();
             },
@@ -116,18 +145,18 @@ pub const Lexer = struct {
         self.advancePos();
         if (self.getChar() == '=') {
             self.advancePos();
-            return Token{ .type = TokenType.NotEq, .literal = "!=" };
+            return self.create_token(.NotEq, "!=", self.pos, self.pos + 2);
         }
-        return Token{ .type = TokenType.Bang, .literal = "!" };
+        return self.create_token(.Bang, "!", self.pos - 1, self.pos);
     }
 
     fn scanEqualChar(self: *Lexer) !Token {
         self.advancePos();
         if (self.getChar() == '=') {
             self.advancePos();
-            return Token{ .type = TokenType.Eq, .literal = "==" };
+            return self.create_token(.Eq, "==", self.pos, self.pos + 2);
         }
-        return Token{ .type = TokenType.Assign, .literal = "=" };
+        return self.create_token(.Assign, "=", self.pos - 1, self.pos);
     }
 
     fn scanString(self: *Lexer) !Token {
@@ -146,7 +175,7 @@ pub const Lexer = struct {
 
         self.advancePos();
 
-        return Token{ .type = TokenType.String, .literal = arena_copy };
+        return self.create_token(.String, arena_copy, start, self.pos);
     }
 
     fn scanNumber(self: *Lexer) !Token {
@@ -166,9 +195,9 @@ pub const Lexer = struct {
         const arena_copy = try self.arena.dupe(u8, result);
 
         if (dec_separator_found) {
-            return Token{ .type = TokenType.Float, .literal = arena_copy };
+            return self.create_token(.Float, arena_copy, start, self.pos);
         }
-        return Token{ .type = TokenType.Integer, .literal = arena_copy };
+        return self.create_token(.Integer, arena_copy, start, self.pos);
     }
 
     fn scanIdentifier(self: *Lexer) !Token {
@@ -184,30 +213,30 @@ pub const Lexer = struct {
         const arena_copy = try self.arena.dupe(u8, result);
 
         if (std.mem.eql(u8, result, "false")) {
-            return Token{ .type = TokenType.False, .literal = arena_copy };
+            return self.create_token(.False, arena_copy, start, self.pos);
         }
 
         if (std.mem.eql(u8, result, "true")) {
-            return Token{ .type = TokenType.True, .literal = arena_copy };
+            return self.create_token(.True, arena_copy, start, self.pos);
         }
 
         if (std.mem.eql(u8, result, "if")) {
-            return Token{ .type = TokenType.If, .literal = arena_copy };
+            return self.create_token(.If, arena_copy, start, self.pos);
         }
 
         if (std.mem.eql(u8, result, "else")) {
-            return Token{ .type = TokenType.Else, .literal = arena_copy };
+            return self.create_token(.Else, arena_copy, start, self.pos);
         }
 
         if (std.mem.eql(u8, result, "return")) {
-            return Token{ .type = TokenType.Return, .literal = arena_copy };
+            return self.create_token(.Return, arena_copy, start, self.pos);
         }
 
         if (std.mem.eql(u8, result, "fnc")) {
-            return Token{ .type = TokenType.Function, .literal = arena_copy };
+            return self.create_token(.Function, arena_copy, start, self.pos);
         }
 
-        return Token{ .type = TokenType.Identifier, .literal = arena_copy };
+        return self.create_token(.Identifier, arena_copy, start, self.pos);
     }
 
     fn charAllowedInIdent(char: u8) bool {
