@@ -218,6 +218,36 @@ pub const Evaluator = struct {
                             else => return try self.createError("can only evaluate boolean if-conditions", .{}),
                         }
                     },
+                    .ForExpression => |for_expression| {
+                        const lower = try self.eval(Node{ .Expression = for_expression.range.left.* }, env);
+                        if (lower.isError()) {
+                            return lower;
+                        }
+                        if (lower != .Integer) {
+                            return self.createError("Can only use Integer in range expression", .{});
+                        }
+                        if (lower.Integer < 0) {
+                            return self.createError("Range value can't be negative", .{});
+                        }
+
+                        const upper = try self.eval(Node{ .Expression = for_expression.range.right.* }, env);
+                        if (upper.isError()) {
+                            return upper;
+                        }
+                        if (upper != .Integer) {
+                            return self.createError("Can only use Integer in range expression", .{});
+                        }
+                        if (upper.Integer < 0) {
+                            return self.createError("Range value can't be negative", .{});
+                        }
+
+                        for (@intCast(lower.Integer)..@intCast(upper.Integer)) |i| {
+                            try env.set(for_expression.variable, Object{ .Integer = @intCast(i) });
+                            _ = try self.eval(Node{ .Statement = .{ .BlockStatement = for_expression.body } }, env);
+                        }
+
+                        return Object.Null;
+                    },
                     else => return Object{ .Error = "Unknown expression" },
                 }
             },

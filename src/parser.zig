@@ -49,8 +49,11 @@ pub const BlockStatement = struct {
         if (self.statements.items.len == 0) separator = "";
         const ident = if (self.is_one_liner) "" else "    ";
         try writer.print("{{{s}", .{separator});
-        for (self.statements.items) |statement| {
+        for (self.statements.items, 0..) |statement, i| {
             try writer.print("{s}{f}", .{ ident, statement });
+            if (!self.is_one_liner and i < self.statements.items.len - 1) {
+                try writer.print("\n", .{});
+            }
         }
         try writer.print("{s}}}", .{separator});
     }
@@ -67,6 +70,8 @@ pub const Expression = union(enum) {
     FunctionLiteral: FunctionLiteral,
     CallExpression: CallExpression,
     IfExpression: IfExpression,
+    RangeExpression: RangeExpression,
+    ForExpression: ForExpression,
 
     pub fn format(
         self: @This(),
@@ -92,14 +97,14 @@ pub const Expression = union(enum) {
                 try v.body.format(writer);
             },
             .CallExpression => |v| {
-                try writer.print("{f}(", .{v.function});
+                try writer.print("({f}(", .{v.function});
                 for (v.args.items, 0..) |arg, i| {
                     if (i > 0) {
                         try writer.print(", ", .{});
                     }
                     try writer.print("{f}", .{arg});
                 }
-                try writer.print(")", .{});
+                try writer.print("))", .{});
             },
             .IfExpression => |v| {
                 try writer.print("if {f} ", .{v.condition});
@@ -108,6 +113,13 @@ pub const Expression = union(enum) {
                     try writer.print(" else ", .{});
                     try alternative.format(writer);
                 }
+            },
+            .RangeExpression => |v| {
+                try writer.print("({f}..{f})", .{ v.left, v.right });
+            },
+            .ForExpression => |v| {
+                try writer.print("for {s} in ({f}..{f}) ", .{ v.variable, v.range.left, v.range.right });
+                try v.body.format(writer);
             },
         }
     }
@@ -172,6 +184,17 @@ const IfExpression = struct {
     is_one_liner: bool,
 };
 
+const RangeExpression = struct {
+    left: *const Expression,
+    right: *const Expression,
+};
+
+const ForExpression = struct {
+    variable: []const u8,
+    range: RangeExpression,
+    body: BlockStatement,
+};
+
 const Precedence = enum(u8) {
     Lowest = 1,
     Equals,
@@ -218,7 +241,7 @@ pub const Parser = struct {
         std.debug.print("cur token: {f}\n", .{self.cur_token});
     }
 
-    fn get_and_advance(self: *Parser) !Token {
+    fn getAndAdvance(self: *Parser) !Token {
         const cur_token = self.cur_token;
         try self.advance();
         return cur_token;
@@ -302,7 +325,7 @@ pub const Parser = struct {
     }
 
     fn parseAssignmentStatement(self: *Parser) !Statement {
-        const identifier = try self.get_and_advance();
+        const identifier = try self.getAndAdvance();
         try self.expectAndAdvance(TokenType.Assign);
         const expression = try self.parseExpression(Precedence.Lowest);
         const statement = Statement{ .AssignmentStatement = AssignmentStatement{ .identifier = identifier, .expression = expression } };
@@ -425,6 +448,34 @@ pub const Parser = struct {
                 if_expression.IfExpression.alternative = try self.parseBlockStatement(is_one_liner);
                 return if_expression;
             },
+            .For => {
+                try self.advance();
+
+                const variable = try self.parseExpression(.Lowest);
+                if (variable.* != .Identifier) {
+                    return error.ExpectedIdentifier;
+                }
+
+                try self.advanceAndExpect(.In);
+                try self.advance();
+
+                const range = try self.parseExpression(.Lowest);
+                if (range.* != .RangeExpression) {
+                    return error.ExpectedRange;
+                }
+
+                try self.advance();
+                try self.expectAndAdvance(.LBrace);
+                const body = try self.parseBlockStatement(false);
+
+                return Expression{
+                    .ForExpression = ForExpression{
+                        .variable = variable.Identifier,
+                        .range = range.RangeExpression,
+                        .body = body,
+                    },
+                };
+            },
             else => {
                 std.debug.print("unknown token type: {any}\n", .{self.cur_token.type});
                 return ParserError.UnknownTokenType;
@@ -476,6 +527,13 @@ pub const Parser = struct {
 
                 return Expression{ .CallExpression = .{ .function = left_owned, .args = args } };
             },
+            TokenType.DotDot => {
+                try self.advance();
+                const right = try self.parseExpression(.Lowest);
+                const left_owned = try self.arena.create(Expression);
+                left_owned.* = left;
+                return Expression{ .RangeExpression = .{ .left = left_owned, .right = right } };
+            },
             else => ParserError.NoInfixFunctionFound,
         };
     }
@@ -519,6 +577,7 @@ pub const Parser = struct {
 
     fn getTokenPrecedence(token: *Token) Precedence {
         return switch (token.type) {
+            TokenType.DotDot => Precedence.Equals,
             TokenType.Eq => Precedence.Equals,
             TokenType.NotEq => Precedence.Equals,
             TokenType.Lt => Precedence.Lessgreater,

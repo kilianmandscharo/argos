@@ -32,6 +32,9 @@ pub const TokenType = enum {
     If,
     Else,
     Function,
+    For,
+    In,
+    DotDot,
 
     NewLine,
     Eof,
@@ -90,6 +93,9 @@ pub const Lexer = struct {
             '\n' => Token{ .type = TokenType.NewLine, .literal = "<newline>" },
             '<' => Token{ .type = TokenType.Lt, .literal = "<" },
             '>' => Token{ .type = TokenType.Gt, .literal = ">" },
+            '.' => {
+                return self.scanDot();
+            },
             '!' => {
                 return self.scanBangChar();
             },
@@ -110,6 +116,15 @@ pub const Lexer = struct {
         self.advancePos();
 
         return token;
+    }
+
+    fn scanDot(self: *Lexer) !Token {
+        self.advancePos();
+        if (self.getChar() != '.') {
+            return error.UnexpectedChar;
+        }
+        self.advancePos();
+        return Token{ .type = TokenType.DotDot, .literal = ".." };
     }
 
     fn scanBangChar(self: *Lexer) !Token {
@@ -157,6 +172,9 @@ pub const Lexer = struct {
                 break;
             }
             if (char == '.') {
+                if (self.peekChar().? == '.') {
+                    break;
+                }
                 dec_separator_found = true;
             }
             self.advancePos();
@@ -207,6 +225,14 @@ pub const Lexer = struct {
             return Token{ .type = TokenType.Function, .literal = arena_copy };
         }
 
+        if (std.mem.eql(u8, result, "in")) {
+            return Token{ .type = TokenType.In, .literal = arena_copy };
+        }
+
+        if (std.mem.eql(u8, result, "for")) {
+            return Token{ .type = TokenType.For, .literal = arena_copy };
+        }
+
         return Token{ .type = TokenType.Identifier, .literal = arena_copy };
     }
 
@@ -225,6 +251,13 @@ pub const Lexer = struct {
             return null;
         }
         return self.buf[self.pos];
+    }
+
+    fn peekChar(self: *Lexer) ?u8 {
+        if (self.pos + 1 >= self.buf.len) {
+            return null;
+        }
+        return self.buf[self.pos + 1];
     }
 
     fn advancePos(self: *Lexer) void {

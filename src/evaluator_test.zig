@@ -334,3 +334,49 @@ test "if expressions" {
     }
     std.debug.print("==if expressions end==\n", .{});
 }
+
+test "for expressions" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected_output: Object,
+    };
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "simple for loop",
+            .input =
+            \\x = 0
+            \\for i in 0..10 {
+            \\    x = x + i
+            \\}
+            \\x
+            ,
+            .expected_output = Object{ .Integer = 45 },
+        },
+        .{
+            .description = "should return null",
+            .input =
+            \\x = 0
+            \\for i in 0..10 {
+            \\    x = x + i
+            \\}
+            ,
+            .expected_output = Object.Null,
+        },
+    };
+
+    std.debug.print("==for expressions start==\n", .{});
+    for (test_cases) |test_case| {
+        std.debug.print("  {s}\n", .{test_case.description});
+        const result = try getResult(arena.allocator(), test_case.input);
+        std.testing.expectEqual(test_case.expected_output, result) catch |err| {
+            std.debug.print("expected {any}, got {any}\n", .{ test_case.expected_output, result });
+            return err;
+        };
+    }
+    std.debug.print("==for expressions end==\n", .{});
+}

@@ -90,6 +90,8 @@ fn expectStatement(want: Statement, got: Statement) !void {
     }
 }
 
+// TODO: clean up tests
+
 test "should parse identifier" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -309,7 +311,7 @@ test "function declaration" {
             \\fnc test() {}
             ,
             .expected =
-            \\fnc test() { }
+            \\fnc test() {}
             ,
             .expected_error = null,
         },
@@ -321,9 +323,7 @@ test "function declaration" {
             \\}
             ,
             .expected =
-            \\fnc test() {
-            \\
-            \\}
+            \\fnc test() {}
             ,
             .expected_error = null,
         },
@@ -454,7 +454,7 @@ test "function declaration" {
             \\    y = (a / b)
             \\    (x + y)
             \\}
-            \\result = test(a, b)
+            \\result = (test(a, b))
             ,
             .expected_error = null,
         },
@@ -475,7 +475,7 @@ test "function declaration" {
             \\    y = (a / b)
             \\    (x + y)
             \\}
-            \\test(a, b)
+            \\(test(a, b))
             ,
             .expected_error = null,
         },
@@ -496,25 +496,6 @@ test "function declaration" {
     std.debug.print("--- end function declaration tests ---\n", .{});
 }
 
-test "should parse function assignment" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const content =
-        \\val = fnc test(a, b) {
-        \\    return a + b
-        \\}(1, 2)
-    ;
-
-    const expected_output =
-        \\val = fnc test(a, b) {
-        \\    return (a + b)
-        \\}(1, 2)
-    ;
-
-    try expectFormattedProgram(arena.allocator(), content, expected_output);
-}
-
 test "should parse function call" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -526,9 +507,9 @@ test "should parse function call" {
     ;
 
     const expected_output =
-        \\val = fnc test(a, b) {
+        \\val = (fnc test(a, b) {
         \\    return (a + b)
-        \\}(1, 2)
+        \\}(1, 2))
     ;
 
     try expectFormattedProgram(arena.allocator(), content, expected_output);
@@ -543,7 +524,7 @@ test "should parse empty one liner function call" {
     ;
 
     const expected_output =
-        \\val = fnc test(a, b) { return (a + b) }(1, 2)
+        \\val = (fnc test(a, b) { return (a + b) }(1, 2))
     ;
 
     try expectFormattedProgram(arena.allocator(), content, expected_output);
@@ -736,4 +717,100 @@ test "if expressions" {
         }
     }
     std.debug.print("--- end if expressions tests ---\n", .{});
+}
+
+test "range expression" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected: []const u8,
+        expected_error: ?ParserError,
+    };
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "two integers",
+            .input =
+            \\0..10
+            ,
+            .expected =
+            \\(0..10)
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "two infix expressions",
+            .input =
+            \\2 + 3..50 - 10
+            ,
+            .expected =
+            \\((2 + 3)..(50 - 10))
+            ,
+            .expected_error = null,
+        },
+        .{
+            .description = "two function calls",
+            .input =
+            \\start()..end()
+            ,
+            .expected =
+            \\((start())..(end()))
+            ,
+            .expected_error = null,
+        },
+    };
+
+    std.debug.print("--- start range expressions tests ---\n", .{});
+    for (test_cases) |test_case| {
+        std.debug.print("  --> {s}\n", .{test_case.description});
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const result = expectFormattedProgram(arena.allocator(), test_case.input, test_case.expected);
+        if (test_case.expected_error == null) {
+            try result;
+        } else {
+            try std.testing.expectError(ParserError.UnexpectedTokenType, result);
+        }
+    }
+    std.debug.print("--- end range expressions tests ---\n", .{});
+}
+
+test "for expression" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected: []const u8,
+        expected_error: ?ParserError,
+    };
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "simple for loop",
+            .input =
+            \\for i in 0..10 {
+            \\    x = x * i
+            \\}
+            ,
+            .expected =
+            \\for i in (0..10) {
+            \\    x = (x * i)
+            \\}
+            ,
+            .expected_error = null,
+        },
+    };
+
+    std.debug.print("--- start for expressions tests ---\n", .{});
+    for (test_cases) |test_case| {
+        std.debug.print("  --> {s}\n", .{test_case.description});
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const result = expectFormattedProgram(arena.allocator(), test_case.input, test_case.expected);
+        if (test_case.expected_error == null) {
+            try result;
+        } else {
+            try std.testing.expectError(ParserError.UnexpectedTokenType, result);
+        }
+    }
+    std.debug.print("--- end for expressions tests ---\n", .{});
 }

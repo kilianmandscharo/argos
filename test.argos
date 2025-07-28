@@ -3,3 +3,7 @@ fnc test(a, b) {
 }
 
 test(5, 10)
+
+for i in x..1 {
+
+}
