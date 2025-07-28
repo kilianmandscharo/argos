@@ -367,6 +367,23 @@ test "for expressions" {
             ,
             .expected_output = Object.Null,
         },
+        .{
+            .description = "fibonacci",
+            .input =
+            \\fnc fib(n) {
+            \\    a = 0
+            \\    b = 1
+            \\    for i in 0..n {
+            \\        tmp = b
+            \\        b = a + b
+            \\        a = tmp
+            \\    }
+            \\    a
+            \\}
+            \\fib(30)
+            ,
+            .expected_output = Object{ .Integer = 832040 },
+        },
     };
 
     std.debug.print("==for expressions start==\n", .{});

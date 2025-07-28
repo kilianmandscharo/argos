@@ -1,9 +1,10 @@
-fnc test(a, b) {
-    return a + b
-}
-
-test(5, 10)
-
-for i in x..1 {
-
+fnc fib(n) {
+    a = 0
+    b = 1
+    for i in 0..n {
+        tmp = b
+        b = a + b
+        a = tmp
+    }
+    b
 }

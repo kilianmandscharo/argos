@@ -448,6 +448,7 @@ pub const Parser = struct {
                 if_expression.IfExpression.alternative = try self.parseBlockStatement(is_one_liner);
                 return if_expression;
             },
+            // TODO: implement one liner for expression
             .For => {
                 try self.advance();
 
