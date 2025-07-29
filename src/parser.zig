@@ -160,7 +160,7 @@ const InfixExpression = struct {
     right: *const Expression,
 };
 
-const PrefixExpression = struct {
+pub const PrefixExpression = struct {
     operator: Operator,
     expression: *const Expression,
 };
@@ -238,7 +238,7 @@ pub const Parser = struct {
     fn advance(self: *Parser) !void {
         self.cur_token = self.peek_token;
         self.peek_token = try self.lexer.next();
-        std.debug.print("cur token: {f}\n", .{self.cur_token});
+        // std.debug.print("cur token: {f}\n", .{self.cur_token});
     }
 
     fn getAndAdvance(self: *Parser) !Token {

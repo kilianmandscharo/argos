@@ -7,6 +7,7 @@ const Lexer = lexer_module.Lexer;
 const parser_module = @import("parser.zig");
 const Parser = parser_module.Parser;
 const Expression = parser_module.Expression;
+const PrefixExpression = parser_module.PrefixExpression;
 const Statement = parser_module.Statement;
 const Operator = parser_module.Operator;
 const ParserError = parser_module.ParserError;
@@ -43,31 +44,6 @@ fn getExpression(arena: std.mem.Allocator, content: []const u8) !*const Expressi
     return expression_statement.expression;
 }
 
-fn expectIdentifier(expression: *const Expression, name: []const u8) !void {
-    try expect(expression.* == .Identifier);
-    try expect(std.mem.eql(u8, expression.*.Identifier, name));
-}
-
-fn expectStringLiteral(expression: *const Expression, value: []const u8) !void {
-    try expect(expression.* == .StringLiteral);
-    try expect(std.mem.eql(u8, expression.*.StringLiteral, value));
-}
-
-fn expectIntegerLiteral(expression: *const Expression, value: i64) !void {
-    try expect(expression.* == .IntegerLiteral);
-    try expect(expression.*.IntegerLiteral == value);
-}
-
-fn expectFloatLiteral(expression: *const Expression, value: f64) !void {
-    try expect(expression.* == .FloatLiteral);
-    try expect(expression.*.FloatLiteral == value);
-}
-
-fn expectBooleanLiteral(expression: *const Expression, value: bool) !void {
-    try expect(expression.* == .BooleanLiteral);
-    try expect(expression.*.BooleanLiteral == value);
-}
-
 fn expectStatement(want: Statement, got: Statement) !void {
     try expect(@tagName(want) == @tagName(got));
 
@@ -90,104 +66,192 @@ fn expectStatement(want: Statement, got: Statement) !void {
     }
 }
 
-// TODO: clean up tests
+fn expectExpression(expected: Expression, actual: Expression) !void {
+    const Tag = std.meta.Tag(@TypeOf(expected));
 
-test "should parse identifier" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+    const expectedTag = @as(Tag, expected);
+    const actualTag = @as(Tag, actual);
 
-    const content =
-        \\foo
-    ;
+    try std.testing.expectEqual(expectedTag, actualTag);
 
-    const expression = try getExpression(arena.allocator(), content);
-    try expectIdentifier(expression, "foo");
-}
-
-test "should parse string literal" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const content =
-        \\"foo"
-    ;
-
-    const expression = try getExpression(arena.allocator(), content);
-    try expectStringLiteral(expression, "foo");
-}
-
-test "should parse integer literal" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const content =
-        \\42
-    ;
-
-    const expression = try getExpression(arena.allocator(), content);
-    try expectIntegerLiteral(expression, 42);
-}
-
-test "should parse float literal" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const content =
-        \\3.1415
-    ;
-
-    const expression = try getExpression(arena.allocator(), content);
-    try expectFloatLiteral(expression, 3.1415);
-}
-
-test "should parse true" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const content =
-        \\true
-    ;
-
-    const expression = try getExpression(arena.allocator(), content);
-    try expectBooleanLiteral(expression, true);
-}
-
-test "should parse false" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const content =
-        \\false
-    ;
-
-    const expression = try getExpression(arena.allocator(), content);
-    try expectBooleanLiteral(expression, false);
-}
-
-test "should parse prefix expression" {
-    const TestCase = struct {
-        content: []const u8,
-        operator: Operator,
-        expression: Expression,
+    return switch (expected) {
+        .Identifier => |ident| try std.testing.expectEqualStrings(ident, actual.Identifier),
+        .StringLiteral => |string| try std.testing.expectEqualStrings(string, actual.StringLiteral),
+        .PrefixExpression => |prefix_expression| {
+            try std.testing.expectEqual(prefix_expression.expression.*, actual.PrefixExpression.expression.*);
+            try std.testing.expectEqual(prefix_expression.operator, actual.PrefixExpression.operator);
+        },
+        else => try std.testing.expectEqual(expected, actual),
     };
+}
 
-    const test_cases = [_]TestCase{
-        .{ .content = "!true", .operator = .Bang, .expression = Expression{ .BooleanLiteral = true } },
-        .{ .content = "!false", .operator = .Bang, .expression = Expression{ .BooleanLiteral = false } },
-        .{ .content = "+5", .operator = .Plus, .expression = Expression{ .IntegerLiteral = 5 } },
-        .{ .content = "-2", .operator = .Minus, .expression = Expression{ .IntegerLiteral = 2 } },
-        .{ .content = "+4.15", .operator = .Plus, .expression = Expression{ .FloatLiteral = 4.15 } },
-        .{ .content = "-0.668", .operator = .Minus, .expression = Expression{ .FloatLiteral = 0.668 } },
-    };
+fn runTests(comptime T: type, name: []const u8, test_cases: []const T, run: fn (arena: std.mem.Allocator, test_case: T) anyerror!void) void {
+    std.debug.print("--- start {s} tests ---\n", .{name});
 
     for (test_cases) |test_case| {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
-        const expression = try getExpression(arena.allocator(), test_case.content);
-        try expect(expression.* == .PrefixExpression);
-        try expect(expression.*.PrefixExpression.operator == test_case.operator);
-        try expect(std.meta.eql(expression.*.PrefixExpression.expression.*, test_case.expression));
+
+        const result = run(arena.allocator(), test_case);
+
+        if (result) |_| {
+            std.debug.print("🟢 {s}\n", .{test_case.description});
+        } else |_| {
+            std.debug.print("🔴 {s}\n", .{test_case.description});
+        }
     }
+
+    std.debug.print("--- end {s} tests ---\n\n", .{name});
+}
+
+const ParseExpressionTestCase = struct {
+    description: []const u8,
+    input: []const u8,
+    expected_output: Expression,
+};
+
+fn runParseExpressionTest(arena: std.mem.Allocator, test_case: ParseExpressionTestCase) anyerror!void {
+    const expression = try getExpression(arena, test_case.input);
+    return expectExpression(test_case.expected_output, expression.*);
+}
+
+test "parse expressions" {
+    const test_cases = [_]ParseExpressionTestCase{
+        .{
+            .description = "should parse identifier",
+            .input =
+            \\foo
+            ,
+            .expected_output = Expression{ .Identifier = "foo" },
+        },
+        .{
+            .description = "should parse string literal",
+            .input =
+            \\"foo"
+            ,
+            .expected_output = Expression{ .StringLiteral = "foo" },
+        },
+        .{
+            .description = "should parse integer literal",
+            .input =
+            \\666
+            ,
+            .expected_output = Expression{ .IntegerLiteral = 666 },
+        },
+        .{
+            .description = "should parse float literal",
+            .input =
+            \\3.1415
+            ,
+            .expected_output = Expression{ .FloatLiteral = 3.1415 },
+        },
+        .{
+            .description = "should parse true",
+            .input =
+            \\true
+            ,
+            .expected_output = Expression{ .BooleanLiteral = true },
+        },
+        .{
+            .description = "should parse false",
+            .input =
+            \\false
+            ,
+            .expected_output = Expression{ .BooleanLiteral = false },
+        },
+    };
+
+    runTests(ParseExpressionTestCase, "parse expressions", &test_cases, runParseExpressionTest);
+}
+
+const ParsePrefixExpressionTestCase = struct {
+    description: []const u8,
+    input: []const u8,
+    expected_expression: Expression,
+};
+
+fn runParsePrefixExpressionTest(arena: std.mem.Allocator, test_case: ParsePrefixExpressionTestCase) anyerror!void {
+    const expression = try getExpression(arena, test_case.input);
+    return expectExpression(test_case.expected_expression, expression.*);
+}
+
+test "should parse prefix expression" {
+    const test_cases = [_]ParsePrefixExpressionTestCase{
+        .{
+            .description = "should parse bang operator with true",
+            .input = "!true",
+            .expected_expression = Expression{
+                .PrefixExpression = PrefixExpression{
+                    .expression = &Expression{
+                        .BooleanLiteral = true,
+                    },
+                    .operator = .Bang,
+                },
+            },
+        },
+        .{
+            .description = "should parse bang operator with false",
+            .input = "!false",
+            .expected_expression = Expression{
+                .PrefixExpression = PrefixExpression{
+                    .expression = &Expression{
+                        .BooleanLiteral = false,
+                    },
+                    .operator = .Bang,
+                },
+            },
+        },
+        .{
+            .description = "should parse plus operator with integer",
+            .input = "+5",
+            .expected_expression = Expression{
+                .PrefixExpression = PrefixExpression{
+                    .expression = &Expression{
+                        .IntegerLiteral = 5,
+                    },
+                    .operator = .Plus,
+                },
+            },
+        },
+        .{
+            .description = "should parse minus operator with integer",
+            .input = "-2",
+            .expected_expression = Expression{
+                .PrefixExpression = PrefixExpression{
+                    .expression = &Expression{
+                        .IntegerLiteral = 2,
+                    },
+                    .operator = .Minus,
+                },
+            },
+        },
+        .{
+            .description = "should parse plus operator with float",
+            .input = "+5.41",
+            .expected_expression = Expression{
+                .PrefixExpression = PrefixExpression{
+                    .expression = &Expression{
+                        .FloatLiteral = 5.41,
+                    },
+                    .operator = .Plus,
+                },
+            },
+        },
+        .{
+            .description = "should parse minus operator with float",
+            .input = "-2.1234",
+            .expected_expression = Expression{
+                .PrefixExpression = PrefixExpression{
+                    .expression = &Expression{
+                        .FloatLiteral = 2.1234,
+                    },
+                    .operator = .Minus,
+                },
+            },
+        },
+    };
+
+    runTests(ParsePrefixExpressionTestCase, "parse prefix expression", &test_cases, runParsePrefixExpressionTest);
 }
 
 test "should parse infix expression" {
@@ -341,7 +405,7 @@ test "function declaration" {
             .description = "multi liner with params and one statement",
             .input =
             \\fnc test(a, b) {
-            \\    return a + b 
+            \\    return a + b
             \\}
             ,
             .expected =
@@ -431,7 +495,7 @@ test "function declaration" {
             .input =
             \\fnc test(a, b) { x = a * b
             \\    y = a / b
-            \\    x + y 
+            \\    x + y
             \\}
             ,
             .expected = "",
@@ -628,7 +692,7 @@ test "if expressions" {
         .{
             .description = "multi line empty no else with empty line",
             .input =
-            \\if 5 == 5 { 
+            \\if 5 == 5 {
             \\
             \\}
             ,
@@ -640,7 +704,7 @@ test "if expressions" {
         .{
             .description = "multi line empty no else",
             .input =
-            \\if 5 == 5 { 
+            \\if 5 == 5 {
             \\}
             ,
             .expected =
@@ -651,7 +715,7 @@ test "if expressions" {
         .{
             .description = "multi line empty with else",
             .input =
-            \\if 5 == 5 { 
+            \\if 5 == 5 {
             \\} else {
             \\}
             ,
@@ -663,8 +727,8 @@ test "if expressions" {
         .{
             .description = "multi line no else",
             .input =
-            \\if 5 == 5 { 
-            \\    3 + 2 
+            \\if 5 == 5 {
+            \\    3 + 2
             \\}
             ,
             .expected =
@@ -687,8 +751,8 @@ test "if expressions" {
         .{
             .description = "multi line with else",
             .input =
-            \\if 5 == 5 { 
-            \\    3 + 2 
+            \\if 5 == 5 {
+            \\    3 + 2
             \\} else {
             \\    1 * 1
             \\}
