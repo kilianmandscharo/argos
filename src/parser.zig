@@ -154,7 +154,7 @@ pub const Operator = enum {
     }
 };
 
-const InfixExpression = struct {
+pub const InfixExpression = struct {
     operator: Operator,
     left: *const Expression,
     right: *const Expression,
@@ -165,7 +165,7 @@ pub const PrefixExpression = struct {
     expression: *const Expression,
 };
 
-const FunctionLiteral = struct {
+pub const FunctionLiteral = struct {
     name: []const u8,
     params: std.ArrayListUnmanaged([]const u8),
     body: BlockStatement,
