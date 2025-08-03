@@ -16,7 +16,7 @@ pub const Statement = union(enum) {
         writer: anytype,
     ) !void {
         switch (self) {
-            .AssignmentStatement => |v| try writer.print("{s} = {f}", .{ v.identifier.literal, v.expression }),
+            .AssignmentStatement => |v| try writer.print("{s} = {f}", .{ v.identifier, v.expression }),
             .ReturnStatement => |v| try writer.print("return {f}", .{v.expression}),
             .ExpressionStatement => |v| try writer.print("{f}", .{v.expression}),
             .BlockStatement => |v| try v.format(writer),
@@ -24,16 +24,16 @@ pub const Statement = union(enum) {
     }
 };
 
-const AssignmentStatement = struct {
-    identifier: Token,
+pub const AssignmentStatement = struct {
+    identifier: []const u8,
     expression: *const Expression,
 };
 
-const ReturnStatement = struct {
+pub const ReturnStatement = struct {
     expression: *const Expression,
 };
 
-const ExpressionStatement = struct {
+pub const ExpressionStatement = struct {
     expression: *const Expression,
 };
 
@@ -172,24 +172,24 @@ pub const FunctionLiteral = struct {
     is_one_liner: bool,
 };
 
-const CallExpression = struct {
+pub const CallExpression = struct {
     function: *const Expression,
-    args: std.ArrayList(*Expression),
+    args: std.ArrayListUnmanaged(*const Expression),
 };
 
-const IfExpression = struct {
+pub const IfExpression = struct {
     condition: *const Expression,
     body: BlockStatement,
     alternative: ?BlockStatement,
     is_one_liner: bool,
 };
 
-const RangeExpression = struct {
+pub const RangeExpression = struct {
     left: *const Expression,
     right: *const Expression,
 };
 
-const ForExpression = struct {
+pub const ForExpression = struct {
     variable: []const u8,
     range: RangeExpression,
     body: BlockStatement,
@@ -328,7 +328,7 @@ pub const Parser = struct {
         const identifier = try self.getAndAdvance();
         try self.expectAndAdvance(TokenType.Assign);
         const expression = try self.parseExpression(Precedence.Lowest);
-        const statement = Statement{ .AssignmentStatement = AssignmentStatement{ .identifier = identifier, .expression = expression } };
+        const statement = Statement{ .AssignmentStatement = AssignmentStatement{ .identifier = identifier.literal, .expression = expression } };
         try self.advance();
         return statement;
     }
@@ -508,13 +508,13 @@ pub const Parser = struct {
             TokenType.LParen => {
                 try self.advance();
 
-                var args = std.ArrayList(*Expression).init(self.arena);
+                var args: std.ArrayListUnmanaged(*const Expression) = .{};
                 while (!self.currentTokenIs(TokenType.RParen)) {
                     if (self.currentTokenIs(TokenType.Eof)) {
                         return ParserError.ReachedEndOfFile;
                     }
 
-                    try args.append(try self.parseExpression(Precedence.Lowest));
+                    try args.append(self.arena, try self.parseExpression(Precedence.Lowest));
 
                     if (!self.peekTokenIs(TokenType.RParen)) {
                         try self.advanceAndExpect(TokenType.Comma);

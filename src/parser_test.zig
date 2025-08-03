@@ -9,29 +9,21 @@ const Parser = parser_module.Parser;
 const Expression = parser_module.Expression;
 const PrefixExpression = parser_module.PrefixExpression;
 const InfixExpression = parser_module.InfixExpression;
+const IfExpression = parser_module.IfExpression;
+const RangeExpression = parser_module.RangeExpression;
+const ForExpression = parser_module.ForExpression;
+const CallExpression = parser_module.CallExpression;
 const FunctionLiteral = parser_module.FunctionLiteral;
 const Statement = parser_module.Statement;
 const BlockStatement = parser_module.BlockStatement;
+const ReturnStatement = parser_module.ReturnStatement;
+const AssignmentStatement = parser_module.AssignmentStatement;
+const ExpressionStatement = parser_module.ExpressionStatement;
 const Operator = parser_module.Operator;
 const ParserError = parser_module.ParserError;
 
-fn getProgram(arena: std.mem.Allocator, content: []const u8) !std.ArrayList(Statement) {
-    var lexer = try Lexer.init(arena, content);
-    var parser = try Parser.init(&lexer, arena);
-
-    const program = try parser.parseProgram();
-    return program;
-}
-
-fn expectFormattedProgram(arena: std.mem.Allocator, input: []const u8, expected_output: []const u8) !void {
-    var lexer = try Lexer.init(arena, input);
-    var parser = try Parser.init(&lexer, arena);
-
-    const program = try parser.parseProgram();
-    const parsed = try Parser.printProgram(program, arena);
-
-    try std.testing.expectEqualStrings(expected_output, parsed);
-}
+// TODO: add error cases
+// TODO: add statement tests
 
 fn getExpression(arena: std.mem.Allocator, content: []const u8) !*const Expression {
     var lexer = try Lexer.init(arena, content);
@@ -57,7 +49,7 @@ fn expectStatement(expected: Statement, actual: Statement) anyerror!void {
 
     return switch (expected) {
         .AssignmentStatement => |assignment_stmt| {
-            try std.testing.expectEqualStrings(assignment_stmt.identifier.literal, actual.AssignmentStatement.identifier.literal);
+            try std.testing.expectEqualStrings(assignment_stmt.identifier, actual.AssignmentStatement.identifier);
             try expectExpression(assignment_stmt.expression.*, actual.AssignmentStatement.expression.*);
         },
         .ReturnStatement => |return_stmt| {
@@ -102,12 +94,65 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
             try std.testing.expectEqual(func_literal.params.items.len, actual.FunctionLiteral.params.items.len);
             try expectStatement(Statement{ .BlockStatement = func_literal.body }, Statement{ .BlockStatement = actual.FunctionLiteral.body });
         },
+        .IfExpression => |if_expression| {
+            try expectExpression(if_expression.condition.*, actual.IfExpression.condition.*);
+            try std.testing.expectEqual(if_expression.is_one_liner, actual.IfExpression.is_one_liner);
+            try expectStatement(Statement{ .BlockStatement = if_expression.body }, Statement{ .BlockStatement = actual.IfExpression.body });
+            if (if_expression.alternative) |alternative| {
+                try expectStatement(Statement{ .BlockStatement = alternative }, Statement{ .BlockStatement = actual.IfExpression.alternative.? });
+            }
+        },
+        .RangeExpression => |range_expression| {
+            try expectExpression(range_expression.left.*, actual.RangeExpression.left.*);
+            try expectExpression(range_expression.right.*, actual.RangeExpression.right.*);
+        },
+        .CallExpression => |call_expression| {
+            try expectExpression(call_expression.function.*, actual.CallExpression.function.*);
+            try std.testing.expectEqual(call_expression.args.items.len, actual.CallExpression.args.items.len);
+            for (call_expression.args.items, 0..) |expression, i| {
+                try expectExpression(expression.*, actual.CallExpression.args.items[i].*);
+            }
+        },
+        .ForExpression => |for_expression| {
+            try std.testing.expectEqualStrings(for_expression.variable, actual.ForExpression.variable);
+            try expectExpression(Expression{ .RangeExpression = for_expression.range }, Expression{ .RangeExpression = actual.ForExpression.range });
+            try expectStatement(Statement{ .BlockStatement = for_expression.body }, Statement{ .BlockStatement = actual.ForExpression.body });
+        },
         else => try std.testing.expectEqual(expected, actual),
     };
 }
 
-fn runTests(comptime T: type, name: []const u8, test_cases: []const T, run: fn (arena: std.mem.Allocator, test_case: T) anyerror!void) void {
-    std.debug.print("--- start {s} tests ---\n", .{name});
+fn list(comptime T: type, arena: std.mem.Allocator, items: []const T) !std.ArrayListUnmanaged(T) {
+    var ret: std.ArrayListUnmanaged(T) = .{};
+    for (items) |item| {
+        try ret.append(arena, item);
+    }
+    return ret;
+}
+
+fn printColor(color: []const u8, comptime format: []const u8, args: anytype) void {
+    std.debug.print("{s}", .{color});
+    std.debug.print(format, args);
+    std.debug.print("\x1b[0m", .{});
+}
+
+fn printHighlight(comptime format: []const u8, args: anytype) void {
+    printColor("\x1b[34m", format, args);
+}
+
+fn printSuccess(comptime format: []const u8, args: anytype) void {
+    printColor("\x1b[32m", format, args);
+}
+
+fn printError(comptime format: []const u8, args: anytype) void {
+    printColor("\x1b[31m", format, args);
+}
+
+fn runTests(comptime T: type, name: []const u8, test_cases: []const T, run: fn (arena: std.mem.Allocator, test_case: T) anyerror!void) !void {
+    printHighlight("start {s} tests\n", .{name});
+
+    var success: usize = 0;
+    var failed: usize = 0;
 
     for (test_cases) |test_case| {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -116,13 +161,28 @@ fn runTests(comptime T: type, name: []const u8, test_cases: []const T, run: fn (
         const result = run(arena.allocator(), test_case);
 
         if (result) |_| {
-            std.debug.print("🟢 {s}\n", .{test_case.description});
+            printSuccess("  > ", .{});
+            success += 1;
         } else |_| {
-            std.debug.print("🔴 {s}\n", .{test_case.description});
+            printError("  > ", .{});
+            failed += 1;
         }
+        std.debug.print("{s}\n", .{test_case.description});
     }
 
-    std.debug.print("--- end {s} tests ---\n\n", .{name});
+    if (failed == 0) {
+        printSuccess("    > {d} successful, {d} failed\n", .{ success, failed });
+    } else {
+        printError("    > {d} successful, {d} failed\n", .{
+            success,
+            failed,
+        });
+    }
+    std.debug.print("\n", .{});
+
+    if (failed > 0) {
+        return error.TestFailed;
+    }
 }
 
 test "parse expressions" {
@@ -184,7 +244,7 @@ test "parse expressions" {
         },
     };
 
-    runTests(TestCase, "parse expressions", &test_cases, run);
+    try runTests(TestCase, "parse expressions", &test_cases, run);
 }
 
 test "should parse prefix expression" {
@@ -276,7 +336,7 @@ test "should parse prefix expression" {
         },
     };
 
-    runTests(TestCase, "parse prefix expression", &test_cases, run);
+    try runTests(TestCase, "parse prefix expression", &test_cases, run);
 }
 
 test "should parse infix expression" {
@@ -450,7 +510,7 @@ test "should parse infix expression" {
         },
     };
 
-    runTests(TestCase, "parse infix expression", &test_cases, run);
+    try runTests(TestCase, "parse infix expression", &test_cases, run);
 }
 
 test "function declaration" {
@@ -467,6 +527,9 @@ test "function declaration" {
             return expectExpression(test_case.expected_expression, expression.*);
         }
     }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
     const test_cases = [_]TestCase{
         .{
@@ -507,271 +570,363 @@ test "function declaration" {
             },
             .expected_error = null,
         },
-        // .{
-        //     .description = "one liner with params",
-        //     .input =
-        //     \\fnc test(a, b) { return a + b }
-        //     ,
-        //     .expected_expression = Expression{
-        //         .FunctionLiteral = FunctionLiteral{
-        //             .name = "test",
-        //             .is_one_liner = false,
-        //             .params = .{
-        //                 Expression{ .Identifier = "a" },
-        //                 Expression{ .Identifier = "b" },
-        //             },
-        //             .body = BlockStatement{
-        //                 .is_one_liner = false,
-        //                 .statements = .{},
-        //             },
-        //         },
-        //     },
-        //     .expected_error = null,
-        // },
-        // .{
-        //     .description = "multi liner with params and one statement",
-        //     .input =
-        //     \\fnc test(a, b) {
-        //     \\    return a + b
-        //     \\}
-        //     ,
-        //     .expected =
-        //     \\fnc test(a, b) {
-        //     \\    return (a + b)
-        //     \\}
-        //     ,
-        //     .expected_error = null,
-        // },
-        // .{
-        //     .description = "multi liner with params and multiple statements",
-        //     .input =
-        //     \\fnc test(a, b) {
-        //     \\    x = a * b
-        //     \\    y = a / b
-        //     \\    return x + y
-        //     \\}
-        //     ,
-        //     .expected =
-        //     \\fnc test(a, b) {
-        //     \\    x = (a * b)
-        //     \\    y = (a / b)
-        //     \\    return (x + y)
-        //     \\}
-        //     ,
-        //     .expected_error = null,
-        // },
-        // .{
-        //     .description = "multi liner with gaps",
-        //     .input =
-        //     \\fnc test(a, b) {
-        //     \\    x = a * b
-        //     \\    y = a / b
-        //     \\    return x + y
-        //     \\}
-        //     ,
-        //     .expected =
-        //     \\fnc test(a, b) {
-        //     \\    x = (a * b)
-        //     \\    y = (a / b)
-        //     \\    return (x + y)
-        //     \\}
-        //     ,
-        //     .expected_error = null,
-        // },
-        // .{
-        //     .description = "one liner without return",
-        //     .input =
-        //     \\fnc test(a, b) { a - b }
-        //     ,
-        //     .expected =
-        //     \\fnc test(a, b) { (a - b) }
-        //     ,
-        //     .expected_error = null,
-        // },
-        // .{
-        //     .description = "multi liner without return",
-        //     .input =
-        //     \\fnc test(a, b) {
-        //     \\    x = a * b
-        //     \\    y = a / b
-        //     \\    x + y
-        //     \\}
-        //     ,
-        //     .expected =
-        //     \\fnc test(a, b) {
-        //     \\    x = (a * b)
-        //     \\    y = (a / b)
-        //     \\    (x + y)
-        //     \\}
-        //     ,
-        //     .expected_error = null,
-        // },
-        // .{
-        //     .description = "new line before closing brace is needed for multi liner",
-        //     .input =
-        //     \\fnc test(a, b) {
-        //     \\    x = a * b
-        //     \\    y = a / b
-        //     \\    x + y }
-        //     ,
-        //     .expected = "",
-        //     .expected_error = ParserError.UnexpectedTokenType,
-        // },
-        // .{
-        //     .description = "new line after opening brace is needed for multi liner",
-        //     .input =
-        //     \\fnc test(a, b) { x = a * b
-        //     \\    y = a / b
-        //     \\    x + y
-        //     \\}
-        //     ,
-        //     .expected = "",
-        //     .expected_error = ParserError.UnexpectedTokenType,
-        // },
-        // .{
-        //     .description = "multi liner with assignment on new line",
-        //     .input =
-        //     \\fnc test(a, b) {
-        //     \\    x = a * b
-        //     \\    y = a / b
-        //     \\    x + y
-        //     \\}
-        //     \\
-        //     \\result = test(a, b)
-        //     ,
-        //     .expected =
-        //     \\fnc test(a, b) {
-        //     \\    x = (a * b)
-        //     \\    y = (a / b)
-        //     \\    (x + y)
-        //     \\}
-        //     \\result = (test(a, b))
-        //     ,
-        //     .expected_error = null,
-        // },
-        // .{
-        //     .description = "multi liner with expression on new line",
-        //     .input =
-        //     \\fnc test(a, b) {
-        //     \\    x = a * b
-        //     \\    y = a / b
-        //     \\    x + y
-        //     \\}
-        //     \\
-        //     \\test(a, b)
-        //     ,
-        //     .expected =
-        //     \\fnc test(a, b) {
-        //     \\    x = (a * b)
-        //     \\    y = (a / b)
-        //     \\    (x + y)
-        //     \\}
-        //     \\(test(a, b))
-        //     ,
-        //     .expected_error = null,
-        // },
+        .{
+            .description = "one liner with params",
+            .input =
+            \\fnc test(a, b) { return a + b }
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .name = "test",
+                    .is_one_liner = true,
+                    .params = try list([]const u8, arena.allocator(), &.{
+                        "a",
+                        "b",
+                    }),
+                    .body = BlockStatement{
+                        .is_one_liner = true,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .ReturnStatement = ReturnStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .Identifier = "a",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "b",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "multiple lines with params",
+            .input =
+            \\fnc test(a, b) {
+            \\    return a + b
+            \\}
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .name = "test",
+                    .is_one_liner = false,
+                    .params = try list([]const u8, arena.allocator(), &.{
+                        "a",
+                        "b",
+                    }),
+                    .body = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .ReturnStatement = ReturnStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .Identifier = "a",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "b",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "multi liner with params and multiple statements",
+            .input =
+            \\fnc test(a, b) {
+            \\    x = a * b
+            \\    y = a / b
+            \\    return x + y
+            \\}
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .name = "test",
+                    .is_one_liner = false,
+                    .params = try list([]const u8, arena.allocator(), &.{
+                        "a",
+                        "b",
+                    }),
+                    .body = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .AssignmentStatement = AssignmentStatement{
+                                    .identifier = "x",
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Asterisk,
+                                            .left = &Expression{
+                                                .Identifier = "a",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "b",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            Statement{
+                                .AssignmentStatement = AssignmentStatement{
+                                    .identifier = "y",
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Slash,
+                                            .left = &Expression{
+                                                .Identifier = "a",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "b",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            Statement{
+                                .ReturnStatement = ReturnStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .Identifier = "x",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "y",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "multi liner with gaps",
+            .input =
+            \\fnc test(a, b) {
+            \\
+            \\    x = a * b
+            \\
+            \\    y = a / b
+            \\
+            \\    return x + y
+            \\}
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .name = "test",
+                    .is_one_liner = false,
+                    .params = try list([]const u8, arena.allocator(), &.{
+                        "a",
+                        "b",
+                    }),
+                    .body = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .AssignmentStatement = AssignmentStatement{
+                                    .identifier = "x",
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Asterisk,
+                                            .left = &Expression{
+                                                .Identifier = "a",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "b",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            Statement{
+                                .AssignmentStatement = AssignmentStatement{
+                                    .identifier = "y",
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Slash,
+                                            .left = &Expression{
+                                                .Identifier = "a",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "b",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            Statement{
+                                .ReturnStatement = ReturnStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .Identifier = "x",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "y",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "one liner without return",
+            .input =
+            \\fnc test(a, b) { a + b }
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .name = "test",
+                    .is_one_liner = true,
+                    .params = try list([]const u8, arena.allocator(), &.{
+                        "a",
+                        "b",
+                    }),
+                    .body = BlockStatement{
+                        .is_one_liner = true,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .ExpressionStatement = ExpressionStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .Identifier = "a",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "b",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "multi liner without return",
+            .input =
+            \\fnc test(a, b) {
+            \\    x = a * b
+            \\    y = a / b
+            \\    x + y
+            \\}
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .name = "test",
+                    .is_one_liner = false,
+                    .params = try list([]const u8, arena.allocator(), &.{
+                        "a",
+                        "b",
+                    }),
+                    .body = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .AssignmentStatement = AssignmentStatement{
+                                    .identifier = "x",
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Asterisk,
+                                            .left = &Expression{
+                                                .Identifier = "a",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "b",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            Statement{
+                                .AssignmentStatement = AssignmentStatement{
+                                    .identifier = "y",
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Slash,
+                                            .left = &Expression{
+                                                .Identifier = "a",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "b",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            Statement{
+                                .ExpressionStatement = ExpressionStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .Identifier = "x",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "y",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
+            .expected_error = null,
+        },
     };
 
-    runTests(TestCase, "parse function declaration", &test_cases, run);
-}
-
-test "should parse function call" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const content =
-        \\val = fnc test(a, b) {
-        \\    return a + b
-        \\}(1, 2)
-    ;
-
-    const expected_output =
-        \\val = (fnc test(a, b) {
-        \\    return (a + b)
-        \\}(1, 2))
-    ;
-
-    try expectFormattedProgram(arena.allocator(), content, expected_output);
-}
-
-test "should parse empty one liner function call" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const content =
-        \\val = fnc test(a, b) { return a + b }(1, 2)
-    ;
-
-    const expected_output =
-        \\val = (fnc test(a, b) { return (a + b) }(1, 2))
-    ;
-
-    try expectFormattedProgram(arena.allocator(), content, expected_output);
-}
-
-test "should parse function declaration" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const content =
-        \\fnc test(a, b) {
-        \\    return a + b
-        \\}
-    ;
-
-    const expression = try getExpression(arena.allocator(), content);
-    try expect(expression.* == .FunctionLiteral);
-    const function_literal = expression.FunctionLiteral;
-    try expect(std.mem.eql(u8, function_literal.name, "test"));
-    try expect(function_literal.params.items.len == 2);
-    try expect(std.mem.eql(u8, function_literal.params.items[0], "a"));
-    try expect(std.mem.eql(u8, function_literal.params.items[1], "b"));
-    try expect(function_literal.body.statements.items.len == 1);
-    const return_statement = function_literal.body.statements.items[0];
-    try expect(return_statement == .ReturnStatement);
-    try expect(return_statement.ReturnStatement.expression.* == .InfixExpression);
-    const infix_expression = return_statement.ReturnStatement.expression.*.InfixExpression;
-    try expect(infix_expression.operator == .Plus);
-    try expect(infix_expression.left.* == .Identifier);
-    try expect(infix_expression.right.* == .Identifier);
-    try expect(std.mem.eql(u8, infix_expression.left.*.Identifier, "a"));
-    try expect(std.mem.eql(u8, infix_expression.right.*.Identifier, "b"));
-}
-
-test "should parse function declaration in one line" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const content =
-        \\fnc test(a, b) { return a + b }
-    ;
-
-    const expression = try getExpression(arena.allocator(), content);
-    try expect(expression.* == .FunctionLiteral);
-    const function_literal = expression.FunctionLiteral;
-    try expect(std.mem.eql(u8, function_literal.name, "test"));
-    try expect(function_literal.params.items.len == 2);
-    try expect(std.mem.eql(u8, function_literal.params.items[0], "a"));
-    try expect(std.mem.eql(u8, function_literal.params.items[1], "b"));
-    try expect(function_literal.body.statements.items.len == 1);
-    const return_statement = function_literal.body.statements.items[0];
-    try expect(return_statement == .ReturnStatement);
-    try expect(return_statement.ReturnStatement.expression.* == .InfixExpression);
-    const infix_expression = return_statement.ReturnStatement.expression.*.InfixExpression;
-    try expect(infix_expression.operator == .Plus);
-    try expect(infix_expression.left.* == .Identifier);
-    try expect(infix_expression.right.* == .Identifier);
-    try expect(std.mem.eql(u8, infix_expression.left.*.Identifier, "a"));
-    try expect(std.mem.eql(u8, infix_expression.right.*.Identifier, "b"));
+    try runTests(TestCase, "parse function declaration", &test_cases, run);
 }
 
 test "if expressions" {
     const TestCase = struct {
         description: []const u8,
         input: []const u8,
-        expected: []const u8,
+        expected_expression: Expression,
         expected_error: ?ParserError,
     };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const expression = try getExpression(arena, test_case.input);
+            return expectExpression(test_case.expected_expression, expression.*);
+        }
+    }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
     const test_cases = [_]TestCase{
         .{
@@ -779,9 +934,27 @@ test "if expressions" {
             .input =
             \\if 5 == 5 {}
             ,
-            .expected =
-            \\if (5 == 5) {}
-            ,
+            .expected_expression = Expression{
+                .IfExpression = IfExpression{
+                    .is_one_liner = true,
+                    .condition = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Eq,
+                            .left = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                        },
+                    },
+                    .body = BlockStatement{
+                        .is_one_liner = true,
+                        .statements = .{},
+                    },
+                    .alternative = null,
+                },
+            },
             .expected_error = null,
         },
         .{
@@ -789,9 +962,30 @@ test "if expressions" {
             .input =
             \\if 5 == 5 {} else {}
             ,
-            .expected =
-            \\if (5 == 5) {} else {}
-            ,
+            .expected_expression = Expression{
+                .IfExpression = IfExpression{
+                    .is_one_liner = true,
+                    .condition = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Eq,
+                            .left = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                        },
+                    },
+                    .body = BlockStatement{
+                        .is_one_liner = true,
+                        .statements = .{},
+                    },
+                    .alternative = BlockStatement{
+                        .is_one_liner = true,
+                        .statements = .{},
+                    },
+                },
+            },
             .expected_error = null,
         },
         .{
@@ -799,9 +993,106 @@ test "if expressions" {
             .input =
             \\if 5 == 5 { 3 + 2 }
             ,
-            .expected =
-            \\if (5 == 5) { (3 + 2) }
+            .expected_expression = Expression{
+                .IfExpression = IfExpression{
+                    .is_one_liner = true,
+                    .condition = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Eq,
+                            .left = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                        },
+                    },
+                    .body = BlockStatement{
+                        .is_one_liner = true,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .ExpressionStatement = ExpressionStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .IntegerLiteral = 3,
+                                            },
+                                            .right = &Expression{
+                                                .IntegerLiteral = 2,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                    .alternative = null,
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "single line with else",
+            .input =
+            \\if 5 == 5 { 3 + 2 } else { 1 * 1 }
             ,
+            .expected_expression = Expression{
+                .IfExpression = IfExpression{
+                    .is_one_liner = true,
+                    .condition = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Eq,
+                            .left = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                        },
+                    },
+                    .body = BlockStatement{
+                        .is_one_liner = true,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .ExpressionStatement = ExpressionStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .IntegerLiteral = 3,
+                                            },
+                                            .right = &Expression{
+                                                .IntegerLiteral = 2,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                    .alternative = BlockStatement{
+                        .is_one_liner = true,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .ExpressionStatement = ExpressionStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Asterisk,
+                                            .left = &Expression{
+                                                .IntegerLiteral = 1,
+                                            },
+                                            .right = &Expression{
+                                                .IntegerLiteral = 1,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
             .expected_error = null,
         },
         .{
@@ -811,9 +1102,27 @@ test "if expressions" {
             \\
             \\}
             ,
-            .expected =
-            \\if (5 == 5) {}
-            ,
+            .expected_expression = Expression{
+                .IfExpression = IfExpression{
+                    .is_one_liner = false,
+                    .condition = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Eq,
+                            .left = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                        },
+                    },
+                    .body = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = .{},
+                    },
+                    .alternative = null,
+                },
+            },
             .expected_error = null,
         },
         .{
@@ -822,9 +1131,27 @@ test "if expressions" {
             \\if 5 == 5 {
             \\}
             ,
-            .expected =
-            \\if (5 == 5) {}
-            ,
+            .expected_expression = Expression{
+                .IfExpression = IfExpression{
+                    .is_one_liner = false,
+                    .condition = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Eq,
+                            .left = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                        },
+                    },
+                    .body = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = .{},
+                    },
+                    .alternative = null,
+                },
+            },
             .expected_error = null,
         },
         .{
@@ -834,9 +1161,30 @@ test "if expressions" {
             \\} else {
             \\}
             ,
-            .expected =
-            \\if (5 == 5) {} else {}
-            ,
+            .expected_expression = Expression{
+                .IfExpression = IfExpression{
+                    .is_one_liner = false,
+                    .condition = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Eq,
+                            .left = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                        },
+                    },
+                    .body = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = .{},
+                    },
+                    .alternative = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = .{},
+                    },
+                },
+            },
             .expected_error = null,
         },
         .{
@@ -846,21 +1194,43 @@ test "if expressions" {
             \\    3 + 2
             \\}
             ,
-            .expected =
-            \\if (5 == 5) {
-            \\    (3 + 2)
-            \\}
-            ,
-            .expected_error = null,
-        },
-        .{
-            .description = "single line with else",
-            .input =
-            \\if 5 == 5 { 3 + 2 } else { 1 * 1 }
-            ,
-            .expected =
-            \\if (5 == 5) { (3 + 2) } else { (1 * 1) }
-            ,
+            .expected_expression = Expression{
+                .IfExpression = IfExpression{
+                    .is_one_liner = false,
+                    .condition = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Eq,
+                            .left = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                        },
+                    },
+                    .body = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .ExpressionStatement = ExpressionStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .IntegerLiteral = 3,
+                                            },
+                                            .right = &Expression{
+                                                .IntegerLiteral = 2,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                    .alternative = null,
+                },
+            },
             .expected_error = null,
         },
         .{
@@ -872,39 +1242,83 @@ test "if expressions" {
             \\    1 * 1
             \\}
             ,
-            .expected =
-            \\if (5 == 5) {
-            \\    (3 + 2)
-            \\} else {
-            \\    (1 * 1)
-            \\}
-            ,
+            .expected_expression = Expression{
+                .IfExpression = IfExpression{
+                    .is_one_liner = false,
+                    .condition = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Eq,
+                            .left = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                        },
+                    },
+                    .body = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .ExpressionStatement = ExpressionStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .IntegerLiteral = 3,
+                                            },
+                                            .right = &Expression{
+                                                .IntegerLiteral = 2,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                    .alternative = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .ExpressionStatement = ExpressionStatement{
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Asterisk,
+                                            .left = &Expression{
+                                                .IntegerLiteral = 1,
+                                            },
+                                            .right = &Expression{
+                                                .IntegerLiteral = 1,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
             .expected_error = null,
         },
     };
 
-    std.debug.print("--- start if expressions tests ---\n", .{});
-    for (test_cases) |test_case| {
-        std.debug.print("  --> {s}\n", .{test_case.description});
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        const result = expectFormattedProgram(arena.allocator(), test_case.input, test_case.expected);
-        if (test_case.expected_error == null) {
-            try result;
-        } else {
-            try std.testing.expectError(ParserError.UnexpectedTokenType, result);
-        }
-    }
-    std.debug.print("--- end if expressions tests ---\n", .{});
+    try runTests(TestCase, "parse if expression", &test_cases, run);
 }
 
 test "range expression" {
     const TestCase = struct {
         description: []const u8,
         input: []const u8,
-        expected: []const u8,
+        expected_expression: Expression,
         expected_error: ?ParserError,
     };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const expression = try getExpression(arena, test_case.input);
+            return expectExpression(test_case.expected_expression, expression.*);
+        }
+    }.runTest;
 
     const test_cases = [_]TestCase{
         .{
@@ -912,9 +1326,16 @@ test "range expression" {
             .input =
             \\0..10
             ,
-            .expected =
-            \\(0..10)
-            ,
+            .expected_expression = Expression{
+                .RangeExpression = RangeExpression{
+                    .left = &Expression{
+                        .IntegerLiteral = 0,
+                    },
+                    .right = &Expression{
+                        .IntegerLiteral = 10,
+                    },
+                },
+            },
             .expected_error = null,
         },
         .{
@@ -922,9 +1343,32 @@ test "range expression" {
             .input =
             \\2 + 3..50 - 10
             ,
-            .expected =
-            \\((2 + 3)..(50 - 10))
-            ,
+            .expected_expression = Expression{
+                .RangeExpression = RangeExpression{
+                    .left = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Plus,
+                            .left = &Expression{
+                                .IntegerLiteral = 2,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 3,
+                            },
+                        },
+                    },
+                    .right = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Minus,
+                            .left = &Expression{
+                                .IntegerLiteral = 50,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 10,
+                            },
+                        },
+                    },
+                },
+            },
             .expected_error = null,
         },
         .{
@@ -932,35 +1376,50 @@ test "range expression" {
             .input =
             \\start()..end()
             ,
-            .expected =
-            \\((start())..(end()))
-            ,
+            .expected_expression = Expression{
+                .RangeExpression = RangeExpression{
+                    .left = &Expression{
+                        .CallExpression = CallExpression{
+                            .args = .{},
+                            .function = &Expression{
+                                .Identifier = "start",
+                            },
+                        },
+                    },
+                    .right = &Expression{
+                        .CallExpression = CallExpression{
+                            .args = .{},
+                            .function = &Expression{
+                                .Identifier = "end",
+                            },
+                        },
+                    },
+                },
+            },
             .expected_error = null,
         },
     };
 
-    std.debug.print("--- start range expressions tests ---\n", .{});
-    for (test_cases) |test_case| {
-        std.debug.print("  --> {s}\n", .{test_case.description});
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        const result = expectFormattedProgram(arena.allocator(), test_case.input, test_case.expected);
-        if (test_case.expected_error == null) {
-            try result;
-        } else {
-            try std.testing.expectError(ParserError.UnexpectedTokenType, result);
-        }
-    }
-    std.debug.print("--- end range expressions tests ---\n", .{});
+    try runTests(TestCase, "parse range expression", &test_cases, run);
 }
 
 test "for expression" {
     const TestCase = struct {
         description: []const u8,
         input: []const u8,
-        expected: []const u8,
+        expected_expression: Expression,
         expected_error: ?ParserError,
     };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const expression = try getExpression(arena, test_case.input);
+            return expectExpression(test_case.expected_expression, expression.*);
+        }
+    }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
     const test_cases = [_]TestCase{
         .{
@@ -970,26 +1429,159 @@ test "for expression" {
             \\    x = x * i
             \\}
             ,
-            .expected =
-            \\for i in (0..10) {
-            \\    x = (x * i)
-            \\}
-            ,
+            .expected_expression = Expression{
+                .ForExpression = ForExpression{
+                    .variable = "i",
+                    .range = RangeExpression{
+                        .left = &Expression{
+                            .IntegerLiteral = 0,
+                        },
+                        .right = &Expression{
+                            .IntegerLiteral = 10,
+                        },
+                    },
+                    .body = BlockStatement{
+                        .is_one_liner = false,
+                        .statements = try list(Statement, arena.allocator(), &.{
+                            Statement{
+                                .AssignmentStatement = AssignmentStatement{
+                                    .identifier = "x",
+                                    .expression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Asterisk,
+                                            .left = &Expression{
+                                                .Identifier = "x",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "i",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
             .expected_error = null,
         },
     };
 
-    std.debug.print("--- start for expressions tests ---\n", .{});
-    for (test_cases) |test_case| {
-        std.debug.print("  --> {s}\n", .{test_case.description});
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        const result = expectFormattedProgram(arena.allocator(), test_case.input, test_case.expected);
-        if (test_case.expected_error == null) {
-            try result;
-        } else {
-            try std.testing.expectError(ParserError.UnexpectedTokenType, result);
+    try runTests(TestCase, "parse for expression", &test_cases, run);
+}
+
+test "function call" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected_expression: Expression,
+        expected_error: ?ParserError,
+    };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const expression = try getExpression(arena, test_case.input);
+            return expectExpression(test_case.expected_expression, expression.*);
         }
-    }
-    std.debug.print("--- end for expressions tests ---\n", .{});
+    }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "iife",
+            .input =
+            \\fnc test(a, b) {
+            \\    return a + b
+            \\}(1, 2)
+            ,
+            .expected_expression = Expression{
+                .CallExpression = CallExpression{
+                    .function = &Expression{
+                        .FunctionLiteral = FunctionLiteral{
+                            .is_one_liner = false,
+                            .name = "test",
+                            .params = try list([]const u8, arena.allocator(), &.{
+                                "a",
+                                "b",
+                            }),
+                            .body = BlockStatement{
+                                .is_one_liner = false,
+                                .statements = try list(Statement, arena.allocator(), &.{
+                                    Statement{
+                                        .ReturnStatement = ReturnStatement{
+                                            .expression = &Expression{
+                                                .InfixExpression = InfixExpression{
+                                                    .operator = .Plus,
+                                                    .left = &Expression{
+                                                        .Identifier = "a",
+                                                    },
+                                                    .right = &Expression{
+                                                        .Identifier = "b",
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                }),
+                            },
+                        },
+                    },
+                    .args = try list(*const Expression, arena.allocator(), &.{
+                        &Expression{ .IntegerLiteral = 1 },
+                        &Expression{ .IntegerLiteral = 2 },
+                    }),
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "one liner iife",
+            .input =
+            \\fnc test(a, b) { return a + b }(1, 2)
+            ,
+            .expected_expression = Expression{
+                .CallExpression = CallExpression{
+                    .function = &Expression{
+                        .FunctionLiteral = FunctionLiteral{
+                            .is_one_liner = true,
+                            .name = "test",
+                            .params = try list([]const u8, arena.allocator(), &.{
+                                "a",
+                                "b",
+                            }),
+                            .body = BlockStatement{
+                                .is_one_liner = true,
+                                .statements = try list(Statement, arena.allocator(), &.{
+                                    Statement{
+                                        .ReturnStatement = ReturnStatement{
+                                            .expression = &Expression{
+                                                .InfixExpression = InfixExpression{
+                                                    .operator = .Plus,
+                                                    .left = &Expression{
+                                                        .Identifier = "a",
+                                                    },
+                                                    .right = &Expression{
+                                                        .Identifier = "b",
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                }),
+                            },
+                        },
+                    },
+                    .args = try list(*const Expression, arena.allocator(), &.{
+                        &Expression{ .IntegerLiteral = 1 },
+                        &Expression{ .IntegerLiteral = 2 },
+                    }),
+                },
+            },
+            .expected_error = null,
+        },
+    };
+
+    try runTests(TestCase, "parse function call", &test_cases, run);
 }
