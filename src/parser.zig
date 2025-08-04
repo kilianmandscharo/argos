@@ -269,11 +269,11 @@ pub const Parser = struct {
         try self.advance();
     }
 
-    pub fn parseProgram(self: *Parser) !std.ArrayList(Statement) {
-        var list = std.ArrayList(Statement).init(self.arena);
+    pub fn parseProgram(self: *Parser) !std.ArrayListUnmanaged(Statement) {
+        var list: std.ArrayListUnmanaged(Statement) = .{};
         while (self.cur_token.type != TokenType.Eof) {
             const statement = try self.parseStatement();
-            try list.append(statement);
+            try list.append(self.arena, statement);
             while (!self.currentTokenIs(.Eof)) {
                 if (self.currentTokenIs(.NewLine)) {
                     try self.advance();
@@ -296,7 +296,7 @@ pub const Parser = struct {
         return buffer.items;
     }
 
-    fn parseStatement(self: *Parser) !Statement {
+    fn parseStatement(self: *Parser) anyerror!Statement {
         return switch (self.cur_token.type) {
             .Identifier => {
                 if (self.peek_token.type == .Assign) {
@@ -305,6 +305,18 @@ pub const Parser = struct {
                 return try self.parseExpressionStatement();
             },
             .Return => try self.parseReturnStatement(),
+            .LBrace => {
+                try self.advance();
+
+                const block_statement = if (self.currentTokenIs(.NewLine))
+                    try self.parseBlockStatement(false)
+                else
+                    try self.parseBlockStatement(false);
+
+                try self.advance();
+
+                return Statement{ .BlockStatement = block_statement };
+            },
             else => try self.parseExpressionStatement(),
         };
     }

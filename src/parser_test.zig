@@ -22,14 +22,26 @@ const ExpressionStatement = parser_module.ExpressionStatement;
 const Operator = parser_module.Operator;
 const ParserError = parser_module.ParserError;
 
-// TODO: add error cases
-// TODO: add statement tests
+const test_utils = @import("test_utils.zig");
+const runTests = test_utils.runTests;
+const list = test_utils.list;
 
-fn getExpression(arena: std.mem.Allocator, content: []const u8) !*const Expression {
+// TODO: add error cases
+
+fn getProgram(arena: std.mem.Allocator, content: []const u8) !std.ArrayListUnmanaged(Statement) {
     var lexer = try Lexer.init(arena, content);
     var parser = try Parser.init(&lexer, arena);
+    return try parser.parseProgram();
+}
 
-    const program = try parser.parseProgram();
+fn getStatement(arena: std.mem.Allocator, content: []const u8) !Statement {
+    const program = try getProgram(arena, content);
+    try std.testing.expectEqual(program.items.len, 1);
+    return program.items[0];
+}
+
+fn getExpression(arena: std.mem.Allocator, content: []const u8) !*const Expression {
+    const program = try getProgram(arena, content);
 
     try expect(program.items.len == 1);
     const statement = program.items[0];
@@ -122,80 +134,136 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
     };
 }
 
-fn list(comptime T: type, arena: std.mem.Allocator, items: []const T) !std.ArrayListUnmanaged(T) {
-    var ret: std.ArrayListUnmanaged(T) = .{};
-    for (items) |item| {
-        try ret.append(arena, item);
-    }
-    return ret;
-}
+test "parse statement" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected_output: Statement,
+        expected_error: ?ParserError,
+    };
 
-fn printColor(color: []const u8, comptime format: []const u8, args: anytype) void {
-    std.debug.print("{s}", .{color});
-    std.debug.print(format, args);
-    std.debug.print("\x1b[0m", .{});
-}
-
-fn printHighlight(comptime format: []const u8, args: anytype) void {
-    printColor("\x1b[34m", format, args);
-}
-
-fn printSuccess(comptime format: []const u8, args: anytype) void {
-    printColor("\x1b[32m", format, args);
-}
-
-fn printError(comptime format: []const u8, args: anytype) void {
-    printColor("\x1b[31m", format, args);
-}
-
-fn runTests(comptime T: type, name: []const u8, test_cases: []const T, run: fn (arena: std.mem.Allocator, test_case: T) anyerror!void) !void {
-    printHighlight("start {s} tests\n", .{name});
-
-    var success: usize = 0;
-    var failed: usize = 0;
-
-    for (test_cases) |test_case| {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-
-        const result = run(arena.allocator(), test_case);
-
-        if (result) |_| {
-            printSuccess("  > ", .{});
-            success += 1;
-        } else |_| {
-            printError("  > ", .{});
-            failed += 1;
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const statement = try getStatement(arena, test_case.input);
+            return expectStatement(test_case.expected_output, statement);
         }
-        std.debug.print("{s}\n", .{test_case.description});
-    }
+    }.runTest;
 
-    if (failed == 0) {
-        printSuccess("    > {d} successful, {d} failed\n", .{ success, failed });
-    } else {
-        printError("    > {d} successful, {d} failed\n", .{
-            success,
-            failed,
-        });
-    }
-    std.debug.print("\n", .{});
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
-    if (failed > 0) {
-        return error.TestFailed;
-    }
+    const test_cases = [_]TestCase{
+        .{
+            .description = "assignment statement",
+            .input = "x = 1",
+            .expected_output = Statement{
+                .AssignmentStatement = AssignmentStatement{
+                    .identifier = "x",
+                    .expression = &Expression{
+                        .IntegerLiteral = 1,
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "return statement",
+            .input = "return 1",
+            .expected_output = Statement{
+                .ReturnStatement = ReturnStatement{
+                    .expression = &Expression{
+                        .IntegerLiteral = 1,
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "expression statement",
+            .input = "5 + 5",
+            .expected_output = Statement{
+                .ExpressionStatement = ExpressionStatement{
+                    .expression = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Plus,
+                            .left = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 5,
+                            },
+                        },
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "block statement",
+            .input =
+            \\{
+            \\     x = 1
+            \\     y = 2
+            \\     z = x * y
+            \\}
+            ,
+            .expected_output = Statement{
+                .BlockStatement = BlockStatement{
+                    .is_one_liner = false,
+                    .statements = try list(Statement, arena.allocator(), &.{
+                        Statement{
+                            .AssignmentStatement = AssignmentStatement{
+                                .identifier = "x",
+                                .expression = &Expression{
+                                    .IntegerLiteral = 1,
+                                },
+                            },
+                        },
+                        Statement{
+                            .AssignmentStatement = AssignmentStatement{
+                                .identifier = "y",
+                                .expression = &Expression{
+                                    .IntegerLiteral = 2,
+                                },
+                            },
+                        },
+                        Statement{
+                            .AssignmentStatement = AssignmentStatement{
+                                .identifier = "z",
+                                .expression = &Expression{
+                                    .InfixExpression = InfixExpression{
+                                        .operator = .Asterisk,
+                                        .left = &Expression{
+                                            .Identifier = "x",
+                                        },
+                                        .right = &Expression{
+                                            .Identifier = "y",
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    }),
+                },
+            },
+            .expected_error = null,
+        },
+    };
+
+    try runTests(TestCase, "parse statement", &test_cases, run);
 }
 
 test "parse expressions" {
     const TestCase = struct {
         description: []const u8,
         input: []const u8,
-        expected_output: Expression,
+        expected_expression: Expression,
     };
 
     const run = struct {
         fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
             const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_output, expression.*);
+            return expectExpression(test_case.expected_expression, expression.*);
         }
     }.runTest;
 
@@ -205,42 +273,42 @@ test "parse expressions" {
             .input =
             \\foo
             ,
-            .expected_output = Expression{ .Identifier = "foo" },
+            .expected_expression = Expression{ .Identifier = "foo" },
         },
         .{
             .description = "should parse string literal",
             .input =
             \\"foo"
             ,
-            .expected_output = Expression{ .StringLiteral = "foo" },
+            .expected_expression = Expression{ .StringLiteral = "foo" },
         },
         .{
             .description = "should parse integer literal",
             .input =
             \\666
             ,
-            .expected_output = Expression{ .IntegerLiteral = 666 },
+            .expected_expression = Expression{ .IntegerLiteral = 666 },
         },
         .{
             .description = "should parse float literal",
             .input =
             \\3.1415
             ,
-            .expected_output = Expression{ .FloatLiteral = 3.1415 },
+            .expected_expression = Expression{ .FloatLiteral = 3.1415 },
         },
         .{
             .description = "should parse true",
             .input =
             \\true
             ,
-            .expected_output = Expression{ .BooleanLiteral = true },
+            .expected_expression = Expression{ .BooleanLiteral = true },
         },
         .{
             .description = "should parse false",
             .input =
             \\false
             ,
-            .expected_output = Expression{ .BooleanLiteral = false },
+            .expected_expression = Expression{ .BooleanLiteral = false },
         },
     };
 
@@ -1584,4 +1652,162 @@ test "function call" {
     };
 
     try runTests(TestCase, "parse function call", &test_cases, run);
+}
+
+test "parse program" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected_output: std.ArrayListUnmanaged(Statement),
+        expected_error: ?ParserError,
+    };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const program = try getProgram(arena, test_case.input);
+            try std.testing.expectEqual(test_case.expected_output.items.len, program.items.len);
+            for (test_case.expected_output.items, 0..) |statement, i| {
+                try expectStatement(statement, program.items[i]);
+            }
+        }
+    }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "fibonacci",
+            .input =
+            \\fnc fib(n) {
+            \\    a = 0
+            \\    b = 1
+            \\    for _ in 0..n {
+            \\        tmp = b
+            \\        b = a + b
+            \\        a = tmp
+            \\    }
+            \\    a
+            \\}
+            \\
+            \\fib(30)
+            ,
+            .expected_output = try list(Statement, arena.allocator(), &.{
+                Statement{
+                    .ExpressionStatement = ExpressionStatement{
+                        .expression = &Expression{
+                            .FunctionLiteral = FunctionLiteral{
+                                .is_one_liner = false,
+                                .name = "fib",
+                                .params = try list([]const u8, arena.allocator(), &.{
+                                    "n",
+                                }),
+                                .body = BlockStatement{
+                                    .is_one_liner = false,
+                                    .statements = try list(Statement, arena.allocator(), &.{
+                                        Statement{
+                                            .AssignmentStatement = AssignmentStatement{
+                                                .identifier = "a",
+                                                .expression = &Expression{
+                                                    .IntegerLiteral = 0,
+                                                },
+                                            },
+                                        },
+                                        Statement{
+                                            .AssignmentStatement = AssignmentStatement{
+                                                .identifier = "b",
+                                                .expression = &Expression{
+                                                    .IntegerLiteral = 1,
+                                                },
+                                            },
+                                        },
+                                        Statement{
+                                            .ExpressionStatement = ExpressionStatement{
+                                                .expression = &Expression{
+                                                    .ForExpression = ForExpression{
+                                                        .variable = "_",
+                                                        .range = RangeExpression{
+                                                            .left = &Expression{
+                                                                .IntegerLiteral = 0,
+                                                            },
+                                                            .right = &Expression{
+                                                                .Identifier = "n",
+                                                            },
+                                                        },
+                                                        .body = BlockStatement{
+                                                            .is_one_liner = false,
+                                                            .statements = try list(Statement, arena.allocator(), &.{
+                                                                Statement{
+                                                                    .AssignmentStatement = AssignmentStatement{
+                                                                        .identifier = "tmp",
+                                                                        .expression = &Expression{
+                                                                            .Identifier = "b",
+                                                                        },
+                                                                    },
+                                                                },
+                                                                Statement{
+                                                                    .AssignmentStatement = AssignmentStatement{
+                                                                        .identifier = "b",
+                                                                        .expression = &Expression{
+                                                                            .InfixExpression = InfixExpression{
+                                                                                .operator = .Plus,
+                                                                                .left = &Expression{
+                                                                                    .Identifier = "a",
+                                                                                },
+                                                                                .right = &Expression{
+                                                                                    .Identifier = "b",
+                                                                                },
+                                                                            },
+                                                                        },
+                                                                    },
+                                                                },
+                                                                Statement{
+                                                                    .AssignmentStatement = AssignmentStatement{
+                                                                        .identifier = "a",
+                                                                        .expression = &Expression{
+                                                                            .Identifier = "tmp",
+                                                                        },
+                                                                    },
+                                                                },
+                                                            }),
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                        Statement{
+                                            .ExpressionStatement = ExpressionStatement{
+                                                .expression = &Expression{
+                                                    .Identifier = "a",
+                                                },
+                                            },
+                                        },
+                                    }),
+                                },
+                            },
+                        },
+                    },
+                },
+                Statement{
+                    .ExpressionStatement = ExpressionStatement{
+                        .expression = &Expression{
+                            .CallExpression = CallExpression{
+                                .function = &Expression{
+                                    .Identifier = "fib",
+                                },
+                                .args = try list(*const Expression, arena.allocator(), &.{
+                                    &Expression{
+                                        .IntegerLiteral = 30,
+                                    },
+                                }),
+                            },
+                        },
+                    },
+                },
+            }),
+            .expected_error = null,
+        },
+    };
+
+    try runTests(TestCase, "parse statement", &test_cases, run);
 }
