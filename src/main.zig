@@ -44,6 +44,8 @@ pub fn main() !void {
     defer env.deinit();
 
     var evaluator = Evaluator.init(gpaAllocator);
+    defer evaluator.deinit();
+
     const result = try evaluator.eval(Node{ .Program = program }, env);
     std.debug.print("Result: {f}\n", .{result});
 }
