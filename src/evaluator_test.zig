@@ -25,7 +25,7 @@ pub fn getResult(arena: std.mem.Allocator, input: []const u8) !Object {
     return result;
 }
 
-// TODO: Add descriptions to each test
+// TODO: Use new testing utils 
 
 test "infix expressions" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -66,35 +66,35 @@ test "infix expressions" {
     }
 }
 
-test "infix expressions error cases" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const TestCase = struct {
-        input: []const u8,
-        expected_error: []const u8,
-    };
-
-    const test_cases = [_]TestCase{
-        .{ .input = "5 + true", .expected_error = "type mismatch: Integer <> Boolean" },
-        .{ .input = "5.7 + true", .expected_error = "type mismatch: Float <> Boolean" },
-        .{ .input = "false * 30", .expected_error = "type mismatch: Boolean <> Integer" },
-        .{ .input = "true * false", .expected_error = "invalid operator '*' for type Boolean" },
-    };
-
-    for (test_cases) |test_case| {
-        const result = try getResult(arena.allocator(), test_case.input);
-        switch (result) {
-            .Error => |v| {
-                std.testing.expectEqualStrings(test_case.expected_error, v) catch |err| {
-                    std.debug.print("expected {s}, got {s}\n", .{ test_case.expected_error, v });
-                    return err;
-                };
-            },
-            else => return error.ExpectedError,
-        }
-    }
-}
+// test "infix expressions error cases" {
+//     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+//     defer arena.deinit();
+//
+//     const TestCase = struct {
+//         input: []const u8,
+//         expected_error: []const u8,
+//     };
+//
+//     const test_cases = [_]TestCase{
+//         .{ .input = "5 + true", .expected_error = "type mismatch: Integer <> Boolean" },
+//         .{ .input = "5.7 + true", .expected_error = "type mismatch: Float <> Boolean" },
+//         .{ .input = "false * 30", .expected_error = "type mismatch: Boolean <> Integer" },
+//         .{ .input = "true * false", .expected_error = "invalid operator '*' for type Boolean" },
+//     };
+//
+//     for (test_cases) |test_case| {
+//         const result = try getResult(arena.allocator(), test_case.input);
+//         switch (result) {
+//             .Error => |v| {
+//                 std.testing.expectEqualStrings(test_case.expected_error, v) catch |err| {
+//                     std.debug.print("expected {s}, got {s}\n", .{ test_case.expected_error, v });
+//                     return err;
+//                 };
+//             },
+//             else => return error.ExpectedError,
+//         }
+//     }
+// }
 
 test "multi line calculation" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);

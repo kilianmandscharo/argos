@@ -15,7 +15,7 @@ const ForExpression = parser_module.ForExpression;
 const CallExpression = parser_module.CallExpression;
 const FunctionLiteral = parser_module.FunctionLiteral;
 const Statement = parser_module.Statement;
-const BlockStatement = parser_module.BlockStatement;
+const BlockExpression = parser_module.BlockExpression;
 const ReturnStatement = parser_module.ReturnStatement;
 const AssignmentStatement = parser_module.AssignmentStatement;
 const ExpressionStatement = parser_module.ExpressionStatement;
@@ -70,13 +70,6 @@ fn expectStatement(expected: Statement, actual: Statement) anyerror!void {
         .ExpressionStatement => |expression_stmt| {
             try expectExpression(expression_stmt.expression.*, actual.ExpressionStatement.expression.*);
         },
-        .BlockStatement => |block_stmt| {
-            try std.testing.expectEqual(block_stmt.statements.items.len, actual.BlockStatement.statements.items.len);
-            try std.testing.expectEqual(block_stmt.is_one_liner, actual.BlockStatement.is_one_liner);
-            for (block_stmt.statements.items, 0..) |stmt, i| {
-                try expectStatement(stmt, actual.BlockStatement.statements.items[i]);
-            }
-        },
     };
 }
 
@@ -104,14 +97,14 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
             try std.testing.expectEqualStrings(func_literal.name, actual.FunctionLiteral.name);
             try std.testing.expectEqual(func_literal.is_one_liner, actual.FunctionLiteral.is_one_liner);
             try std.testing.expectEqual(func_literal.params.items.len, actual.FunctionLiteral.params.items.len);
-            try expectStatement(Statement{ .BlockStatement = func_literal.body }, Statement{ .BlockStatement = actual.FunctionLiteral.body });
+            try expectExpression(Expression{ .BlockExpression = func_literal.body }, Expression{ .BlockExpression = actual.FunctionLiteral.body });
         },
         .IfExpression => |if_expression| {
             try expectExpression(if_expression.condition.*, actual.IfExpression.condition.*);
             try std.testing.expectEqual(if_expression.is_one_liner, actual.IfExpression.is_one_liner);
-            try expectStatement(Statement{ .BlockStatement = if_expression.body }, Statement{ .BlockStatement = actual.IfExpression.body });
+            try expectExpression(Expression{ .BlockExpression = if_expression.body }, Expression{ .BlockExpression = actual.IfExpression.body });
             if (if_expression.alternative) |alternative| {
-                try expectStatement(Statement{ .BlockStatement = alternative }, Statement{ .BlockStatement = actual.IfExpression.alternative.? });
+                try expectExpression(Expression{ .BlockExpression = alternative }, Expression{ .BlockExpression = actual.IfExpression.alternative.? });
             }
         },
         .RangeExpression => |range_expression| {
@@ -128,12 +121,19 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
         .ForExpression => |for_expression| {
             try std.testing.expectEqualStrings(for_expression.variable, actual.ForExpression.variable);
             try expectExpression(Expression{ .RangeExpression = for_expression.range }, Expression{ .RangeExpression = actual.ForExpression.range });
-            try expectStatement(Statement{ .BlockStatement = for_expression.body }, Statement{ .BlockStatement = actual.ForExpression.body });
+            try expectExpression(Expression{ .BlockExpression = for_expression.body }, Expression{ .BlockExpression = actual.ForExpression.body });
         },
         .ArrayLiteral => |array_literal| {
             try std.testing.expectEqual(array_literal.items.len, actual.ArrayLiteral.items.len);
             for (array_literal.items, 0..) |item, i| {
                 try expectExpression(item.*, actual.ArrayLiteral.items[i].*);
+            }
+        },
+        .BlockExpression => |block_expression| {
+            try std.testing.expectEqual(block_expression.statements.items.len, actual.BlockExpression.statements.items.len);
+            try std.testing.expectEqual(block_expression.is_one_liner, actual.BlockExpression.is_one_liner);
+            for (block_expression.statements.items, 0..) |stmt, i| {
+                try expectStatement(stmt, actual.BlockExpression.statements.items[i]);
             }
         },
         else => try std.testing.expectEqual(expected, actual),
@@ -200,56 +200,6 @@ test "parse statement" {
                             },
                         },
                     },
-                },
-            },
-            .expected_error = null,
-        },
-        .{
-            .description = "block statement",
-            .input =
-            \\{
-            \\     x = 1
-            \\     y = 2
-            \\     z = x * y
-            \\}
-            ,
-            .expected_output = Statement{
-                .BlockStatement = BlockStatement{
-                    .is_one_liner = false,
-                    .statements = try list(Statement, arena.allocator(), &.{
-                        Statement{
-                            .AssignmentStatement = AssignmentStatement{
-                                .identifier = "x",
-                                .expression = &Expression{
-                                    .IntegerLiteral = 1,
-                                },
-                            },
-                        },
-                        Statement{
-                            .AssignmentStatement = AssignmentStatement{
-                                .identifier = "y",
-                                .expression = &Expression{
-                                    .IntegerLiteral = 2,
-                                },
-                            },
-                        },
-                        Statement{
-                            .AssignmentStatement = AssignmentStatement{
-                                .identifier = "z",
-                                .expression = &Expression{
-                                    .InfixExpression = InfixExpression{
-                                        .operator = .Asterisk,
-                                        .left = &Expression{
-                                            .Identifier = "x",
-                                        },
-                                        .right = &Expression{
-                                            .Identifier = "y",
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    }),
                 },
             },
             .expected_error = null,
@@ -616,7 +566,7 @@ test "function declaration" {
                     .name = "test",
                     .is_one_liner = true,
                     .params = .{},
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = true,
                         .statements = .{},
                     },
@@ -636,7 +586,7 @@ test "function declaration" {
                     .name = "test",
                     .is_one_liner = false,
                     .params = .{},
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = .{},
                     },
@@ -657,7 +607,7 @@ test "function declaration" {
                         "a",
                         "b",
                     }),
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = true,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -696,7 +646,7 @@ test "function declaration" {
                         "a",
                         "b",
                     }),
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -737,7 +687,7 @@ test "function declaration" {
                         "a",
                         "b",
                     }),
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -813,7 +763,7 @@ test "function declaration" {
                         "a",
                         "b",
                     }),
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -882,7 +832,7 @@ test "function declaration" {
                         "a",
                         "b",
                     }),
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = true,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -923,7 +873,7 @@ test "function declaration" {
                         "a",
                         "b",
                     }),
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -1022,7 +972,7 @@ test "if expressions" {
                             },
                         },
                     },
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = true,
                         .statements = .{},
                     },
@@ -1050,11 +1000,11 @@ test "if expressions" {
                             },
                         },
                     },
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = true,
                         .statements = .{},
                     },
-                    .alternative = BlockStatement{
+                    .alternative = BlockExpression{
                         .is_one_liner = true,
                         .statements = .{},
                     },
@@ -1081,7 +1031,7 @@ test "if expressions" {
                             },
                         },
                     },
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = true,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -1125,7 +1075,7 @@ test "if expressions" {
                             },
                         },
                     },
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = true,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -1145,7 +1095,7 @@ test "if expressions" {
                             },
                         }),
                     },
-                    .alternative = BlockStatement{
+                    .alternative = BlockExpression{
                         .is_one_liner = true,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -1190,7 +1140,7 @@ test "if expressions" {
                             },
                         },
                     },
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = .{},
                     },
@@ -1219,7 +1169,7 @@ test "if expressions" {
                             },
                         },
                     },
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = .{},
                     },
@@ -1249,11 +1199,11 @@ test "if expressions" {
                             },
                         },
                     },
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = .{},
                     },
-                    .alternative = BlockStatement{
+                    .alternative = BlockExpression{
                         .is_one_liner = false,
                         .statements = .{},
                     },
@@ -1282,7 +1232,7 @@ test "if expressions" {
                             },
                         },
                     },
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -1330,7 +1280,7 @@ test "if expressions" {
                             },
                         },
                     },
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -1350,7 +1300,7 @@ test "if expressions" {
                             },
                         }),
                     },
-                    .alternative = BlockStatement{
+                    .alternative = BlockExpression{
                         .is_one_liner = false,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -1514,7 +1464,7 @@ test "for expression" {
                             .IntegerLiteral = 10,
                         },
                     },
-                    .body = BlockStatement{
+                    .body = BlockExpression{
                         .is_one_liner = false,
                         .statements = try list(Statement, arena.allocator(), &.{
                             Statement{
@@ -1658,7 +1608,7 @@ test "function call" {
                                 "a",
                                 "b",
                             }),
-                            .body = BlockStatement{
+                            .body = BlockExpression{
                                 .is_one_liner = false,
                                 .statements = try list(Statement, arena.allocator(), &.{
                                     Statement{
@@ -1703,7 +1653,7 @@ test "function call" {
                                 "a",
                                 "b",
                             }),
-                            .body = BlockStatement{
+                            .body = BlockExpression{
                                 .is_one_liner = true,
                                 .statements = try list(Statement, arena.allocator(), &.{
                                     Statement{
@@ -1926,7 +1876,7 @@ test "parse program" {
                                 .params = try list([]const u8, arena.allocator(), &.{
                                     "n",
                                 }),
-                                .body = BlockStatement{
+                                .body = BlockExpression{
                                     .is_one_liner = false,
                                     .statements = try list(Statement, arena.allocator(), &.{
                                         Statement{
@@ -1958,7 +1908,7 @@ test "parse program" {
                                                                 .Identifier = "n",
                                                             },
                                                         },
-                                                        .body = BlockStatement{
+                                                        .body = BlockExpression{
                                                             .is_one_liner = false,
                                                             .statements = try list(Statement, arena.allocator(), &.{
                                                                 Statement{
@@ -2034,4 +1984,100 @@ test "parse program" {
     };
 
     try runTests(TestCase, "parse statement", &test_cases, run);
+}
+
+test "block expression" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected_expression: Expression,
+        expected_error: ?ParserError,
+    };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const expression = try getExpression(arena, test_case.input);
+            return expectExpression(test_case.expected_expression, expression.*);
+        }
+    }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "block expression one line",
+            .input =
+            \\{ x = 1 }
+            ,
+            .expected_expression = Expression{
+                .BlockExpression = BlockExpression{
+                    .is_one_liner = true,
+                    .statements = try list(Statement, arena.allocator(), &.{
+                        Statement{
+                            .AssignmentStatement = AssignmentStatement{
+                                .identifier = "x",
+                                .expression = &Expression{
+                                    .IntegerLiteral = 1,
+                                },
+                            },
+                        },
+                    }),
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "block expression multi line",
+            .input =
+            \\{
+            \\     x = 1
+            \\     y = 2
+            \\     z = x * y
+            \\}
+            ,
+            .expected_expression = Expression{
+                .BlockExpression = BlockExpression{
+                    .is_one_liner = false,
+                    .statements = try list(Statement, arena.allocator(), &.{
+                        Statement{
+                            .AssignmentStatement = AssignmentStatement{
+                                .identifier = "x",
+                                .expression = &Expression{
+                                    .IntegerLiteral = 1,
+                                },
+                            },
+                        },
+                        Statement{
+                            .AssignmentStatement = AssignmentStatement{
+                                .identifier = "y",
+                                .expression = &Expression{
+                                    .IntegerLiteral = 2,
+                                },
+                            },
+                        },
+                        Statement{
+                            .AssignmentStatement = AssignmentStatement{
+                                .identifier = "z",
+                                .expression = &Expression{
+                                    .InfixExpression = InfixExpression{
+                                        .operator = .Asterisk,
+                                        .left = &Expression{
+                                            .Identifier = "x",
+                                        },
+                                        .right = &Expression{
+                                            .Identifier = "y",
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    }),
+                },
+            },
+            .expected_error = null,
+        },
+    };
+
+    try runTests(TestCase, "parse block expression", &test_cases, run);
 }

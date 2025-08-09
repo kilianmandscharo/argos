@@ -9,7 +9,6 @@ pub const Statement = union(enum) {
     AssignmentStatement: AssignmentStatement,
     ReturnStatement: ReturnStatement,
     ExpressionStatement: ExpressionStatement,
-    BlockStatement: BlockStatement,
 
     pub fn format(
         self: @This(),
@@ -19,7 +18,6 @@ pub const Statement = union(enum) {
             .AssignmentStatement => |v| try writer.print("{s} = {f}", .{ v.identifier, v.expression }),
             .ReturnStatement => |v| try writer.print("return {f}", .{v.expression}),
             .ExpressionStatement => |v| try writer.print("{f}", .{v.expression}),
-            .BlockStatement => |v| try v.format(writer),
         }
     }
 };
@@ -37,28 +35,6 @@ pub const ExpressionStatement = struct {
     expression: *const Expression,
 };
 
-pub const BlockStatement = struct {
-    statements: std.ArrayListUnmanaged(Statement),
-    is_one_liner: bool,
-
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
-        var separator: []const u8 = if (self.is_one_liner) " " else "\n";
-        if (self.statements.items.len == 0) separator = "";
-        const ident = if (self.is_one_liner) "" else "    ";
-        try writer.print("{{{s}", .{separator});
-        for (self.statements.items, 0..) |statement, i| {
-            try writer.print("{s}{f}", .{ ident, statement });
-            if (!self.is_one_liner and i < self.statements.items.len - 1) {
-                try writer.print("\n", .{});
-            }
-        }
-        try writer.print("{s}}}", .{separator});
-    }
-};
-
 pub const Expression = union(enum) {
     Identifier: []const u8,
     StringLiteral: []const u8,
@@ -73,6 +49,7 @@ pub const Expression = union(enum) {
     RangeExpression: RangeExpression,
     ForExpression: ForExpression,
     ArrayLiteral: std.ArrayListUnmanaged(*const Expression),
+    BlockExpression: BlockExpression,
 
     pub fn format(
         self: @This(),
@@ -122,6 +99,10 @@ pub const Expression = union(enum) {
                 try writer.print("for {s} in ({f}..{f}) ", .{ v.variable, v.range.left, v.range.right });
                 try v.body.format(writer);
             },
+            .ArrayLiteral => {
+                try writer.print("array format not implemented", .{});
+            },
+            .BlockExpression => |v| try v.format(writer),
         }
     }
 };
@@ -169,7 +150,7 @@ pub const PrefixExpression = struct {
 pub const FunctionLiteral = struct {
     name: []const u8,
     params: std.ArrayListUnmanaged([]const u8),
-    body: BlockStatement,
+    body: BlockExpression,
     is_one_liner: bool,
 };
 
@@ -180,8 +161,8 @@ pub const CallExpression = struct {
 
 pub const IfExpression = struct {
     condition: *const Expression,
-    body: BlockStatement,
-    alternative: ?BlockStatement,
+    body: BlockExpression,
+    alternative: ?BlockExpression,
     is_one_liner: bool,
 };
 
@@ -193,7 +174,29 @@ pub const RangeExpression = struct {
 pub const ForExpression = struct {
     variable: []const u8,
     range: RangeExpression,
-    body: BlockStatement,
+    body: BlockExpression,
+};
+
+pub const BlockExpression = struct {
+    statements: std.ArrayListUnmanaged(Statement),
+    is_one_liner: bool,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        var separator: []const u8 = if (self.is_one_liner) " " else "\n";
+        if (self.statements.items.len == 0) separator = "";
+        const ident = if (self.is_one_liner) "" else "    ";
+        try writer.print("{{{s}", .{separator});
+        for (self.statements.items, 0..) |statement, i| {
+            try writer.print("{s}{f}", .{ ident, statement });
+            if (!self.is_one_liner and i < self.statements.items.len - 1) {
+                try writer.print("\n", .{});
+            }
+        }
+        try writer.print("{s}}}", .{separator});
+    }
 };
 
 const Precedence = enum(u8) {
@@ -306,18 +309,6 @@ pub const Parser = struct {
                 return try self.parseExpressionStatement();
             },
             .Return => try self.parseReturnStatement(),
-            .LBrace => {
-                try self.advance();
-
-                const block_statement = if (self.currentTokenIs(.NewLine))
-                    try self.parseBlockStatement(false)
-                else
-                    try self.parseBlockStatement(false);
-
-                try self.advance();
-
-                return Statement{ .BlockStatement = block_statement };
-            },
             else => try self.parseExpressionStatement(),
         };
     }
@@ -346,7 +337,7 @@ pub const Parser = struct {
         return statement;
     }
 
-    fn parseBlockStatement(self: *Parser, is_one_liner: bool) !BlockStatement {
+    fn parseBlockExpression(self: *Parser, is_one_liner: bool) !BlockExpression {
         var statements: std.ArrayListUnmanaged(Statement) = .{};
         while (!self.currentTokenIs(TokenType.RBrace)) {
             if (self.currentTokenIs(TokenType.Eof)) {
@@ -366,7 +357,7 @@ pub const Parser = struct {
                 return ParserError.UnexpectedTokenType;
             }
         }
-        return BlockStatement{
+        return BlockExpression{
             .statements = statements,
             .is_one_liner = is_one_liner,
         };
@@ -422,7 +413,7 @@ pub const Parser = struct {
                 }
                 try self.advance();
 
-                const body = try self.parseBlockStatement(is_one_liner);
+                const body = try self.parseBlockExpression(is_one_liner);
 
                 return Expression{
                     .FunctionLiteral = FunctionLiteral{ .name = name, .params = params, .body = body, .is_one_liner = is_one_liner },
@@ -442,7 +433,7 @@ pub const Parser = struct {
                 }
                 try self.advance();
 
-                const body = try self.parseBlockStatement(is_one_liner);
+                const body = try self.parseBlockExpression(is_one_liner);
 
                 var if_expression = Expression{ .IfExpression = .{ .condition = condition, .body = body, .alternative = null, .is_one_liner = is_one_liner } };
 
@@ -458,7 +449,7 @@ pub const Parser = struct {
                 try self.advanceAndExpect(.LBrace);
                 try self.advance();
 
-                if_expression.IfExpression.alternative = try self.parseBlockStatement(is_one_liner);
+                if_expression.IfExpression.alternative = try self.parseBlockExpression(is_one_liner);
                 return if_expression;
             },
             // TODO: implement one liner for expression
@@ -480,7 +471,7 @@ pub const Parser = struct {
 
                 try self.advance();
                 try self.expectAndAdvance(.LBrace);
-                const body = try self.parseBlockStatement(false);
+                const body = try self.parseBlockExpression(false);
 
                 return Expression{
                     .ForExpression = ForExpression{
@@ -496,6 +487,18 @@ pub const Parser = struct {
                 return Expression{
                     .ArrayLiteral = items,
                 };
+            },
+            .LBrace => {
+                try self.advance();
+
+                const block_expression = if (self.currentTokenIs(.NewLine))
+                    try self.parseBlockExpression(false)
+                else
+                    try self.parseBlockExpression(true);
+
+                try self.advance();
+
+                return Expression{ .BlockExpression = block_expression };
             },
             else => {
                 std.debug.print("unknown token type: {any}\n", .{self.cur_token.type});

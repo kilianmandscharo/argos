@@ -6,7 +6,7 @@ const parser_module = @import("parser.zig");
 const Statement = parser_module.Statement;
 const Expression = parser_module.Expression;
 const Operator = parser_module.Operator;
-const BlockStatement = parser_module.BlockStatement;
+const BlockExpression = parser_module.BlockExpression;
 
 const EvaluatorError = error{
     RuntimeError,
@@ -70,7 +70,7 @@ pub const Object = union(enum) {
 
 const Function = struct {
     params: std.ArrayListUnmanaged([]const u8),
-    body: BlockStatement,
+    body: BlockExpression,
     env: *Environment,
 };
 
@@ -131,17 +131,6 @@ pub const Evaluator = struct {
                         try env.set(assignment.identifier, val);
                         return val;
                     },
-                    .BlockStatement => |block| {
-                        var result: Object = Object.Null;
-                        for (block.statements.items) |item| {
-                            result = try self.eval(Node{ .Statement = item }, env);
-                            switch (result) {
-                                .ReturnValue => |idx| return self.object_store.get(idx),
-                                else => {},
-                            }
-                        }
-                        return result;
-                    },
                     .ReturnStatement => |return_statement| {
                         const value = try self.eval(Node{ .Expression = return_statement.expression.* }, env);
                         const object_id = try self.object_store.add(value);
@@ -153,6 +142,17 @@ pub const Evaluator = struct {
             .Expression => |expression| {
                 // std.debug.print("eval expression {f}\n", .{expression});
                 switch (expression) {
+                    .BlockExpression => |block| {
+                        var result: Object = Object.Null;
+                        for (block.statements.items) |item| {
+                            result = try self.eval(Node{ .Statement = item }, env);
+                            switch (result) {
+                                .ReturnValue => |idx| return self.object_store.get(idx),
+                                else => {},
+                            }
+                        }
+                        return result;
+                    },
                     .Identifier => |identifier| {
                         const val = try env.get(identifier);
                         return val;
@@ -194,7 +194,10 @@ pub const Evaluator = struct {
                                     try extended_env.set(name, arg);
                                 }
 
-                                const result = self.eval(Node{ .Statement = Statement{ .BlockStatement = function.body } }, extended_env);
+                                const result = self.eval(Node{ .Expression = Expression{ .BlockExpression = function.body } }, extended_env);
+
+                                // TODO: clean up extended_env
+
                                 return result;
                             },
                             else => {
@@ -208,10 +211,10 @@ pub const Evaluator = struct {
                         switch (condition) {
                             .Boolean => |val| {
                                 if (val) {
-                                    return try self.eval(Node{ .Statement = .{ .BlockStatement = if_expression.body } }, env);
+                                    return try self.eval(Node{ .Expression = .{ .BlockExpression = if_expression.body } }, env);
                                 }
                                 if (if_expression.alternative) |alternative| {
-                                    return try self.eval(Node{ .Statement = .{ .BlockStatement = alternative } }, env);
+                                    return try self.eval(Node{ .Expression = .{ .BlockExpression = alternative } }, env);
                                 }
                                 return Object.Null;
                             },
@@ -244,7 +247,7 @@ pub const Evaluator = struct {
 
                         for (@intCast(lower.Integer)..@intCast(upper.Integer)) |i| {
                             try env.set(for_expression.variable, Object{ .Integer = @intCast(i) });
-                            _ = try self.eval(Node{ .Statement = .{ .BlockStatement = for_expression.body } }, env);
+                            _ = try self.eval(Node{ .Expression = .{ .BlockExpression = for_expression.body } }, env);
                         }
 
                         return Object.Null;
