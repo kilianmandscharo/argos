@@ -130,6 +130,12 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
             try expectExpression(Expression{ .RangeExpression = for_expression.range }, Expression{ .RangeExpression = actual.ForExpression.range });
             try expectStatement(Statement{ .BlockStatement = for_expression.body }, Statement{ .BlockStatement = actual.ForExpression.body });
         },
+        .ArrayLiteral => |array_literal| {
+            try std.testing.expectEqual(array_literal.items.len, actual.ArrayLiteral.items.len);
+            for (array_literal.items, 0..) |item, i| {
+                try expectExpression(item.*, actual.ArrayLiteral.items[i].*);
+            }
+        },
         else => try std.testing.expectEqual(expected, actual),
     };
 }
@@ -1558,6 +1564,84 @@ test "function call" {
 
     const test_cases = [_]TestCase{
         .{
+            .description = "function call one line no trailing comma",
+            .input =
+            \\test(1, 2)
+            ,
+            .expected_expression = Expression{
+                .CallExpression = CallExpression{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = try list(*const Expression, arena.allocator(), &.{
+                        &Expression{ .IntegerLiteral = 1 },
+                        &Expression{ .IntegerLiteral = 2 },
+                    }),
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "function call one line with trailing comma",
+            .input =
+            \\test(1, 2,)
+            ,
+            .expected_expression = Expression{
+                .CallExpression = CallExpression{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = try list(*const Expression, arena.allocator(), &.{
+                        &Expression{ .IntegerLiteral = 1 },
+                        &Expression{ .IntegerLiteral = 2 },
+                    }),
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "function call multiline no trailing comma",
+            .input =
+            \\test(
+            \\    1, 
+            \\    2
+            \\)
+            ,
+            .expected_expression = Expression{
+                .CallExpression = CallExpression{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = try list(*const Expression, arena.allocator(), &.{
+                        &Expression{ .IntegerLiteral = 1 },
+                        &Expression{ .IntegerLiteral = 2 },
+                    }),
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "function call multiline with trailing comma",
+            .input =
+            \\test(
+            \\    1, 
+            \\    2,
+            \\)
+            ,
+            .expected_expression = Expression{
+                .CallExpression = CallExpression{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = try list(*const Expression, arena.allocator(), &.{
+                        &Expression{ .IntegerLiteral = 1 },
+                        &Expression{ .IntegerLiteral = 2 },
+                    }),
+                },
+            },
+            .expected_error = null,
+        },
+        .{
             .description = "iife",
             .input =
             \\fnc test(a, b) {
@@ -1652,6 +1736,146 @@ test "function call" {
     };
 
     try runTests(TestCase, "parse function call", &test_cases, run);
+}
+
+test "array literal" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected_expression: Expression,
+        expected_error: ?ParserError,
+    };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const expression = try getExpression(arena, test_case.input);
+            return expectExpression(test_case.expected_expression, expression.*);
+        }
+    }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "integer array one line no trailing comma",
+            .input =
+            \\[1, 2, 3, 4, 5]
+            ,
+            .expected_expression = Expression{
+                .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{
+                    &Expression{
+                        .IntegerLiteral = 1,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 2,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 3,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 4,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 5,
+                    },
+                }),
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "integer array one line with trailing comma",
+            .input =
+            \\[1, 2, 3, 4, 5,]
+            ,
+            .expected_expression = Expression{
+                .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{
+                    &Expression{
+                        .IntegerLiteral = 1,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 2,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 3,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 4,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 5,
+                    },
+                }),
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "integer array multi line no trailing comma",
+            .input =
+            \\[
+            \\    1, 
+            \\    2, 
+            \\    3, 
+            \\    4, 
+            \\    5
+            \\]
+            ,
+            .expected_expression = Expression{
+                .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{
+                    &Expression{
+                        .IntegerLiteral = 1,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 2,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 3,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 4,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 5,
+                    },
+                }),
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "integer array multi line with trailing comma",
+            .input =
+            \\[
+            \\    1, 
+            \\    2, 
+            \\    3, 
+            \\    4, 
+            \\    5,
+            \\]
+            ,
+            .expected_expression = Expression{
+                .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{
+                    &Expression{
+                        .IntegerLiteral = 1,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 2,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 3,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 4,
+                    },
+                    &Expression{
+                        .IntegerLiteral = 5,
+                    },
+                }),
+            },
+            .expected_error = null,
+        },
+    };
+
+    try runTests(TestCase, "parse array literal", &test_cases, run);
 }
 
 test "parse program" {

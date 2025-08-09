@@ -72,6 +72,7 @@ pub const Expression = union(enum) {
     IfExpression: IfExpression,
     RangeExpression: RangeExpression,
     ForExpression: ForExpression,
+    ArrayLiteral: std.ArrayListUnmanaged(*const Expression),
 
     pub fn format(
         self: @This(),
@@ -489,6 +490,13 @@ pub const Parser = struct {
                     },
                 };
             },
+            .LBracket => {
+                try self.advance();
+                const items = try self.parseExpressionList(.RBracket);
+                return Expression{
+                    .ArrayLiteral = items,
+                };
+            },
             else => {
                 std.debug.print("unknown token type: {any}\n", .{self.cur_token.type});
                 return ParserError.UnknownTokenType;
@@ -519,25 +527,9 @@ pub const Parser = struct {
             },
             TokenType.LParen => {
                 try self.advance();
-
-                var args: std.ArrayListUnmanaged(*const Expression) = .{};
-                while (!self.currentTokenIs(TokenType.RParen)) {
-                    if (self.currentTokenIs(TokenType.Eof)) {
-                        return ParserError.ReachedEndOfFile;
-                    }
-
-                    try args.append(self.arena, try self.parseExpression(Precedence.Lowest));
-
-                    if (!self.peekTokenIs(TokenType.RParen)) {
-                        try self.advanceAndExpect(TokenType.Comma);
-                    }
-
-                    try self.advance();
-                }
-
+                const args = try self.parseExpressionList(TokenType.RParen);
                 const left_owned = try self.arena.create(Expression);
                 left_owned.* = left;
-
                 return Expression{ .CallExpression = .{ .function = left_owned, .args = args } };
             },
             TokenType.DotDot => {
@@ -570,6 +562,44 @@ pub const Parser = struct {
         }
 
         return left_owned;
+    }
+
+    fn parseExpressionList(self: *Parser, delimiter: TokenType) !std.ArrayListUnmanaged(*const Expression) {
+        var items: std.ArrayListUnmanaged(*const Expression) = .{};
+
+        while (!self.currentTokenIs(delimiter)) {
+            if (self.currentTokenIs(TokenType.Eof)) {
+                return ParserError.ReachedEndOfFile;
+            }
+
+            try self.chopNewlines();
+
+            if (self.currentTokenIs(delimiter)) {
+                return items;
+            }
+
+            try items.append(self.arena, try self.parseExpression(Precedence.Lowest));
+
+            if (self.peekTokenIs(.NewLine)) {
+                try self.advance();
+                try self.chopNewlines();
+                if (self.currentTokenIs(delimiter)) {
+                    return items;
+                }
+            }
+
+            if (!self.peekTokenIs(delimiter)) {
+                try self.advanceAndExpect(TokenType.Comma);
+            }
+
+            try self.advance();
+        }
+
+        return items;
+    }
+
+    fn chopNewlines(self: *Parser) !void {
+        while (self.currentTokenIs(.NewLine)) try self.advance();
     }
 
     fn currentTokenIs(self: *Parser, token_type: TokenType) bool {
