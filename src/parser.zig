@@ -5,29 +5,6 @@ const Token = lexer_module.Token;
 const TokenType = lexer_module.TokenType;
 const Lexer = lexer_module.Lexer;
 
-pub const Statement = union(enum) {
-    ReturnStatement: ReturnStatement,
-    ExpressionStatement: ExpressionStatement,
-
-    pub fn format(
-        self: @This(),
-        writer: anytype,
-    ) !void {
-        switch (self) {
-            .ReturnStatement => |v| try writer.print("return {f}", .{v.expression}),
-            .ExpressionStatement => |v| try writer.print("{f}", .{v.expression}),
-        }
-    }
-};
-
-pub const ReturnStatement = struct {
-    expression: *const Expression,
-};
-
-pub const ExpressionStatement = struct {
-    expression: *const Expression,
-};
-
 pub const Expression = union(enum) {
     Identifier: []const u8,
     StringLiteral: []const u8,
@@ -44,6 +21,7 @@ pub const Expression = union(enum) {
     ArrayLiteral: std.ArrayListUnmanaged(*const Expression),
     BlockExpression: BlockExpression,
     AssignmentExpression: AssignmentExpression,
+    ReturnExpression: *const Expression,
 
     pub fn format(
         self: @This(),
@@ -98,6 +76,7 @@ pub const Expression = union(enum) {
             },
             .BlockExpression => |v| try v.format(writer),
             .AssignmentExpression => |v| try writer.print("({s} = {f})", .{ v.identifier, v.expression }),
+            .ReturnExpression => |v| try writer.print("(return {f})", .{v}),
         }
     }
 };
@@ -175,7 +154,7 @@ pub const ForExpression = struct {
 };
 
 pub const BlockExpression = struct {
-    statements: std.ArrayListUnmanaged(Statement),
+    expressions: std.ArrayListUnmanaged(*const Expression),
     is_one_liner: bool,
 
     pub fn format(
@@ -183,12 +162,12 @@ pub const BlockExpression = struct {
         writer: *std.Io.Writer,
     ) std.Io.Writer.Error!void {
         var separator: []const u8 = if (self.is_one_liner) " " else "\n";
-        if (self.statements.items.len == 0) separator = "";
+        if (self.expressions.items.len == 0) separator = "";
         const ident = if (self.is_one_liner) "" else "    ";
         try writer.print("{{{s}", .{separator});
-        for (self.statements.items, 0..) |statement, i| {
-            try writer.print("{s}{f}", .{ ident, statement });
-            if (!self.is_one_liner and i < self.statements.items.len - 1) {
+        for (self.expressions.items, 0..) |expression, i| {
+            try writer.print("{s}{f}", .{ ident, expression });
+            if (!self.is_one_liner and i < self.expressions.items.len - 1) {
                 try writer.print("\n", .{});
             }
         }
@@ -244,7 +223,7 @@ pub const Parser = struct {
     fn advance(self: *Parser) !void {
         self.cur_token = self.peek_token;
         self.peek_token = try self.lexer.next();
-        // std.debug.print("cur token: {f}\n", .{self.cur_token});
+        std.debug.print("cur token: {f}\n", .{self.cur_token});
     }
 
     fn getAndAdvance(self: *Parser) !Token {
@@ -275,11 +254,12 @@ pub const Parser = struct {
         try self.advance();
     }
 
-    pub fn parseProgram(self: *Parser) !std.ArrayListUnmanaged(Statement) {
-        var list: std.ArrayListUnmanaged(Statement) = .{};
+    pub fn parseProgram(self: *Parser) !std.ArrayListUnmanaged(*const Expression) {
+        var list: std.ArrayListUnmanaged(*const Expression) = .{};
         while (self.cur_token.type != TokenType.Eof) {
-            const statement = try self.parseStatement();
-            try list.append(self.arena, statement);
+            const expression = try self.parseExpression(.Lowest);
+            try self.advance();
+            try list.append(self.arena, expression);
             while (!self.currentTokenIs(.Eof)) {
                 if (self.currentTokenIs(.NewLine)) {
                     try self.advance();
@@ -291,10 +271,10 @@ pub const Parser = struct {
         return list;
     }
 
-    pub fn printProgram(program: std.ArrayList(Statement), arena: std.mem.Allocator) ![]const u8 {
+    pub fn printProgram(program: std.ArrayList(*const Expression), arena: std.mem.Allocator) ![]const u8 {
         var buffer = std.ArrayList(u8).init(arena);
-        for (program.items, 0..) |statement, i| {
-            try std.fmt.format(buffer.writer(), "{f}", .{statement});
+        for (program.items, 0..) |expression, i| {
+            try std.fmt.format(buffer.writer(), "{f}", .{expression});
             if (i < program.items.len - 1) {
                 try buffer.append('\n');
             }
@@ -302,30 +282,8 @@ pub const Parser = struct {
         return buffer.items;
     }
 
-    fn parseStatement(self: *Parser) anyerror!Statement {
-        return switch (self.cur_token.type) {
-            .Return => try self.parseReturnStatement(),
-            else => try self.parseExpressionStatement(),
-        };
-    }
-
-    fn parseExpressionStatement(self: *Parser) !Statement {
-        const expression = try self.parseExpression(.Lowest);
-        const statement = Statement{ .ExpressionStatement = .{ .expression = expression } };
-        try self.advance();
-        return statement;
-    }
-
-    fn parseReturnStatement(self: *Parser) !Statement {
-        try self.advance();
-        const expression = try self.parseExpression(Precedence.Lowest);
-        const statement = Statement{ .ReturnStatement = .{ .expression = expression } };
-        try self.advance();
-        return statement;
-    }
-
     fn parseBlockExpression(self: *Parser, is_one_liner: bool) !BlockExpression {
-        var statements: std.ArrayListUnmanaged(Statement) = .{};
+        var expressions: std.ArrayListUnmanaged(*const Expression) = .{};
         while (!self.currentTokenIs(TokenType.RBrace)) {
             if (self.currentTokenIs(TokenType.Eof)) {
                 return ParserError.ReachedEndOfFile;
@@ -336,7 +294,9 @@ pub const Parser = struct {
                 continue;
             }
 
-            try statements.append(self.arena, try self.parseStatement());
+            try expressions.append(self.arena, try self.parseExpression(.Lowest));
+            std.debug.print("HERE: {f}\n", .{self.cur_token});
+            try self.advance();
 
             if (!is_one_liner) {
                 try self.expectAndAdvance(.NewLine);
@@ -345,7 +305,7 @@ pub const Parser = struct {
             }
         }
         return BlockExpression{
-            .statements = statements,
+            .expressions = expressions,
             .is_one_liner = is_one_liner,
         };
     }
@@ -486,6 +446,11 @@ pub const Parser = struct {
                 try self.advance();
 
                 return Expression{ .BlockExpression = block_expression };
+            },
+            .Return => {
+                try self.advance();
+                const expression = try self.parseExpression(.Lowest);
+                return Expression{ .ReturnExpression = expression };
             },
             else => {
                 std.debug.print("unknown token type: {any}\n", .{self.cur_token.type});
