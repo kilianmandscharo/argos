@@ -126,11 +126,6 @@ pub const Evaluator = struct {
                     .ExpressionStatement => |expression_statement| {
                         return try self.eval(Node{ .Expression = expression_statement.expression.* }, env);
                     },
-                    .AssignmentStatement => |assignment| {
-                        const val = try self.eval(Node{ .Expression = assignment.expression.* }, env);
-                        try env.set(assignment.identifier, val);
-                        return val;
-                    },
                     .ReturnStatement => |return_statement| {
                         const value = try self.eval(Node{ .Expression = return_statement.expression.* }, env);
                         const object_id = try self.object_store.add(value);
@@ -251,6 +246,11 @@ pub const Evaluator = struct {
                         }
 
                         return Object.Null;
+                    },
+                    .AssignmentExpression => |assignment| {
+                        const val = try self.eval(Node{ .Expression = assignment.expression.* }, env);
+                        try env.set(assignment.identifier, val);
+                        return val;
                     },
                     else => {
                         self.printError("unknown expression: {s}\n", .{@tagName(expression)});

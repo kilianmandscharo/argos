@@ -6,7 +6,6 @@ const TokenType = lexer_module.TokenType;
 const Lexer = lexer_module.Lexer;
 
 pub const Statement = union(enum) {
-    AssignmentStatement: AssignmentStatement,
     ReturnStatement: ReturnStatement,
     ExpressionStatement: ExpressionStatement,
 
@@ -15,16 +14,10 @@ pub const Statement = union(enum) {
         writer: anytype,
     ) !void {
         switch (self) {
-            .AssignmentStatement => |v| try writer.print("{s} = {f}", .{ v.identifier, v.expression }),
             .ReturnStatement => |v| try writer.print("return {f}", .{v.expression}),
             .ExpressionStatement => |v| try writer.print("{f}", .{v.expression}),
         }
     }
-};
-
-pub const AssignmentStatement = struct {
-    identifier: []const u8,
-    expression: *const Expression,
 };
 
 pub const ReturnStatement = struct {
@@ -50,6 +43,7 @@ pub const Expression = union(enum) {
     ForExpression: ForExpression,
     ArrayLiteral: std.ArrayListUnmanaged(*const Expression),
     BlockExpression: BlockExpression,
+    AssignmentExpression: AssignmentExpression,
 
     pub fn format(
         self: @This(),
@@ -103,6 +97,7 @@ pub const Expression = union(enum) {
                 try writer.print("array format not implemented", .{});
             },
             .BlockExpression => |v| try v.format(writer),
+            .AssignmentExpression => |v| try writer.print("({s} = {f})", .{ v.identifier, v.expression }),
         }
     }
 };
@@ -117,6 +112,7 @@ pub const Operator = enum {
     Eq,
     NotEq,
     Bang,
+    Assign,
 
     pub fn format(
         self: @This(),
@@ -132,6 +128,7 @@ pub const Operator = enum {
             Operator.Eq => try writer.print("==", .{}),
             Operator.NotEq => try writer.print("!=", .{}),
             Operator.Bang => try writer.print("!", .{}),
+            Operator.Assign => try writer.print("=", .{}),
         }
     }
 };
@@ -197,6 +194,11 @@ pub const BlockExpression = struct {
         }
         try writer.print("{s}}}", .{separator});
     }
+};
+
+pub const AssignmentExpression = struct {
+    identifier: []const u8,
+    expression: *const Expression,
 };
 
 const Precedence = enum(u8) {
@@ -302,12 +304,6 @@ pub const Parser = struct {
 
     fn parseStatement(self: *Parser) anyerror!Statement {
         return switch (self.cur_token.type) {
-            .Identifier => {
-                if (self.peek_token.type == .Assign) {
-                    return try self.parseAssignmentStatement();
-                }
-                return try self.parseExpressionStatement();
-            },
             .Return => try self.parseReturnStatement(),
             else => try self.parseExpressionStatement(),
         };
@@ -324,15 +320,6 @@ pub const Parser = struct {
         try self.advance();
         const expression = try self.parseExpression(Precedence.Lowest);
         const statement = Statement{ .ReturnStatement = .{ .expression = expression } };
-        try self.advance();
-        return statement;
-    }
-
-    fn parseAssignmentStatement(self: *Parser) !Statement {
-        const identifier = try self.getAndAdvance();
-        try self.expectAndAdvance(TokenType.Assign);
-        const expression = try self.parseExpression(Precedence.Lowest);
-        const statement = Statement{ .AssignmentStatement = AssignmentStatement{ .identifier = identifier.literal, .expression = expression } };
         try self.advance();
         return statement;
     }
@@ -542,6 +529,19 @@ pub const Parser = struct {
                 left_owned.* = left;
                 return Expression{ .RangeExpression = .{ .left = left_owned, .right = right } };
             },
+            TokenType.Assign => {
+                try self.advance();
+                const expression = try self.parseExpression(.Lowest);
+                if (left == .Identifier) {
+                    return Expression{
+                        .AssignmentExpression = AssignmentExpression{
+                            .identifier = left.Identifier,
+                            .expression = expression,
+                        },
+                    };
+                }
+                return error.ExpectedIdentifier;
+            },
             else => ParserError.NoInfixFunctionFound,
         };
     }
@@ -634,6 +634,7 @@ pub const Parser = struct {
             TokenType.Asterisk => Precedence.Product,
             TokenType.LParen => Precedence.Call,
             TokenType.LBracket => Precedence.Index,
+            TokenType.Assign => Precedence.Index,
             else => Precedence.Lowest,
         };
     }
@@ -649,6 +650,7 @@ pub const Parser = struct {
             TokenType.Eq => Operator.Eq,
             TokenType.NotEq => Operator.NotEq,
             TokenType.Bang => Operator.Bang,
+            TokenType.Assign => Operator.Assign,
             else => {
                 std.debug.print("unknown operator: {any}\n", .{self.cur_token.type});
                 return ParserError.NoOperatorFound;
