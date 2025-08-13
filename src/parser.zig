@@ -223,7 +223,7 @@ pub const Parser = struct {
     fn advance(self: *Parser) !void {
         self.cur_token = self.peek_token;
         self.peek_token = try self.lexer.next();
-        std.debug.print("cur token: {f}\n", .{self.cur_token});
+        // std.debug.print("cur token: {f}\n", .{self.cur_token});
     }
 
     fn getAndAdvance(self: *Parser) !Token {
@@ -282,32 +282,55 @@ pub const Parser = struct {
         return buffer.items;
     }
 
-    fn parseBlockExpression(self: *Parser, is_one_liner: bool) !BlockExpression {
-        var expressions: std.ArrayListUnmanaged(*const Expression) = .{};
-        while (!self.currentTokenIs(TokenType.RBrace)) {
-            if (self.currentTokenIs(TokenType.Eof)) {
-                return ParserError.ReachedEndOfFile;
-            }
+    fn parseExpressionList(self: *Parser) !struct {
+        items: std.ArrayListUnmanaged(*const Expression),
+        delimiter: TokenType,
+        is_one_liner: bool,
+    } {
+        const stopToken: TokenType = switch (self.cur_token.type) {
+            .LBrace => .RBrace,
+            .LBracket => .RBracket,
+            .LParen => .RParen,
+            else => return error.UnknownEnclosingToken,
+        };
 
-            if (self.currentTokenIs(.NewLine)) {
+        try self.advance();
+
+        var delimiter: TokenType = .NewLine;
+        var items: std.ArrayListUnmanaged(*const Expression) = .{};
+        const is_one_liner = !self.currentTokenIs(.NewLine);
+
+        while (!self.currentTokenIs(stopToken)) {
+            if (self.currentTokenIs(TokenType.Eof)) return ParserError.ReachedEndOfFile;
+
+            try self.chopNewlines();
+
+            if (self.currentTokenIs(stopToken)) break;
+
+            try items.append(self.arena, try self.parseExpression(Precedence.Lowest));
+
+            if (self.peekTokenIs(.Comma)) delimiter = .Comma;
+
+            if (delimiter == .Comma) {
                 try self.advance();
+                if (self.currentTokenIs(stopToken)) break;
+
+                const token_type = self.cur_token.type;
+                try self.advance();
+                try self.chopNewlines();
+                if (!self.currentTokenIs(stopToken) and token_type != .Comma) {
+                    return error.ExpectedComma;
+                }
+
+                if (self.currentTokenIs(stopToken)) break;
+
                 continue;
             }
 
-            try expressions.append(self.arena, try self.parseExpression(.Lowest));
-            std.debug.print("HERE: {f}\n", .{self.cur_token});
             try self.advance();
-
-            if (!is_one_liner) {
-                try self.expectAndAdvance(.NewLine);
-            } else if (self.currentTokenIs(.NewLine)) {
-                return ParserError.UnexpectedTokenType;
-            }
         }
-        return BlockExpression{
-            .expressions = expressions,
-            .is_one_liner = is_one_liner,
-        };
+
+        return .{ .items = items, .delimiter = delimiter, .is_one_liner = is_one_liner };
     }
 
     fn parsePrefixExpression(self: *Parser) !Expression {
@@ -356,14 +379,20 @@ pub const Parser = struct {
                 try self.advanceAndExpect(TokenType.LBrace);
                 if (self.peekTokenIs(.NewLine)) {
                     is_one_liner = false;
-                    try self.advance();
                 }
-                try self.advance();
 
-                const body = try self.parseBlockExpression(is_one_liner);
+                const result = try self.parseExpressionList();
 
                 return Expression{
-                    .FunctionLiteral = FunctionLiteral{ .name = name, .params = params, .body = body, .is_one_liner = is_one_liner },
+                    .FunctionLiteral = FunctionLiteral{
+                        .name = name,
+                        .params = params,
+                        .body = BlockExpression{
+                            .expressions = result.items,
+                            .is_one_liner = result.is_one_liner,
+                        },
+                        .is_one_liner = is_one_liner,
+                    },
                 };
             },
             .If => {
@@ -376,13 +405,21 @@ pub const Parser = struct {
                 try self.advanceAndExpect(TokenType.LBrace);
                 if (self.peekTokenIs(.NewLine)) {
                     is_one_liner = false;
-                    try self.advance();
                 }
-                try self.advance();
 
-                const body = try self.parseBlockExpression(is_one_liner);
+                const result = try self.parseExpressionList();
 
-                var if_expression = Expression{ .IfExpression = .{ .condition = condition, .body = body, .alternative = null, .is_one_liner = is_one_liner } };
+                var if_expression = Expression{
+                    .IfExpression = .{
+                        .condition = condition,
+                        .body = BlockExpression{
+                            .expressions = result.items,
+                            .is_one_liner = result.is_one_liner,
+                        },
+                        .alternative = null,
+                        .is_one_liner = is_one_liner,
+                    },
+                };
 
                 try self.advance();
 
@@ -394,12 +431,14 @@ pub const Parser = struct {
                 }
 
                 try self.advanceAndExpect(.LBrace);
-                try self.advance();
 
-                if_expression.IfExpression.alternative = try self.parseBlockExpression(is_one_liner);
+                const alternative = try self.parseExpressionList();
+                if_expression.IfExpression.alternative = BlockExpression{
+                    .expressions = alternative.items,
+                    .is_one_liner = alternative.is_one_liner,
+                };
                 return if_expression;
             },
-            // TODO: implement one liner for expression
             .For => {
                 try self.advance();
 
@@ -416,36 +455,38 @@ pub const Parser = struct {
                     return error.ExpectedRange;
                 }
 
-                try self.advance();
-                try self.expectAndAdvance(.LBrace);
-                const body = try self.parseBlockExpression(false);
+                try self.advanceAndExpect(.LBrace);
+
+                const body = try self.parseExpressionList();
 
                 return Expression{
                     .ForExpression = ForExpression{
                         .variable = variable.Identifier,
                         .range = range.RangeExpression,
-                        .body = body,
+                        .body = BlockExpression{
+                            .expressions = body.items,
+                            .is_one_liner = body.is_one_liner,
+                        },
                     },
                 };
             },
             .LBracket => {
-                try self.advance();
-                const items = try self.parseExpressionList(.RBracket);
+                const result = try self.parseExpressionList();
                 return Expression{
-                    .ArrayLiteral = items,
+                    .ArrayLiteral = result.items,
                 };
             },
             .LBrace => {
-                try self.advance();
-
-                const block_expression = if (self.currentTokenIs(.NewLine))
-                    try self.parseBlockExpression(false)
-                else
-                    try self.parseBlockExpression(true);
+                const block_expression = try self.parseExpressionList();
 
                 try self.advance();
 
-                return Expression{ .BlockExpression = block_expression };
+                return Expression{
+                    .BlockExpression = BlockExpression{
+                        .expressions = block_expression.items,
+                        .is_one_liner = block_expression.is_one_liner,
+                    },
+                };
             },
             .Return => {
                 try self.advance();
@@ -481,11 +522,10 @@ pub const Parser = struct {
                 return Expression{ .InfixExpression = infix_expression };
             },
             TokenType.LParen => {
-                try self.advance();
-                const args = try self.parseExpressionList(TokenType.RParen);
+                const result = try self.parseExpressionList();
                 const left_owned = try self.arena.create(Expression);
                 left_owned.* = left;
-                return Expression{ .CallExpression = .{ .function = left_owned, .args = args } };
+                return Expression{ .CallExpression = .{ .function = left_owned, .args = result.items } };
             },
             TokenType.DotDot => {
                 try self.advance();
@@ -530,40 +570,6 @@ pub const Parser = struct {
         }
 
         return left_owned;
-    }
-
-    fn parseExpressionList(self: *Parser, delimiter: TokenType) !std.ArrayListUnmanaged(*const Expression) {
-        var items: std.ArrayListUnmanaged(*const Expression) = .{};
-
-        while (!self.currentTokenIs(delimiter)) {
-            if (self.currentTokenIs(TokenType.Eof)) {
-                return ParserError.ReachedEndOfFile;
-            }
-
-            try self.chopNewlines();
-
-            if (self.currentTokenIs(delimiter)) {
-                return items;
-            }
-
-            try items.append(self.arena, try self.parseExpression(Precedence.Lowest));
-
-            if (self.peekTokenIs(.NewLine)) {
-                try self.advance();
-                try self.chopNewlines();
-                if (self.currentTokenIs(delimiter)) {
-                    return items;
-                }
-            }
-
-            if (!self.peekTokenIs(delimiter)) {
-                try self.advanceAndExpect(TokenType.Comma);
-            }
-
-            try self.advance();
-        }
-
-        return items;
     }
 
     fn chopNewlines(self: *Parser) !void {

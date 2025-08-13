@@ -38,10 +38,11 @@ pub fn runTests(comptime T: type, name: []const u8, test_cases: []const T, run: 
 
         const result = run(arena.allocator(), test_case);
 
-        if (result) |_| {
+        if (result) {
             printSuccess("  > ", .{});
             success += 1;
-        } else |_| {
+        } else |err| {
+            printError("{any}\n", .{err});
             printError("  > ", .{});
             failed += 1;
         }
