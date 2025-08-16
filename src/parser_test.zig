@@ -15,6 +15,7 @@ const ForExpression = parser_module.ForExpression;
 const CallExpression = parser_module.CallExpression;
 const FunctionLiteral = parser_module.FunctionLiteral;
 const BlockExpression = parser_module.BlockExpression;
+const IndexExpression = parser_module.IndexExpression;
 const AssignmentExpression = parser_module.AssignmentExpression;
 const Operator = parser_module.Operator;
 const ParserError = parser_module.ParserError;
@@ -93,6 +94,12 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
                 try expectExpression(item.*, actual.ArrayLiteral.items[i].*);
             }
         },
+        .TableLiteral => |table_literal| {
+            try std.testing.expectEqual(table_literal.items.len, actual.TableLiteral.items.len);
+            for (table_literal.items, 0..) |item, i| {
+                try expectExpression(item.*, actual.TableLiteral.items[i].*);
+            }
+        },
         .BlockExpression => |block_expression| {
             try std.testing.expectEqual(block_expression.expressions.items.len, actual.BlockExpression.expressions.items.len);
             try std.testing.expectEqual(block_expression.is_one_liner, actual.BlockExpression.is_one_liner);
@@ -106,6 +113,10 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
         },
         .ReturnExpression => |return_expression| {
             try expectExpression(return_expression.*, actual.ReturnExpression.*);
+        },
+        .IndexExpression => |index_expression| {
+            try expectExpression(index_expression.left.*, actual.IndexExpression.left.*);
+            try expectExpression(index_expression.index_expression.*, actual.IndexExpression.index_expression.*);
         },
         else => try std.testing.expectEqual(expected, actual),
     };
@@ -1566,6 +1577,30 @@ test "array literal" {
 
     const test_cases = [_]TestCase{
         .{
+            .description = "integer array one line no trailing comma no element",
+            .input =
+            \\[]
+            ,
+            .expected_expression = Expression{
+                .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{}),
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "integer array one line no trailing comma one element",
+            .input =
+            \\[1]
+            ,
+            .expected_expression = Expression{
+                .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{
+                    &Expression{
+                        .IntegerLiteral = 1,
+                    },
+                }),
+            },
+            .expected_error = null,
+        },
+        .{
             .description = "integer array one line no trailing comma",
             .input =
             \\[1, 2, 3, 4, 5]
@@ -1978,4 +2013,225 @@ test "assignment expression" {
     };
 
     try runTests(TestCase, "parse assignment expression", &test_cases, run);
+}
+
+test "table expression" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected_expression: Expression,
+        expected_error: ?ParserError,
+    };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const expression = try getExpression(arena, test_case.input);
+            return expectExpression(test_case.expected_expression, expression.*);
+        }
+    }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "table expression one line",
+            .input =
+            \\{ x = 1, }
+            ,
+            .expected_expression = Expression{
+                .TableLiteral = try list(*const Expression, arena.allocator(), &.{
+                    &Expression{
+                        .AssignmentExpression = AssignmentExpression{
+                            .identifier = "x",
+                            .expression = &Expression{
+                                .IntegerLiteral = 1,
+                            },
+                        },
+                    },
+                }),
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "table expression multi line",
+            .input =
+            \\{
+            \\     x = 1,
+            \\     y = 2,
+            \\     z = x * y,
+            \\}
+            ,
+            .expected_expression = Expression{
+                .TableLiteral = try list(*const Expression, arena.allocator(), &.{
+                    &Expression{
+                        .AssignmentExpression = AssignmentExpression{
+                            .identifier = "x",
+                            .expression = &Expression{
+                                .IntegerLiteral = 1,
+                            },
+                        },
+                    },
+                    &Expression{
+                        .AssignmentExpression = AssignmentExpression{
+                            .identifier = "y",
+                            .expression = &Expression{
+                                .IntegerLiteral = 2,
+                            },
+                        },
+                    },
+                    &Expression{
+                        .AssignmentExpression = AssignmentExpression{
+                            .identifier = "z",
+                            .expression = &Expression{
+                                .InfixExpression = InfixExpression{
+                                    .operator = .Asterisk,
+                                    .left = &Expression{
+                                        .Identifier = "x",
+                                    },
+                                    .right = &Expression{
+                                        .Identifier = "y",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                }),
+            },
+            .expected_error = null,
+        },
+    };
+
+    try runTests(TestCase, "parse table expression", &test_cases, run);
+}
+
+test "index expression" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected_expression: Expression,
+        expected_error: ?ParserError,
+    };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const expression = try getExpression(arena, test_case.input);
+            return expectExpression(test_case.expected_expression, expression.*);
+        }
+    }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "index array literal",
+            .input =
+            \\[1, 2, 3][0]
+            ,
+            .expected_expression = Expression{
+                .IndexExpression = IndexExpression{
+                    .left = &Expression{
+                        .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{
+                            &Expression{
+                                .IntegerLiteral = 1,
+                            },
+                            &Expression{
+                                .IntegerLiteral = 2,
+                            },
+                            &Expression{
+                                .IntegerLiteral = 3,
+                            },
+                        }),
+                    },
+                    .index_expression = &Expression{
+                        .IntegerLiteral = 0,
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "index array identifier",
+            .input =
+            \\array[0]
+            ,
+            .expected_expression = Expression{
+                .IndexExpression = IndexExpression{
+                    .left = &Expression{
+                        .Identifier = "array",
+                    },
+                    .index_expression = &Expression{
+                        .IntegerLiteral = 0,
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "index table literal",
+            .input =
+            \\{
+            \\    a = 6,
+            \\    b = 6,
+            \\    c = 6,
+            \\}["c"]
+            ,
+            .expected_expression = Expression{
+                .IndexExpression = IndexExpression{
+                    .left = &Expression{
+                        .TableLiteral = try list(*const Expression, arena.allocator(), &.{
+                            &Expression{
+                                .AssignmentExpression = AssignmentExpression{
+                                    .identifier = "a",
+                                    .expression = &Expression{
+                                        .IntegerLiteral = 6,
+                                    },
+                                },
+                            },
+                            &Expression{
+                                .AssignmentExpression = AssignmentExpression{
+                                    .identifier = "b",
+                                    .expression = &Expression{
+                                        .IntegerLiteral = 6,
+                                    },
+                                },
+                            },
+                            &Expression{
+                                .AssignmentExpression = AssignmentExpression{
+                                    .identifier = "c",
+                                    .expression = &Expression{
+                                        .IntegerLiteral = 6,
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                    .index_expression = &Expression{
+                        .StringLiteral = "c",
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+        .{
+            .description = "index table identifier",
+            .input =
+            \\table["foo"]
+            ,
+            .expected_expression = Expression{
+                .IndexExpression = IndexExpression{
+                    .left = &Expression{
+                        .Identifier = "table",
+                    },
+                    .index_expression = &Expression{
+                        .StringLiteral = "foo",
+                    },
+                },
+            },
+            .expected_error = null,
+        },
+    };
+
+    try runTests(TestCase, "parse index expression", &test_cases, run);
 }
