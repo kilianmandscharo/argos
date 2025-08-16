@@ -31,6 +31,11 @@ pub const Expression = union(enum) {
         writer: anytype,
     ) !void {
         switch (self) {
+            .Program => |v| {
+                for (v.items) |item| {
+                    try item.format(writer);
+                }
+            },
             .Identifier => |v| try writer.print("{s}", .{v}),
             .StringLiteral => |v| try writer.print("\"{s}\"", .{v}),
             .FloatLiteral => |v| try writer.print("{}", .{v}),
@@ -222,7 +227,7 @@ pub const Parser = struct {
 
     pub fn init(lexer: *Lexer, arena: std.mem.Allocator) !Parser {
         const cur_token = try lexer.next();
-        if (cur_token.type == TokenType.Eof) {
+        if (cur_token.type == .Eof) {
             return ParserError.NoTokens;
         }
         const peek_token = try lexer.next();
@@ -236,7 +241,7 @@ pub const Parser = struct {
 
     pub fn parseProgram(self: *Parser) !Expression {
         var list: std.ArrayListUnmanaged(*const Expression) = .{};
-        while (self.cur_token.type != TokenType.Eof) {
+        while (self.cur_token.type != .Eof) {
             const expression = try self.parseExpression(.Lowest);
             try self.advance();
             try list.append(self.arena, expression);
@@ -259,7 +264,7 @@ pub const Parser = struct {
             left_owned.* = left;
         }
 
-        while (self.peek_token.type != TokenType.NewLine and @intFromEnum(precedence) < @intFromEnum(self.getPeekPrecedence())) {
+        while (self.peek_token.type != .NewLine and @intFromEnum(precedence) < @intFromEnum(self.getPeekPrecedence())) {
             try self.advance();
             left = self.parseRight(left) catch |err| {
                 switch (err) {
@@ -332,20 +337,20 @@ pub const Parser = struct {
             name = self.cur_token.literal;
         }
 
-        try self.advanceAndExpect(TokenType.LParen);
+        try self.advanceAndExpect(.LParen);
         try self.advance();
 
         var params: std.ArrayListUnmanaged([]const u8) = .{};
-        while (!self.currentTokenIs(TokenType.RParen)) {
-            if (self.currentTokenIs(TokenType.Eof)) {
+        while (!self.currentTokenIs(.RParen)) {
+            if (self.currentTokenIs(.Eof)) {
                 return ParserError.ReachedEndOfFile;
             }
 
-            try self.expectToken(TokenType.Identifier);
+            try self.expectToken(.Identifier);
             try params.append(self.arena, self.cur_token.literal);
 
-            if (!self.peekTokenIs(TokenType.RParen)) {
-                try self.advanceAndExpect(TokenType.Comma);
+            if (!self.peekTokenIs(.RParen)) {
+                try self.advanceAndExpect(.Comma);
             }
 
             try self.advance();
@@ -353,7 +358,7 @@ pub const Parser = struct {
 
         var is_one_liner = true;
 
-        try self.advanceAndExpect(TokenType.LBrace);
+        try self.advanceAndExpect(.LBrace);
         if (self.peekTokenIs(.NewLine)) {
             is_one_liner = false;
         }
@@ -380,7 +385,7 @@ pub const Parser = struct {
 
         var is_one_liner = true;
 
-        try self.advanceAndExpect(TokenType.LBrace);
+        try self.advanceAndExpect(.LBrace);
         if (self.peekTokenIs(.NewLine)) {
             is_one_liner = false;
         }
@@ -484,11 +489,11 @@ pub const Parser = struct {
 
     fn parseRight(self: *Parser, left: Expression) !Expression {
         return switch (self.cur_token.type) {
-            TokenType.Plus, TokenType.Minus, TokenType.Slash, TokenType.Asterisk, TokenType.Eq, TokenType.NotEq, TokenType.Lt, TokenType.Gt => self.parseInfix(left),
-            TokenType.LParen => self.parseCall(left),
-            TokenType.DotDot => self.parseRange(left),
-            TokenType.Assign => self.parseAssign(left),
-            TokenType.LBracket => self.parseIndex(left),
+            .Plus, .Minus, .Slash, .Asterisk, .Eq, .NotEq, .Lt, .Gt => self.parseInfix(left),
+            .LParen => self.parseCall(left),
+            .DotDot => self.parseRange(left),
+            .Assign => self.parseAssign(left),
+            .LBracket => self.parseIndex(left),
             else => ParserError.NoInfixFunctionFound,
         };
     }
@@ -578,7 +583,7 @@ pub const Parser = struct {
         const is_one_liner = !self.currentTokenIs(.NewLine);
 
         while (!self.currentTokenIs(stopToken)) {
-            if (self.currentTokenIs(TokenType.Eof)) return ParserError.ReachedEndOfFile;
+            if (self.currentTokenIs(.Eof)) return ParserError.ReachedEndOfFile;
 
             try self.chopNewlines();
 
@@ -677,34 +682,34 @@ pub const Parser = struct {
 
     fn getTokenPrecedence(token: *Token) Precedence {
         return switch (token.type) {
-            TokenType.DotDot => Precedence.Equals,
-            TokenType.Eq => Precedence.Equals,
-            TokenType.NotEq => Precedence.Equals,
-            TokenType.Lt => Precedence.Lessgreater,
-            TokenType.Gt => Precedence.Lessgreater,
-            TokenType.Plus => Precedence.Sum,
-            TokenType.Minus => Precedence.Sum,
-            TokenType.Slash => Precedence.Product,
-            TokenType.Asterisk => Precedence.Product,
-            TokenType.LParen => Precedence.Call,
-            TokenType.LBracket => Precedence.Index,
-            TokenType.Assign => Precedence.Index,
-            else => Precedence.Lowest,
+            .DotDot => .Equals,
+            .Eq => .Equals,
+            .NotEq => .Equals,
+            .Lt => .Lessgreater,
+            .Gt => .Lessgreater,
+            .Plus => .Sum,
+            .Minus => .Sum,
+            .Slash => .Product,
+            .Asterisk => .Product,
+            .LParen => .Call,
+            .LBracket => .Index,
+            .Assign => .Index,
+            else => .Lowest,
         };
     }
 
     fn getCurrentOperator(self: *Parser) !Operator {
         return switch (self.cur_token.type) {
-            TokenType.Plus => Operator.Plus,
-            TokenType.Minus => Operator.Minus,
-            TokenType.Asterisk => Operator.Asterisk,
-            TokenType.Slash => Operator.Slash,
-            TokenType.Gt => Operator.Gt,
-            TokenType.Lt => Operator.Lt,
-            TokenType.Eq => Operator.Eq,
-            TokenType.NotEq => Operator.NotEq,
-            TokenType.Bang => Operator.Bang,
-            TokenType.Assign => Operator.Assign,
+            .Plus => .Plus,
+            .Minus => .Minus,
+            .Asterisk => .Asterisk,
+            .Slash => .Slash,
+            .Gt => .Gt,
+            .Lt => .Lt,
+            .Eq => .Eq,
+            .NotEq => .NotEq,
+            .Bang => .Bang,
+            .Assign => .Assign,
             else => {
                 std.debug.print("unknown operator: {any}\n", .{self.cur_token.type});
                 return ParserError.NoOperatorFound;

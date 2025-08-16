@@ -13,7 +13,6 @@ const Parser = parser_module.Parser;
 
 const evaluator_module = @import("evaluator.zig");
 const Evaluator = evaluator_module.Evaluator;
-const Node = evaluator_module.Node;
 const Environment = evaluator_module.Environment;
 
 pub fn main() !void {
@@ -46,6 +45,6 @@ pub fn main() !void {
     var evaluator = Evaluator.init(gpaAllocator);
     defer evaluator.deinit();
 
-    const result = try evaluator.eval(Node{ .Program = program }, env);
+    const result = try evaluator.eval(&program, env);
     std.debug.print("Result: {f}\n", .{result});
 }

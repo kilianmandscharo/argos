@@ -3,7 +3,6 @@ const std = @import("std");
 // TODO: clean up the error handling in the evaluator
 
 const parser_module = @import("parser.zig");
-const Statement = parser_module.Statement;
 const Expression = parser_module.Expression;
 const Operator = parser_module.Operator;
 const BlockExpression = parser_module.BlockExpression;
@@ -11,12 +10,6 @@ const BlockExpression = parser_module.BlockExpression;
 const EvaluatorError = error{
     RuntimeError,
     IdentifierNotFound,
-};
-
-pub const Node = union(enum) {
-    Program: std.ArrayListUnmanaged(Statement),
-    Expression: Expression,
-    Statement: Statement,
 };
 
 pub const Object = union(enum) {
@@ -115,148 +108,135 @@ pub const Evaluator = struct {
         self.object_store.deinit();
     }
 
-    pub fn eval(self: *Evaluator, node: Node, env: *Environment) !Object {
-        return switch (node) {
+    pub fn eval(self: *Evaluator, expression: *const Expression, env: *Environment) !Object {
+        return switch (expression.*) {
             .Program => |statements| {
                 return try self.evalProgram(statements, env);
             },
-            .Statement => |statement| {
-                // std.debug.print("eval statement {f}\n", .{statement});
-                switch (statement) {
-                    .ExpressionStatement => |expression_statement| {
-                        return try self.eval(Node{ .Expression = expression_statement.expression.* }, env);
-                    },
-                    .ReturnStatement => |return_statement| {
-                        const value = try self.eval(Node{ .Expression = return_statement.expression.* }, env);
-                        const object_id = try self.object_store.add(value);
-                        const return_val = Object{ .ReturnValue = object_id };
-                        return return_val;
-                    },
-                }
+            .ReturnExpression => |return_expression| {
+                const value = try self.eval(return_expression, env);
+                const object_id = try self.object_store.add(value);
+                const return_val = Object{ .ReturnValue = object_id };
+                return return_val;
             },
-            .Expression => |expression| {
-                // std.debug.print("eval expression {f}\n", .{expression});
-                switch (expression) {
-                    .BlockExpression => |block| {
-                        var result: Object = Object.Null;
-                        for (block.statements.items) |item| {
-                            result = try self.eval(Node{ .Statement = item }, env);
-                            switch (result) {
-                                .ReturnValue => |idx| return self.object_store.get(idx),
-                                else => {},
-                            }
+            .BlockExpression => |block| {
+                var result: Object = Object.Null;
+                for (block.expressions.items) |item| {
+                    result = try self.eval(item, env);
+                    switch (result) {
+                        .ReturnValue => |idx| return self.object_store.get(idx),
+                        else => {},
+                    }
+                }
+                return result;
+            },
+            .Identifier => |identifier| {
+                const val = try env.get(identifier);
+                return val;
+            },
+            .IntegerLiteral => |integer| return Object{ .Integer = integer },
+            .FloatLiteral => |float| return Object{ .Float = float },
+            .BooleanLiteral => |boolean| return Object{ .Boolean = boolean },
+            .InfixExpression => |infix| {
+                const left = try self.eval(infix.left, env);
+                const right = try self.eval(infix.right, env);
+                return self.evalInfixExpression(left, right, infix.operator);
+            },
+            .PrefixExpression => |prefix| {
+                const right = try self.eval(prefix.expression, env);
+                return self.evalPrefixExpression(right, prefix.operator);
+            },
+            .FunctionLiteral => |function| {
+                const object = Object{ .Function = .{ .params = function.params, .body = function.body, .env = env } };
+                try env.set(function.name, object);
+                return object;
+            },
+            .CallExpression => |call_expression| {
+                const func = try self.eval(call_expression.function, env);
+
+                var args: std.ArrayListUnmanaged(Object) = .{};
+                defer args.deinit(self.gpa);
+
+                for (call_expression.args.items) |arg| {
+                    const evaluated = try self.eval(arg, env);
+                    try args.append(self.gpa, evaluated);
+                }
+
+                switch (func) {
+                    .Function => |function| {
+                        const extended_env = try Environment.initEnclosed(self.gpa, function.env);
+                        for (0..function.params.items.len) |i| {
+                            const name = function.params.items[i];
+                            const arg = args.items[i];
+                            try extended_env.set(name, arg);
                         }
+
+                        const result = self.eval(&Expression{ .BlockExpression = function.body }, extended_env);
+
+                        // TODO: clean up extended_env
+
                         return result;
                     },
-                    .Identifier => |identifier| {
-                        const val = try env.get(identifier);
-                        return val;
-                    },
-                    .IntegerLiteral => |integer| return Object{ .Integer = integer },
-                    .FloatLiteral => |float| return Object{ .Float = float },
-                    .BooleanLiteral => |boolean| return Object{ .Boolean = boolean },
-                    .InfixExpression => |infix| {
-                        const left = try self.eval(Node{ .Expression = infix.left.* }, env);
-                        const right = try self.eval(Node{ .Expression = infix.right.* }, env);
-                        return self.evalInfixExpression(left, right, infix.operator);
-                    },
-                    .PrefixExpression => |prefix| {
-                        const right = try self.eval(Node{ .Expression = prefix.expression.* }, env);
-                        return self.evalPrefixExpression(right, prefix.operator);
-                    },
-                    .FunctionLiteral => |function| {
-                        const object = Object{ .Function = .{ .params = function.params, .body = function.body, .env = env } };
-                        try env.set(function.name, object);
-                        return object;
-                    },
-                    .CallExpression => |call_expression| {
-                        const func = try self.eval(Node{ .Expression = call_expression.function.* }, env);
-
-                        var args: std.ArrayListUnmanaged(Object) = .{};
-                        defer args.deinit(self.gpa);
-
-                        for (call_expression.args.items) |arg| {
-                            const evaluated = try self.eval(Node{ .Expression = arg.* }, env);
-                            try args.append(self.gpa, evaluated);
-                        }
-
-                        switch (func) {
-                            .Function => |function| {
-                                const extended_env = try Environment.initEnclosed(self.gpa, function.env);
-                                for (0..function.params.items.len) |i| {
-                                    const name = function.params.items[i];
-                                    const arg = args.items[i];
-                                    try extended_env.set(name, arg);
-                                }
-
-                                const result = self.eval(Node{ .Expression = Expression{ .BlockExpression = function.body } }, extended_env);
-
-                                // TODO: clean up extended_env
-
-                                return result;
-                            },
-                            else => {
-                                self.printError("can't call a non-function: {f}\n", .{expression});
-                                return EvaluatorError.RuntimeError;
-                            },
-                        }
-                    },
-                    .IfExpression => |if_expression| {
-                        const condition = try self.eval(Node{ .Expression = if_expression.condition.* }, env);
-                        switch (condition) {
-                            .Boolean => |val| {
-                                if (val) {
-                                    return try self.eval(Node{ .Expression = .{ .BlockExpression = if_expression.body } }, env);
-                                }
-                                if (if_expression.alternative) |alternative| {
-                                    return try self.eval(Node{ .Expression = .{ .BlockExpression = alternative } }, env);
-                                }
-                                return Object.Null;
-                            },
-                            else => {
-                                self.printError("found non-Boolean value in if condition: {s}\n", .{@tagName(condition)});
-                                return EvaluatorError.RuntimeError;
-                            },
-                        }
-                    },
-                    .ForExpression => |for_expression| {
-                        const lower = try self.eval(Node{ .Expression = for_expression.range.left.* }, env);
-                        if (lower != .Integer) {
-                            self.printError("found non-Integer value in range expression: {s}\n", .{@tagName(lower)});
-                            return EvaluatorError.RuntimeError;
-                        }
-                        if (lower.Integer < 0) {
-                            self.printError("range value can't be negative\n", .{});
-                            return EvaluatorError.RuntimeError;
-                        }
-
-                        const upper = try self.eval(Node{ .Expression = for_expression.range.right.* }, env);
-                        if (upper != .Integer) {
-                            self.printError("found non-Integer value in range expression: {s}\n", .{@tagName(lower)});
-                            return EvaluatorError.RuntimeError;
-                        }
-                        if (upper.Integer < 0) {
-                            self.printError("range value can't be negative\n", .{});
-                            return EvaluatorError.RuntimeError;
-                        }
-
-                        for (@intCast(lower.Integer)..@intCast(upper.Integer)) |i| {
-                            try env.set(for_expression.variable, Object{ .Integer = @intCast(i) });
-                            _ = try self.eval(Node{ .Expression = .{ .BlockExpression = for_expression.body } }, env);
-                        }
-
-                        return Object.Null;
-                    },
-                    .AssignmentExpression => |assignment| {
-                        const val = try self.eval(Node{ .Expression = assignment.expression.* }, env);
-                        try env.set(assignment.identifier, val);
-                        return val;
-                    },
                     else => {
-                        self.printError("unknown expression: {s}\n", .{@tagName(expression)});
+                        self.printError("can't call a non-function: {f}\n", .{expression});
                         return EvaluatorError.RuntimeError;
                     },
                 }
+            },
+            .IfExpression => |if_expression| {
+                const condition = try self.eval(if_expression.condition, env);
+                switch (condition) {
+                    .Boolean => |val| {
+                        if (val) {
+                            return try self.eval(&Expression{ .BlockExpression = if_expression.body }, env);
+                        }
+                        if (if_expression.alternative) |alternative| {
+                            return try self.eval(&Expression{ .BlockExpression = alternative }, env);
+                        }
+                        return Object.Null;
+                    },
+                    else => {
+                        self.printError("found non-Boolean value in if condition: {s}\n", .{@tagName(condition)});
+                        return EvaluatorError.RuntimeError;
+                    },
+                }
+            },
+            .ForExpression => |for_expression| {
+                const lower = try self.eval(for_expression.range.left, env);
+                if (lower != .Integer) {
+                    self.printError("found non-Integer value in range expression: {s}\n", .{@tagName(lower)});
+                    return EvaluatorError.RuntimeError;
+                }
+                if (lower.Integer < 0) {
+                    self.printError("range value can't be negative\n", .{});
+                    return EvaluatorError.RuntimeError;
+                }
+
+                const upper = try self.eval(for_expression.range.right, env);
+                if (upper != .Integer) {
+                    self.printError("found non-Integer value in range expression: {s}\n", .{@tagName(lower)});
+                    return EvaluatorError.RuntimeError;
+                }
+                if (upper.Integer < 0) {
+                    self.printError("range value can't be negative\n", .{});
+                    return EvaluatorError.RuntimeError;
+                }
+
+                for (@intCast(lower.Integer)..@intCast(upper.Integer)) |i| {
+                    try env.set(for_expression.variable, Object{ .Integer = @intCast(i) });
+                    _ = try self.eval(&Expression{ .BlockExpression = for_expression.body }, env);
+                }
+
+                return Object.Null;
+            },
+            .AssignmentExpression => |assignment| {
+                const val = try self.eval(assignment.expression, env);
+                try env.set(assignment.identifier, val);
+                return val;
+            },
+            else => {
+                self.printError("unknown expression: {s}\n", .{@tagName(expression.*)});
+                return EvaluatorError.RuntimeError;
             },
         };
     }
@@ -266,10 +246,10 @@ pub const Evaluator = struct {
         std.debug.print(format, args);
     }
 
-    fn evalProgram(self: *Evaluator, statements: std.ArrayListUnmanaged(Statement), env: *Environment) anyerror!Object {
+    fn evalProgram(self: *Evaluator, expressions: std.ArrayListUnmanaged(*const Expression), env: *Environment) anyerror!Object {
         var result: Object = Object.Null;
-        for (statements.items) |statement| {
-            result = try self.eval(Node{ .Statement = statement }, env);
+        for (expressions.items) |expression| {
+            result = try self.eval(expression, env);
             switch (result) {
                 .ReturnValue => return result,
                 else => {},
@@ -300,7 +280,7 @@ pub const Evaluator = struct {
                 }
             },
             else => {
-                self.printError("invalid operator in prefix position: {any}\n", .{Operator});
+                self.printError("invalid operator in prefix position: {any}\n", .{operator});
                 return EvaluatorError.RuntimeError;
             },
         }

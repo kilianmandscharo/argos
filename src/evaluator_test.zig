@@ -9,8 +9,10 @@ const Parser = parser_module.Parser;
 const evaluator_module = @import("evaluator.zig");
 const Evaluator = evaluator_module.Evaluator;
 const Object = evaluator_module.Object;
-const Node = evaluator_module.Node;
 const Environment = evaluator_module.Environment;
+
+const test_utils = @import("test_utils.zig");
+const runTests = test_utils.runTests;
 
 pub fn getResult(arena: std.mem.Allocator, input: []const u8) !Object {
     var lexer = try Lexer.init(arena, input);
@@ -20,81 +22,53 @@ pub fn getResult(arena: std.mem.Allocator, input: []const u8) !Object {
     const env = try Environment.init(arena);
 
     var evaluator = Evaluator.init(arena);
-    const result = try evaluator.eval(Node{ .Program = program }, env);
+    const result = try evaluator.eval(&program, env);
 
     return result;
 }
 
-// TODO: Use new testing utils 
+const ObjectTestCase = struct {
+    input: []const u8,
+    description: []const u8,
+    expected_output: Object,
+};
+
+const runObjectTest = struct {
+    fn runTest(arena: std.mem.Allocator, test_case: ObjectTestCase) anyerror!void {
+        const result = try getResult(arena, test_case.input);
+        try std.testing.expectEqual(test_case.expected_output, result);
+    }
+}.runTest;
 
 test "infix expressions" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const TestCase = struct {
-        input: []const u8,
-        expected_output: Object,
+    const test_cases = [_]ObjectTestCase{
+        .{ .description = "integer addition", .input = "5 + 5", .expected_output = Object{ .Integer = 10 } },
+        .{ .description = "integer subtraction positive", .input = "5 - 3", .expected_output = Object{ .Integer = 2 } },
+        .{ .description = "integer subtraction negative", .input = "5 - 11", .expected_output = Object{ .Integer = -6 } },
+        .{ .description = "integer multiplication", .input = "5 * 3", .expected_output = Object{ .Integer = 15 } },
+        .{ .description = "integer multiplication first multiplier negative", .input = "-5 * 3", .expected_output = Object{ .Integer = -15 } },
+        .{ .description = "integer multiplication second multiplier negative", .input = "5 * -3", .expected_output = Object{ .Integer = -15 } },
+        .{ .description = "integer division", .input = "10 / 5", .expected_output = Object{ .Float = 2 } },
+        .{ .description = "float multiplication", .input = "1.1 * 4.3", .expected_output = Object{ .Float = 4.73 } },
+        .{ .description = "float subtraction positive", .input = "5.4 - 1.0", .expected_output = Object{ .Float = 4.4 } },
+        .{ .description = "float subtraction negative", .input = "1.1 - 4.2", .expected_output = Object{ .Float = -3.1 } },
+        .{ .description = "float division", .input = "1.0 / 4.0", .expected_output = Object{ .Float = 0.25 } },
+        .{ .description = "equals bool true and true", .input = "true == true", .expected_output = Object{ .Boolean = true } },
+        .{ .description = "equals bool true and false", .input = "true == false", .expected_output = Object{ .Boolean = false } },
+        .{ .description = "equals bool false and false", .input = "false == false", .expected_output = Object{ .Boolean = true } },
+        .{ .description = "equals integer false", .input = "5 == 6", .expected_output = Object{ .Boolean = false } },
+        .{ .description = "equals integer true", .input = "5 == 5", .expected_output = Object{ .Boolean = true } },
+        .{ .description = "equals float true", .input = "1.1 == 1.1", .expected_output = Object{ .Boolean = true } },
+        .{ .description = "equals float false", .input = "1.1 == 2.1", .expected_output = Object{ .Boolean = false } },
+        .{ .description = "less than integer", .input = "7 < 6", .expected_output = Object{ .Boolean = false } },
+        .{ .description = "larger than float", .input = "5.1 > 1.3", .expected_output = Object{ .Boolean = true } },
     };
 
-    const test_cases = [_]TestCase{
-        .{ .input = "5 + 5", .expected_output = Object{ .Integer = 10 } },
-        .{ .input = "5 - 3", .expected_output = Object{ .Integer = 2 } },
-        .{ .input = "5 - 11", .expected_output = Object{ .Integer = -6 } },
-        .{ .input = "5 * 3", .expected_output = Object{ .Integer = 15 } },
-        .{ .input = "-5 * 3", .expected_output = Object{ .Integer = -15 } },
-        .{ .input = "5 * -3", .expected_output = Object{ .Integer = -15 } },
-        .{ .input = "10 / 5", .expected_output = Object{ .Float = 2 } },
-        .{ .input = "1.1 * 4.3", .expected_output = Object{ .Float = 4.73 } },
-        .{ .input = "1.1 - 4.2", .expected_output = Object{ .Float = -3.1 } },
-        .{ .input = "5.4 - 1.0", .expected_output = Object{ .Float = 4.4 } },
-        .{ .input = "1.0 / 4.0", .expected_output = Object{ .Float = 0.25 } },
-        .{ .input = "true == true", .expected_output = Object{ .Boolean = true } },
-        .{ .input = "true == false", .expected_output = Object{ .Boolean = false } },
-        .{ .input = "false == false", .expected_output = Object{ .Boolean = true } },
-        .{ .input = "5 == 6", .expected_output = Object{ .Boolean = false } },
-        .{ .input = "1.1 == 1.1", .expected_output = Object{ .Boolean = true } },
-        .{ .input = "7 < 6", .expected_output = Object{ .Boolean = false } },
-        .{ .input = "5.1 > 1.3", .expected_output = Object{ .Boolean = true } },
-    };
-
-    for (test_cases) |test_case| {
-        const result = try getResult(arena.allocator(), test_case.input);
-        std.testing.expectEqual(test_case.expected_output, result) catch |err| {
-            std.debug.print("expected {any}, got {any}\n", .{ test_case.expected_output, result });
-            return err;
-        };
-    }
+    try runTests(ObjectTestCase, "evaluate infix expression", &test_cases, runObjectTest);
 }
-
-// test "infix expressions error cases" {
-//     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-//     defer arena.deinit();
-//
-//     const TestCase = struct {
-//         input: []const u8,
-//         expected_error: []const u8,
-//     };
-//
-//     const test_cases = [_]TestCase{
-//         .{ .input = "5 + true", .expected_error = "type mismatch: Integer <> Boolean" },
-//         .{ .input = "5.7 + true", .expected_error = "type mismatch: Float <> Boolean" },
-//         .{ .input = "false * 30", .expected_error = "type mismatch: Boolean <> Integer" },
-//         .{ .input = "true * false", .expected_error = "invalid operator '*' for type Boolean" },
-//     };
-//
-//     for (test_cases) |test_case| {
-//         const result = try getResult(arena.allocator(), test_case.input);
-//         switch (result) {
-//             .Error => |v| {
-//                 std.testing.expectEqualStrings(test_case.expected_error, v) catch |err| {
-//                     std.debug.print("expected {s}, got {s}\n", .{ test_case.expected_error, v });
-//                     return err;
-//                 };
-//             },
-//             else => return error.ExpectedError,
-//         }
-//     }
-// }
 
 test "multi line calculation" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -116,16 +90,9 @@ test "multi line calculation" {
 }
 
 test "function calls" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const TestCase = struct {
-        input: []const u8,
-        expected_output: Object,
-    };
-
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ObjectTestCase{
         .{
+            .description = "function call with return",
             .input =
             \\fnc square(a) {
             \\    return a * a
@@ -136,6 +103,7 @@ test "function calls" {
             .expected_output = Object{ .Integer = 121 },
         },
         .{
+            .description = "function call without return",
             .input =
             \\fnc square(a) {
             \\    a * a
@@ -146,6 +114,7 @@ test "function calls" {
             .expected_output = Object{ .Integer = 121 },
         },
         .{
+            .description = "function call outer scope variable",
             .input =
             \\x = 10
             \\
@@ -158,6 +127,7 @@ test "function calls" {
             .expected_output = Object{ .Integer = 15 },
         },
         .{
+            .description = "function call outer scope variable multi line",
             .input =
             \\x = 10
             \\
@@ -171,6 +141,7 @@ test "function calls" {
             .expected_output = Object{ .Integer = 22 },
         },
         .{
+            .description = "function call shadow outer scope variable",
             .input =
             \\a = 10
             \\
@@ -183,6 +154,7 @@ test "function calls" {
             .expected_output = Object{ .Integer = 17 },
         },
         .{
+            .description = "function call with callback function",
             .input =
             \\fnc callback(x) {
             \\    x * x
@@ -197,6 +169,7 @@ test "function calls" {
             .expected_output = Object{ .Integer = 225 },
         },
         .{
+            .description = "function call with inner function declaration",
             .input =
             \\fnc test() {
             \\    fnc inner(y) { y * y }
@@ -207,6 +180,7 @@ test "function calls" {
             .expected_output = Object{ .Integer = 100 },
         },
         .{
+            .description = "function call higher order function",
             .input =
             \\fnc adder(val) {
             \\    fnc inner(x) { val + x }
@@ -219,26 +193,11 @@ test "function calls" {
         },
     };
 
-    for (test_cases) |test_case| {
-        const result = try getResult(arena.allocator(), test_case.input);
-        std.testing.expectEqual(test_case.expected_output, result) catch |err| {
-            std.debug.print("expected {any}, got {any}\n", .{ test_case.expected_output, result });
-            return err;
-        };
-    }
+    try runTests(ObjectTestCase, "evaluate function calls", &test_cases, runObjectTest);
 }
 
 test "if expressions" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_output: Object,
-    };
-
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ObjectTestCase{
         .{
             .description = "single line no else true",
             .input =
@@ -323,29 +282,11 @@ test "if expressions" {
         },
     };
 
-    std.debug.print("==if expressions start==\n", .{});
-    for (test_cases) |test_case| {
-        std.debug.print("  {s}\n", .{test_case.description});
-        const result = try getResult(arena.allocator(), test_case.input);
-        std.testing.expectEqual(test_case.expected_output, result) catch |err| {
-            std.debug.print("expected {any}, got {any}\n", .{ test_case.expected_output, result });
-            return err;
-        };
-    }
-    std.debug.print("==if expressions end==\n", .{});
+    try runTests(ObjectTestCase, "evaluate if expressions", &test_cases, runObjectTest);
 }
 
 test "for expressions" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_output: Object,
-    };
-
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ObjectTestCase{
         .{
             .description = "simple for loop",
             .input =
@@ -386,14 +327,5 @@ test "for expressions" {
         },
     };
 
-    std.debug.print("==for expressions start==\n", .{});
-    for (test_cases) |test_case| {
-        std.debug.print("  {s}\n", .{test_case.description});
-        const result = try getResult(arena.allocator(), test_case.input);
-        std.testing.expectEqual(test_case.expected_output, result) catch |err| {
-            std.debug.print("expected {any}, got {any}\n", .{ test_case.expected_output, result });
-            return err;
-        };
-    }
-    std.debug.print("==for expressions end==\n", .{});
+    try runTests(ObjectTestCase, "evaluate for expressions", &test_cases, runObjectTest);
 }
