@@ -26,7 +26,21 @@ const list = test_utils.list;
 
 // TODO: add error cases
 
-fn getProgram(arena: std.mem.Allocator, content: []const u8) !std.ArrayListUnmanaged(*const Expression) {
+const ExpressionTestCase = struct {
+    description: []const u8,
+    input: []const u8,
+    expected_expression: Expression,
+    expected_error: ?ParserError = null,
+};
+
+const runExpressionTest = struct {
+    fn runTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) anyerror!void {
+        const expression = try getExpression(arena, test_case.input);
+        return expectExpression(test_case.expected_expression, expression.*);
+    }
+}.runTest;
+
+fn getProgram(arena: std.mem.Allocator, content: []const u8) !Expression {
     var lexer = try Lexer.init(arena, content);
     var parser = try Parser.init(&lexer, arena);
     return try parser.parseProgram();
@@ -34,8 +48,11 @@ fn getProgram(arena: std.mem.Allocator, content: []const u8) !std.ArrayListUnman
 
 fn getExpression(arena: std.mem.Allocator, content: []const u8) !*const Expression {
     const program = try getProgram(arena, content);
-    try expect(program.items.len >= 1);
-    return program.items[0];
+    if (program != .Program) {
+        return error.ExpectedProgram;
+    }
+    try expect(program.Program.items.len >= 1);
+    return program.Program.items[0];
 }
 
 fn expectExpression(expected: Expression, actual: Expression) !void {
@@ -47,6 +64,12 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
     try std.testing.expectEqual(expectedTag, actualTag);
 
     return switch (expected) {
+        .Program => |program| {
+            try std.testing.expectEqual(program.items.len, actual.Program.items.len);
+            for (program.items, 0..) |item, i| {
+                try expectExpression(item.*, actual.Program.items[i].*);
+            }
+        },
         .Identifier => |ident| try std.testing.expectEqualStrings(ident, actual.Identifier),
         .StringLiteral => |string| try std.testing.expectEqualStrings(string, actual.StringLiteral),
         .PrefixExpression => |prefix_expression| {
@@ -123,20 +146,7 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
 }
 
 test "parse expressions" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "should parse identifier",
             .input =
@@ -181,24 +191,11 @@ test "parse expressions" {
         },
     };
 
-    try runTests(TestCase, "parse expressions", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse expressions", &test_cases, runExpressionTest);
 }
 
 test "should parse prefix expression" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "should parse bang operator with true",
             .input = "!true",
@@ -273,24 +270,11 @@ test "should parse prefix expression" {
         },
     };
 
-    try runTests(TestCase, "parse prefix expression", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse prefix expression", &test_cases, runExpressionTest);
 }
 
 test "should parse infix expression" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "should parse integer addition",
             .input = "1 + 1",
@@ -447,28 +431,14 @@ test "should parse infix expression" {
         },
     };
 
-    try runTests(TestCase, "parse infix expression", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse infix expression", &test_cases, runExpressionTest);
 }
 
 test "function declaration" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "empty function one line",
             .input =
@@ -485,7 +455,6 @@ test "function declaration" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "empty function multi lines",
@@ -505,7 +474,6 @@ test "function declaration" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "one liner with params",
@@ -540,7 +508,6 @@ test "function declaration" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "multiple lines with params",
@@ -577,7 +544,6 @@ test "function declaration" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "multi liner with params and multiple statements",
@@ -648,7 +614,6 @@ test "function declaration" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "multi liner with gaps",
@@ -722,7 +687,6 @@ test "function declaration" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "one liner without return",
@@ -755,7 +719,6 @@ test "function declaration" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "multi liner without return",
@@ -824,32 +787,17 @@ test "function declaration" {
                     },
                 },
             },
-            .expected_error = null,
         },
     };
 
-    try runTests(TestCase, "parse function declaration", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse function declaration", &test_cases, runExpressionTest);
 }
 
 test "if expressions" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "single line empty no else",
             .input =
@@ -876,7 +824,6 @@ test "if expressions" {
                     .alternative = null,
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "single line empty with else",
@@ -907,7 +854,6 @@ test "if expressions" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "single line no else",
@@ -947,7 +893,6 @@ test "if expressions" {
                     .alternative = null,
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "single line with else",
@@ -1002,7 +947,6 @@ test "if expressions" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "multi line empty no else with empty line",
@@ -1032,7 +976,6 @@ test "if expressions" {
                     .alternative = null,
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "multi line empty no else",
@@ -1061,7 +1004,6 @@ test "if expressions" {
                     .alternative = null,
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "multi line empty with else",
@@ -1094,7 +1036,6 @@ test "if expressions" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "multi line no else",
@@ -1136,7 +1077,6 @@ test "if expressions" {
                     .alternative = null,
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "multi line with else",
@@ -1195,29 +1135,14 @@ test "if expressions" {
                     },
                 },
             },
-            .expected_error = null,
         },
     };
 
-    try runTests(TestCase, "parse if expression", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse if expression", &test_cases, runExpressionTest);
 }
 
 test "range expression" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "two integers",
             .input =
@@ -1233,7 +1158,6 @@ test "range expression" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "two infix expressions",
@@ -1266,7 +1190,6 @@ test "range expression" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "two function calls",
@@ -1293,32 +1216,17 @@ test "range expression" {
                     },
                 },
             },
-            .expected_error = null,
         },
     };
 
-    try runTests(TestCase, "parse range expression", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse range expression", &test_cases, runExpressionTest);
 }
 
 test "for expression" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "simple for loop",
             .input =
@@ -1360,32 +1268,17 @@ test "for expression" {
                     },
                 },
             },
-            .expected_error = null,
         },
     };
 
-    try runTests(TestCase, "parse for expression", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse for expression", &test_cases, runExpressionTest);
 }
 
 test "function call" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "function call one line no trailing comma",
             .input =
@@ -1402,7 +1295,6 @@ test "function call" {
                     }),
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "function call one line with trailing comma",
@@ -1420,7 +1312,6 @@ test "function call" {
                     }),
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "function call multiline no trailing comma",
@@ -1441,7 +1332,6 @@ test "function call" {
                     }),
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "function call multiline with trailing comma",
@@ -1462,7 +1352,6 @@ test "function call" {
                     }),
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "iife",
@@ -1507,7 +1396,6 @@ test "function call" {
                     }),
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "one liner iife",
@@ -1550,32 +1438,17 @@ test "function call" {
                     }),
                 },
             },
-            .expected_error = null,
         },
     };
 
-    try runTests(TestCase, "parse function call", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse function call", &test_cases, runExpressionTest);
 }
 
 test "array literal" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "integer array one line no trailing comma no element",
             .input =
@@ -1584,7 +1457,6 @@ test "array literal" {
             .expected_expression = Expression{
                 .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{}),
             },
-            .expected_error = null,
         },
         .{
             .description = "integer array one line no trailing comma one element",
@@ -1598,7 +1470,6 @@ test "array literal" {
                     },
                 }),
             },
-            .expected_error = null,
         },
         .{
             .description = "integer array one line no trailing comma",
@@ -1624,7 +1495,6 @@ test "array literal" {
                     },
                 }),
             },
-            .expected_error = null,
         },
         .{
             .description = "integer array one line with trailing comma",
@@ -1650,7 +1520,6 @@ test "array literal" {
                     },
                 }),
             },
-            .expected_error = null,
         },
         .{
             .description = "integer array multi line no trailing comma",
@@ -1682,7 +1551,6 @@ test "array literal" {
                     },
                 }),
             },
-            .expected_error = null,
         },
         .{
             .description = "integer array multi line with trailing comma",
@@ -1714,174 +1582,17 @@ test "array literal" {
                     },
                 }),
             },
-            .expected_error = null,
         },
     };
 
-    try runTests(TestCase, "parse array literal", &test_cases, run);
-}
-
-test "parse program" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_output: std.ArrayListUnmanaged(*const Expression),
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const program = try getProgram(arena, test_case.input);
-            try std.testing.expectEqual(test_case.expected_output.items.len, program.items.len);
-            for (test_case.expected_output.items, 0..) |expression, i| {
-                try expectExpression(expression.*, program.items[i].*);
-            }
-        }
-    }.runTest;
-
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const test_cases = [_]TestCase{
-        .{
-            .description = "fibonacci",
-            .input =
-            \\fnc fib(n) {
-            \\    a = 0
-            \\    b = 1
-            \\    for _ in 0..n {
-            \\        tmp = b
-            \\        b = a + b
-            \\        a = tmp
-            \\    }
-            \\    a
-            \\}
-            \\
-            \\fib(30)
-            ,
-            .expected_output = try list(*const Expression, arena.allocator(), &.{
-                &Expression{
-                    .FunctionLiteral = FunctionLiteral{
-                        .is_one_liner = false,
-                        .name = "fib",
-                        .params = try list([]const u8, arena.allocator(), &.{
-                            "n",
-                        }),
-                        .body = BlockExpression{
-                            .is_one_liner = false,
-                            .expressions = try list(*const Expression, arena.allocator(), &.{
-                                &Expression{
-                                    .AssignmentExpression = AssignmentExpression{
-                                        .identifier = "a",
-                                        .expression = &Expression{
-                                            .IntegerLiteral = 0,
-                                        },
-                                    },
-                                },
-                                &Expression{
-                                    .AssignmentExpression = AssignmentExpression{
-                                        .identifier = "b",
-                                        .expression = &Expression{
-                                            .IntegerLiteral = 1,
-                                        },
-                                    },
-                                },
-                                &Expression{
-                                    .ForExpression = ForExpression{
-                                        .variable = "_",
-                                        .range = RangeExpression{
-                                            .left = &Expression{
-                                                .IntegerLiteral = 0,
-                                            },
-                                            .right = &Expression{
-                                                .Identifier = "n",
-                                            },
-                                        },
-                                        .body = BlockExpression{
-                                            .is_one_liner = false,
-                                            .expressions = try list(*const Expression, arena.allocator(), &.{
-                                                &Expression{
-                                                    .AssignmentExpression = AssignmentExpression{
-                                                        .identifier = "tmp",
-                                                        .expression = &Expression{
-                                                            .Identifier = "b",
-                                                        },
-                                                    },
-                                                },
-                                                &Expression{
-                                                    .AssignmentExpression = AssignmentExpression{
-                                                        .identifier = "b",
-                                                        .expression = &Expression{
-                                                            .InfixExpression = InfixExpression{
-                                                                .operator = .Plus,
-                                                                .left = &Expression{
-                                                                    .Identifier = "a",
-                                                                },
-                                                                .right = &Expression{
-                                                                    .Identifier = "b",
-                                                                },
-                                                            },
-                                                        },
-                                                    },
-                                                },
-                                                &Expression{
-                                                    .AssignmentExpression = AssignmentExpression{
-                                                        .identifier = "a",
-                                                        .expression = &Expression{
-                                                            .Identifier = "tmp",
-                                                        },
-                                                    },
-                                                },
-                                            }),
-                                        },
-                                    },
-                                },
-                                &Expression{
-                                    .Identifier = "a",
-                                },
-                            }),
-                        },
-                    },
-                },
-                &Expression{
-                    .CallExpression = CallExpression{
-                        .function = &Expression{
-                            .Identifier = "fib",
-                        },
-                        .args = try list(*const Expression, arena.allocator(), &.{
-                            &Expression{
-                                .IntegerLiteral = 30,
-                            },
-                        }),
-                    },
-                },
-            }),
-            .expected_error = null,
-        },
-    };
-
-    try runTests(TestCase, "parse statement", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse array literal", &test_cases, runExpressionTest);
 }
 
 test "block expression" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "block expression one line",
             .input =
@@ -1902,7 +1613,6 @@ test "block expression" {
                     }),
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "block expression multi line",
@@ -1952,29 +1662,14 @@ test "block expression" {
                     }),
                 },
             },
-            .expected_error = null,
         },
     };
 
-    try runTests(TestCase, "parse block expression", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse block expression", &test_cases, runExpressionTest);
 }
 
 test "assignment expression" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "assignment expression",
             .input =
@@ -1988,7 +1683,6 @@ test "assignment expression" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "nested assignment expression",
@@ -2008,32 +1702,17 @@ test "assignment expression" {
                     },
                 },
             },
-            .expected_error = null,
         },
     };
 
-    try runTests(TestCase, "parse assignment expression", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse assignment expression", &test_cases, runExpressionTest);
 }
 
 test "table expression" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "table expression one line",
             .input =
@@ -2051,7 +1730,6 @@ test "table expression" {
                     },
                 }),
             },
-            .expected_error = null,
         },
         .{
             .description = "table expression multi line",
@@ -2098,32 +1776,17 @@ test "table expression" {
                     },
                 }),
             },
-            .expected_error = null,
         },
     };
 
-    try runTests(TestCase, "parse table expression", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse table expression", &test_cases, runExpressionTest);
 }
 
 test "index expression" {
-    const TestCase = struct {
-        description: []const u8,
-        input: []const u8,
-        expected_expression: Expression,
-        expected_error: ?ParserError,
-    };
-
-    const run = struct {
-        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const expression = try getExpression(arena, test_case.input);
-            return expectExpression(test_case.expected_expression, expression.*);
-        }
-    }.runTest;
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const test_cases = [_]TestCase{
+    const test_cases = [_]ExpressionTestCase{
         .{
             .description = "index array literal",
             .input =
@@ -2149,7 +1812,6 @@ test "index expression" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "index array identifier",
@@ -2166,7 +1828,6 @@ test "index expression" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "index table literal",
@@ -2212,7 +1873,6 @@ test "index expression" {
                     },
                 },
             },
-            .expected_error = null,
         },
         .{
             .description = "index table identifier",
@@ -2229,9 +1889,141 @@ test "index expression" {
                     },
                 },
             },
-            .expected_error = null,
         },
     };
 
-    try runTests(TestCase, "parse index expression", &test_cases, run);
+    try runTests(ExpressionTestCase, "parse index expression", &test_cases, runExpressionTest);
+}
+
+test "parse program" {
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) anyerror!void {
+            const program = try getProgram(arena, test_case.input);
+            return expectExpression(test_case.expected_expression, program);
+        }
+    }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "fibonacci",
+            .input =
+            \\fnc fib(n) {
+            \\    a = 0
+            \\    b = 1
+            \\    for _ in 0..n {
+            \\        tmp = b
+            \\        b = a + b
+            \\        a = tmp
+            \\    }
+            \\    a
+            \\}
+            \\
+            \\fib(30)
+            ,
+            .expected_expression = Expression{
+                .Program = try list(*const Expression, arena.allocator(), &.{
+                    &Expression{
+                        .FunctionLiteral = FunctionLiteral{
+                            .is_one_liner = false,
+                            .name = "fib",
+                            .params = try list([]const u8, arena.allocator(), &.{
+                                "n",
+                            }),
+                            .body = BlockExpression{
+                                .is_one_liner = false,
+                                .expressions = try list(*const Expression, arena.allocator(), &.{
+                                    &Expression{
+                                        .AssignmentExpression = AssignmentExpression{
+                                            .identifier = "a",
+                                            .expression = &Expression{
+                                                .IntegerLiteral = 0,
+                                            },
+                                        },
+                                    },
+                                    &Expression{
+                                        .AssignmentExpression = AssignmentExpression{
+                                            .identifier = "b",
+                                            .expression = &Expression{
+                                                .IntegerLiteral = 1,
+                                            },
+                                        },
+                                    },
+                                    &Expression{
+                                        .ForExpression = ForExpression{
+                                            .variable = "_",
+                                            .range = RangeExpression{
+                                                .left = &Expression{
+                                                    .IntegerLiteral = 0,
+                                                },
+                                                .right = &Expression{
+                                                    .Identifier = "n",
+                                                },
+                                            },
+                                            .body = BlockExpression{
+                                                .is_one_liner = false,
+                                                .expressions = try list(*const Expression, arena.allocator(), &.{
+                                                    &Expression{
+                                                        .AssignmentExpression = AssignmentExpression{
+                                                            .identifier = "tmp",
+                                                            .expression = &Expression{
+                                                                .Identifier = "b",
+                                                            },
+                                                        },
+                                                    },
+                                                    &Expression{
+                                                        .AssignmentExpression = AssignmentExpression{
+                                                            .identifier = "b",
+                                                            .expression = &Expression{
+                                                                .InfixExpression = InfixExpression{
+                                                                    .operator = .Plus,
+                                                                    .left = &Expression{
+                                                                        .Identifier = "a",
+                                                                    },
+                                                                    .right = &Expression{
+                                                                        .Identifier = "b",
+                                                                    },
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                    &Expression{
+                                                        .AssignmentExpression = AssignmentExpression{
+                                                            .identifier = "a",
+                                                            .expression = &Expression{
+                                                                .Identifier = "tmp",
+                                                            },
+                                                        },
+                                                    },
+                                                }),
+                                            },
+                                        },
+                                    },
+                                    &Expression{
+                                        .Identifier = "a",
+                                    },
+                                }),
+                            },
+                        },
+                    },
+                    &Expression{
+                        .CallExpression = CallExpression{
+                            .function = &Expression{
+                                .Identifier = "fib",
+                            },
+                            .args = try list(*const Expression, arena.allocator(), &.{
+                                &Expression{
+                                    .IntegerLiteral = 30,
+                                },
+                            }),
+                        },
+                    },
+                }),
+            },
+        },
+    };
+
+    try runTests(ExpressionTestCase, "parse program", &test_cases, run);
 }

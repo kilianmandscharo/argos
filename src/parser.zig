@@ -6,6 +6,7 @@ const TokenType = lexer_module.TokenType;
 const Lexer = lexer_module.Lexer;
 
 pub const Expression = union(enum) {
+    Program: std.ArrayListUnmanaged(*const Expression),
     Identifier: []const u8,
     StringLiteral: []const u8,
     IntegerLiteral: i64,
@@ -233,7 +234,7 @@ pub const Parser = struct {
         };
     }
 
-    pub fn parseProgram(self: *Parser) !std.ArrayListUnmanaged(*const Expression) {
+    pub fn parseProgram(self: *Parser) !Expression {
         var list: std.ArrayListUnmanaged(*const Expression) = .{};
         while (self.cur_token.type != TokenType.Eof) {
             const expression = try self.parseExpression(.Lowest);
@@ -247,7 +248,7 @@ pub const Parser = struct {
                 }
             }
         }
-        return list;
+        return Expression{ .Program = list };
     }
 
     fn parseExpression(self: *Parser, precedence: Precedence) anyerror!*Expression {
