@@ -19,6 +19,7 @@ pub const Object = union(enum) {
     Boolean: bool,
     ReturnValue: usize,
     Function: Function,
+    Array: Array,
     Null,
 
     fn getType(self: Object) []const u8 {
@@ -29,21 +30,30 @@ pub const Object = union(enum) {
             .Boolean => "Boolean",
             .ReturnValue => "ReturnValue",
             .Function => "Function",
+            .Array => "Array",
             .Null => "Null",
         };
     }
 
-    // fn deinit(self: *Object, gpa: std.mem.Allocator) void {
-    //     return switch (self.*) {
-    //         .Integer => {},
-    //         .Float => {},
-    //         .String => {},
-    //         .Boolean => {},
-    //         .ReturnValue => {},
-    //         .Function => {},
-    //         .Null => {},
-    //     };
-    // }
+    fn deinit(self: *Object, gpa: std.mem.Allocator, object_store: *ObjectStore) !void {
+        std.debug.print("deinit object {s}\n", .{self.getType()});
+        return switch (self.*) {
+            .Integer => {},
+            .Float => {},
+            .String => {},
+            .Boolean => {},
+            .ReturnValue => {},
+            .Function => {},
+            .Array => |*array| {
+                for (array.data.items) |id| {
+                    var object = try object_store.removeAndGet(id);
+                    try object.deinit(gpa, object_store);
+                }
+                array.data.deinit(gpa);
+            },
+            .Null => {},
+        };
+    }
 
     pub fn format(
         self: @This(),
@@ -56,6 +66,7 @@ pub const Object = union(enum) {
             .Boolean => |v| try writer.print("{}", .{v}),
             .ReturnValue => |v| try writer.print("{any}", .{v}),
             .Function => try writer.print("Function", .{}),
+            .Array => try writer.print("Array", .{}),
             .Null => try writer.print("Null", .{}),
         }
     }
@@ -67,45 +78,63 @@ const Function = struct {
     env: *Environment,
 };
 
+const Array = struct {
+    data: std.ArrayListUnmanaged(usize),
+    refs: usize,
+};
+
 pub const ObjectStore = struct {
     gpa: std.mem.Allocator,
-    objects: std.ArrayListUnmanaged(Object),
+    id: usize,
+    objects: std.AutoArrayHashMapUnmanaged(usize, Object),
 
     pub fn init(gpa: std.mem.Allocator) ObjectStore {
         return .{
             .gpa = gpa,
             .objects = .{},
+            .id = 1,
         };
     }
 
     pub fn deinit(self: *ObjectStore) void {
+        std.debug.print("deinit object store\n", .{});
         self.objects.deinit(self.gpa);
     }
 
     pub fn add(self: *ObjectStore, object: Object) !usize {
-        try self.objects.append(self.gpa, object);
-        return self.objects.items.len - 1;
+        const id = self.id;
+        try self.objects.put(self.gpa, id, object);
+        std.debug.print("added {s} to store with id {d}\n", .{ object.getType(), id });
+        self.id += 1;
+        return id;
     }
 
-    pub fn get(self: *ObjectStore, index: usize) Object {
-        return self.objects.items[index];
+    pub fn get(self: *ObjectStore, id: usize) !Object {
+        return self.objects.get(id) orelse error.ObjectNotFound;
+    }
+
+    pub fn remove(self: *ObjectStore, id: usize) !void {
+        self.objects.swapRemove(id);
+    }
+
+    pub fn removeAndGet(self: *ObjectStore, id: usize) !Object {
+        const entry = self.objects.fetchSwapRemove(id);
+        if (entry) |e| {
+            return e.value;
+        }
+        return error.ObjectNotFound;
     }
 };
 
 pub const Evaluator = struct {
     gpa: std.mem.Allocator,
-    object_store: ObjectStore,
+    object_store: *ObjectStore,
 
-    pub fn init(gpa: std.mem.Allocator) Evaluator {
-        const object_store = ObjectStore.init(gpa);
+    pub fn init(gpa: std.mem.Allocator, object_store: *ObjectStore) Evaluator {
         return Evaluator{
             .gpa = gpa,
             .object_store = object_store,
         };
-    }
-
-    pub fn deinit(self: *Evaluator) void {
-        self.object_store.deinit();
     }
 
     pub fn eval(self: *Evaluator, expression: *const Expression, env: *Environment) !Object {
@@ -234,11 +263,47 @@ pub const Evaluator = struct {
                 try env.set(assignment.identifier, val);
                 return val;
             },
+            .ArrayLiteral => |array| {
+                var data: std.ArrayListUnmanaged(usize) = .{};
+                for (array.items) |item| {
+                    const evaluated = try self.eval(item, env);
+                    const id = try self.object_store.add(evaluated);
+                    try data.append(self.gpa, id);
+                }
+                return Object{ .Array = Array{ .data = data, .refs = 1 } };
+            },
+            .IndexExpression => |index_expression| {
+                const evaluated = try self.eval(index_expression.left, env);
+                switch (evaluated) {
+                    .Array => |array| {
+                        const index = try self.eval(index_expression.index_expression, env);
+                        switch (index) {
+                            .Integer => |integer| {
+                                const id: usize = array.data.items[@intCast(integer)];
+                                return try self.object_store.get(id);
+                            },
+                            else => return self.runtimeError(
+                                "invalid type for index in index expression: {s}",
+                                .{index.getType()},
+                            ),
+                        }
+                    },
+                    else => return self.runtimeError(
+                        "invalid left side for index expression: {s}",
+                        .{evaluated.getType()},
+                    ),
+                }
+            },
             else => {
                 self.printError("unknown expression: {s}\n", .{@tagName(expression.*)});
                 return EvaluatorError.RuntimeError;
             },
         };
+    }
+
+    fn runtimeError(self: *Evaluator, comptime format: []const u8, args: anytype) EvaluatorError {
+        self.printError(format, args);
+        return EvaluatorError.RuntimeError;
     }
 
     fn printError(self: *Evaluator, comptime format: []const u8, args: anytype) void {
@@ -396,10 +461,20 @@ pub const Environment = struct {
         return env;
     }
 
-    pub fn deinit(self: *Environment) void {
+    pub fn deinit(self: *Environment, object_store: *ObjectStore) void {
+        std.debug.print("deinit env\n", .{});
+
         for (self.children.items) |child| {
-            child.deinit();
+            child.deinit(object_store);
         }
+
+        var object_iterator = self.store.valueIterator();
+        while (object_iterator.next()) |object| {
+            object.deinit(self.gpa, object_store) catch |err| {
+                std.debug.print("failed to deinit object: {any}\n", .{err});
+            };
+        }
+
         self.store.deinit(self.gpa);
         self.children.deinit(self.gpa);
         self.gpa.destroy(self);
