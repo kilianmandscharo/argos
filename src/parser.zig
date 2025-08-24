@@ -25,6 +25,7 @@ pub const Expression = union(enum) {
     AssignmentExpression: AssignmentExpression,
     ReturnExpression: *const Expression,
     IndexExpression: IndexExpression,
+    Statement: *const Expression,
 
     pub fn format(
         self: @This(),
@@ -85,12 +86,13 @@ pub const Expression = union(enum) {
             .TableLiteral => {
                 try writer.print("table format not implemented", .{});
             },
-            .IndexExpression => {
-                try writer.print("index expression format not implemented", .{});
+            .IndexExpression => |index_expression| {
+                try writer.print("{f}[{f}]", .{ index_expression.left, index_expression.index_expression });
             },
             .BlockExpression => |v| try v.format(writer),
             .AssignmentExpression => |v| try writer.print("({s} = {f})", .{ v.identifier, v.expression }),
             .ReturnExpression => |v| try writer.print("(return {f})", .{v}),
+            .Statement => |v| try writer.print("({f})", .{v}),
         }
     }
 };
@@ -243,8 +245,11 @@ pub const Parser = struct {
         var list: std.ArrayListUnmanaged(*const Expression) = .{};
         while (self.cur_token.type != .Eof) {
             const expression = try self.parseExpression(.Lowest);
+            const wrapper = Expression{ .Statement = expression };
+            const owned = try self.arena.create(Expression);
+            owned.* = wrapper;
             try self.advance();
-            try list.append(self.arena, expression);
+            try list.append(self.arena, owned);
             while (!self.currentTokenIs(.Eof)) {
                 if (self.currentTokenIs(.NewLine)) {
                     try self.advance();
@@ -576,9 +581,15 @@ pub const Parser = struct {
             else => return error.UnknownEnclosingToken,
         };
 
+        var delimiter: TokenType = switch (self.cur_token.type) {
+            .LBrace => .NewLine,
+            .LBracket => .Comma,
+            .LParen => .Comma,
+            else => return error.UnknownEnclosingToken,
+        };
+
         try self.advance();
 
-        var delimiter: TokenType = .NewLine;
         var items: std.ArrayListUnmanaged(*const Expression) = .{};
         const is_one_liner = !self.currentTokenIs(.NewLine);
 
@@ -610,6 +621,14 @@ pub const Parser = struct {
             }
 
             try self.advance();
+        }
+
+        if (delimiter == .NewLine) {
+            for (items.items, 0..) |item, i| {
+                const statement = try self.arena.create(Expression);
+                statement.* = Expression{ .Statement = item };
+                items.items[i] = statement;
+            }
         }
 
         return .{ .items = items, .delimiter = delimiter, .is_one_liner = is_one_liner };

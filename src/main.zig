@@ -44,5 +44,7 @@ pub fn main() !void {
 
     var evaluator = Evaluator.init(gpaAllocator);
     const result = try evaluator.eval(&program, env);
+    std.debug.print("==========\n", .{});
     std.debug.print("Result: {f}\n", .{result});
+    std.debug.print("==========\n", .{});
 }

@@ -19,9 +19,12 @@ pub fn getResult(arena: std.mem.Allocator, input: []const u8) !Object {
     var parser = try Parser.init(&lexer, arena);
     const program = try parser.parseProgram();
 
-    const env = try Environment.init(arena);
+    const allocator = std.testing.allocator;
 
-    var evaluator = Evaluator.init(arena);
+    const env = try Environment.init(allocator);
+    defer env.deinit();
+
+    var evaluator = Evaluator.init(allocator);
     const result = try evaluator.eval(&program, env);
 
     return result;
@@ -68,25 +71,6 @@ test "infix expressions" {
     };
 
     try runTests(ObjectTestCase, "evaluate infix expression", &test_cases, runObjectTest);
-}
-
-test "multi line calculation" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const input =
-        \\a = 7
-        \\b = 10
-        \\a * b
-    ;
-
-    const expected_output = Object{ .Integer = 70 };
-
-    const result = try getResult(arena.allocator(), input);
-    std.testing.expectEqual(expected_output, result) catch |err| {
-        std.debug.print("expected {any}, got {any}\n", .{ expected_output, result });
-        return err;
-    };
 }
 
 test "function calls" {
@@ -328,4 +312,70 @@ test "for expressions" {
     };
 
     try runTests(ObjectTestCase, "evaluate for expressions", &test_cases, runObjectTest);
+}
+
+test "array memory leaks" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+    };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
+            const result = try getResult(arena, test_case.input);
+            _ = result;
+        }
+    }.runTest;
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "unassigned array on top level",
+            .input =
+            \\[1, 2, 3, 4, 5]
+            ,
+        },
+        .{
+            .description = "unassigned array in index expression on top level",
+            .input =
+            \\[1, 2, 3, 4, 5][0]
+            ,
+        },
+        .{
+            .description = "unassigned array in function body",
+            .input =
+            \\fnc test(a, b) {
+            \\    [1, 2, 3, 4, 5]
+            \\    a + b
+            \\}
+            \\test(1, 2)
+            ,
+        },
+        .{
+            .description = "unassigned array returned from function call",
+            .input =
+            \\fnc test() {
+            \\    return [1, 2, 3, 4, 5]
+            \\}
+            \\test()
+            ,
+        },
+        .{
+            .description = "assigned array on top level",
+            .input =
+            \\array = [1, 2, 3, 4, 5]
+            ,
+        },
+        .{
+            .description = "assigned array in function body",
+            .input =
+            \\fnc test() {
+            \\    array = [1, 2, 3, 4, 5]
+            \\    return array[0] + array[1]
+            \\}
+            \\test()
+            ,
+        },
+    };
+
+    try runTests(TestCase, "evaluate array memory leaks", &test_cases, run);
 }

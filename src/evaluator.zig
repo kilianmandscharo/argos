@@ -36,7 +36,7 @@ pub const Object = union(enum) {
         };
     }
 
-    fn deinit(self: *Object, gpa: std.mem.Allocator) !void {
+    fn deinit(self: *Object, gpa: std.mem.Allocator) void {
         std.debug.print("deinit object {s}\n", .{self.getType()});
         return switch (self.*) {
             .Integer => {},
@@ -48,6 +48,41 @@ pub const Object = union(enum) {
             .Array => |array| {
                 array.data.deinit(gpa);
                 gpa.destroy(array);
+            },
+            .Null => {},
+        };
+    }
+
+    fn decRef(self: *Object, gpa: std.mem.Allocator) void {
+        return switch (self.*) {
+            .Integer => {},
+            .Float => {},
+            .String => {},
+            .Boolean => {},
+            .ReturnValue => {},
+            .Function => {},
+            .Array => |array| {
+                std.debug.print("dec array refCount, new count: {d}\n", .{array.ref_count - 1});
+                array.ref_count -= 1;
+                if (array.ref_count == 0) {
+                    self.deinit(gpa);
+                }
+            },
+            .Null => {},
+        };
+    }
+
+    fn incRef(self: *Object) void {
+        return switch (self.*) {
+            .Integer => {},
+            .Float => {},
+            .String => {},
+            .Boolean => {},
+            .ReturnValue => {},
+            .Function => {},
+            .Array => |array| {
+                std.debug.print("inc array refCount, new count: {d}\n", .{array.ref_count + 1});
+                array.ref_count += 1;
             },
             .Null => {},
         };
@@ -78,7 +113,7 @@ const Function = struct {
 
 const Array = struct {
     data: std.ArrayListUnmanaged(Object),
-    refs: usize,
+    ref_count: usize,
 };
 
 pub const Evaluator = struct {
@@ -91,9 +126,15 @@ pub const Evaluator = struct {
     }
 
     pub fn eval(self: *Evaluator, expression: *const Expression, env: *Environment) !Object {
+        // std.debug.print("eval {s} {f}\n", .{@tagName(expression.*), expression});
         return switch (expression.*) {
             .Program => |statements| {
                 return try self.evalProgram(statements, env);
+            },
+            .Statement => |statement| {
+                var value = try self.eval(statement, env);
+                value.decRef(self.gpa);
+                return value;
             },
             .ReturnExpression => |return_expression| {
                 const value = try self.eval(return_expression, env);
@@ -106,7 +147,11 @@ pub const Evaluator = struct {
                 for (block.expressions.items) |item| {
                     result = try self.eval(item, env);
                     switch (result) {
-                        .ReturnValue => |obj| return obj.*,
+                        .ReturnValue => |obj| {
+                            const retVal = obj.*;
+                            self.gpa.destroy(obj);
+                            return retVal;
+                        },
                         else => {},
                     }
                 }
@@ -153,7 +198,7 @@ pub const Evaluator = struct {
                             try extended_env.set(name, arg);
                         }
 
-                        const result = self.eval(&Expression{ .BlockExpression = function.body }, extended_env);
+                        const result = try self.eval(&Expression{ .BlockExpression = function.body }, extended_env);
 
                         // TODO: clean up extended_env
 
@@ -212,8 +257,9 @@ pub const Evaluator = struct {
                 return Object.Null;
             },
             .AssignmentExpression => |assignment| {
-                const val = try self.eval(assignment.expression, env);
+                var val = try self.eval(assignment.expression, env);
                 try env.set(assignment.identifier, val);
+                val.incRef();
                 return val;
             },
             .ArrayLiteral => |array| {
@@ -223,17 +269,22 @@ pub const Evaluator = struct {
                     try data.append(self.gpa, evaluated);
                 }
                 const array_owned = try self.gpa.create(Array);
-                array_owned.* = Array{ .data = data, .refs = 1 };
+                array_owned.* = Array{ .data = data, .ref_count = 1 };
                 return Object{ .Array = array_owned };
             },
             .IndexExpression => |index_expression| {
-                const evaluated = try self.eval(index_expression.left, env);
+                var evaluated = try self.eval(index_expression.left, env);
+
                 switch (evaluated) {
                     .Array => |array| {
                         const index = try self.eval(index_expression.index_expression, env);
                         switch (index) {
                             .Integer => |integer| {
-                                return array.data.items[@intCast(integer)];
+                                const val = array.data.items[@intCast(integer)];
+                                if (index_expression.left.* == .ArrayLiteral) {
+                                    defer evaluated.decRef(self.gpa);
+                                }
+                                return val;
                             },
                             else => return self.runtimeError(
                                 "invalid type for index in index expression: {s}",
@@ -423,9 +474,7 @@ pub const Environment = struct {
 
         var object_iterator = self.store.valueIterator();
         while (object_iterator.next()) |object| {
-            object.deinit(self.gpa) catch |err| {
-                std.debug.print("failed to deinit object: {any}\n", .{err});
-            };
+            object.deinit(self.gpa);
         }
 
         self.store.deinit(self.gpa);
