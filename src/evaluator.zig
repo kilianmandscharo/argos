@@ -1,8 +1,5 @@
 const std = @import("std");
 
-// TODO: clean up the error handling in the evaluator
-// TODO: clean up the heap allocated ReturnValue object
-
 const parser_module = @import("parser.zig");
 const Expression = parser_module.Expression;
 const Operator = parser_module.Operator;
@@ -200,7 +197,7 @@ pub const Evaluator = struct {
 
                         const result = try self.eval(&Expression{ .BlockExpression = function.body }, extended_env);
 
-                        // TODO: clean up extended_env
+                        // TODO: clean up extended_env at this point
 
                         return result;
                     },
@@ -454,22 +451,41 @@ pub const Evaluator = struct {
 };
 
 pub const Environment = struct {
+    id: usize = 1,
     gpa: std.mem.Allocator,
     store: std.StringHashMapUnmanaged(Object),
-    children: std.ArrayListUnmanaged(*Environment),
+    children: std.AutoArrayHashMapUnmanaged(usize, *Environment),
+    child_id_counter: usize,
     outer: ?*Environment,
 
-    pub fn init(gpa: std.mem.Allocator) !*Environment {
-        const env = try gpa.create(Environment);
-        env.* = Environment{ .store = .{}, .outer = null, .children = .{}, .gpa = gpa };
+    pub fn init(options: struct {
+        gpa: std.mem.Allocator,
+        id: usize = 1,
+        outer: ?*Environment = null,
+    }) !*Environment {
+        const env = try options.gpa.create(Environment);
+        env.* = Environment{
+            .outer = options.outer,
+            .gpa = options.gpa,
+            .id = options.id,
+            .store = .{},
+            .children = .{},
+            .child_id_counter = 1,
+        };
         return env;
     }
 
     pub fn deinit(self: *Environment) void {
-        std.debug.print("deinit env\n", .{});
+        std.debug.print("deinit env {d}\n", .{self.id});
 
-        for (self.children.items) |child| {
-            child.deinit();
+        // if (self.outer) |outer| {
+        //     const result = outer.children.swapRemove(self.id);
+        //     _ = result;
+        // }
+
+        var child_iterator = self.children.iterator();
+        while (child_iterator.next()) |child| {
+            child.value_ptr.*.deinit();
         }
 
         var object_iterator = self.store.valueIterator();
@@ -483,10 +499,16 @@ pub const Environment = struct {
     }
 
     pub fn initEnclosed(gpa: std.mem.Allocator, environment: *Environment) !*Environment {
-        const env = try gpa.create(Environment);
-        env.* = Environment{ .store = .{}, .outer = environment, .children = .{}, .gpa = gpa };
-        try environment.children.append(gpa, env);
-        return env;
+        const child_env = try Environment.init(.{
+            .gpa = gpa,
+            .outer = environment,
+            .id = environment.child_id_counter,
+        });
+
+        try environment.children.put(gpa, child_env.id, child_env);
+        environment.child_id_counter += 1;
+
+        return child_env;
     }
 
     pub fn get(self: *Environment, key: []const u8) !Object {

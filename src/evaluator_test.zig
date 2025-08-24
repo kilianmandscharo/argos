@@ -21,7 +21,7 @@ pub fn getResult(arena: std.mem.Allocator, input: []const u8) !Object {
 
     const allocator = std.testing.allocator;
 
-    const env = try Environment.init(allocator);
+    const env = try Environment.init(.{ .gpa = allocator });
     defer env.deinit();
 
     var evaluator = Evaluator.init(allocator);
