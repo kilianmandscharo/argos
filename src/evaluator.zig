@@ -1,6 +1,7 @@
 const std = @import("std");
 
 // TODO: clean up the error handling in the evaluator
+// TODO: clean up the heap allocated ReturnValue object
 
 const parser_module = @import("parser.zig");
 const Expression = parser_module.Expression;
@@ -17,9 +18,9 @@ pub const Object = union(enum) {
     Float: f64,
     String: []const u8,
     Boolean: bool,
-    ReturnValue: usize,
+    ReturnValue: *Object,
     Function: Function,
-    Array: Array,
+    Array: *Array,
     Null,
 
     fn getType(self: Object) []const u8 {
@@ -35,7 +36,7 @@ pub const Object = union(enum) {
         };
     }
 
-    fn deinit(self: *Object, gpa: std.mem.Allocator, object_store: *ObjectStore) !void {
+    fn deinit(self: *Object, gpa: std.mem.Allocator) !void {
         std.debug.print("deinit object {s}\n", .{self.getType()});
         return switch (self.*) {
             .Integer => {},
@@ -44,12 +45,9 @@ pub const Object = union(enum) {
             .Boolean => {},
             .ReturnValue => {},
             .Function => {},
-            .Array => |*array| {
-                for (array.data.items) |id| {
-                    var object = try object_store.removeAndGet(id);
-                    try object.deinit(gpa, object_store);
-                }
+            .Array => |array| {
                 array.data.deinit(gpa);
+                gpa.destroy(array);
             },
             .Null => {},
         };
@@ -79,61 +77,16 @@ const Function = struct {
 };
 
 const Array = struct {
-    data: std.ArrayListUnmanaged(usize),
+    data: std.ArrayListUnmanaged(Object),
     refs: usize,
-};
-
-pub const ObjectStore = struct {
-    gpa: std.mem.Allocator,
-    id: usize,
-    objects: std.AutoArrayHashMapUnmanaged(usize, Object),
-
-    pub fn init(gpa: std.mem.Allocator) ObjectStore {
-        return .{
-            .gpa = gpa,
-            .objects = .{},
-            .id = 1,
-        };
-    }
-
-    pub fn deinit(self: *ObjectStore) void {
-        std.debug.print("deinit object store\n", .{});
-        self.objects.deinit(self.gpa);
-    }
-
-    pub fn add(self: *ObjectStore, object: Object) !usize {
-        const id = self.id;
-        try self.objects.put(self.gpa, id, object);
-        std.debug.print("added {s} to store with id {d}\n", .{ object.getType(), id });
-        self.id += 1;
-        return id;
-    }
-
-    pub fn get(self: *ObjectStore, id: usize) !Object {
-        return self.objects.get(id) orelse error.ObjectNotFound;
-    }
-
-    pub fn remove(self: *ObjectStore, id: usize) !void {
-        self.objects.swapRemove(id);
-    }
-
-    pub fn removeAndGet(self: *ObjectStore, id: usize) !Object {
-        const entry = self.objects.fetchSwapRemove(id);
-        if (entry) |e| {
-            return e.value;
-        }
-        return error.ObjectNotFound;
-    }
 };
 
 pub const Evaluator = struct {
     gpa: std.mem.Allocator,
-    object_store: *ObjectStore,
 
-    pub fn init(gpa: std.mem.Allocator, object_store: *ObjectStore) Evaluator {
+    pub fn init(gpa: std.mem.Allocator) Evaluator {
         return Evaluator{
             .gpa = gpa,
-            .object_store = object_store,
         };
     }
 
@@ -144,16 +97,16 @@ pub const Evaluator = struct {
             },
             .ReturnExpression => |return_expression| {
                 const value = try self.eval(return_expression, env);
-                const object_id = try self.object_store.add(value);
-                const return_val = Object{ .ReturnValue = object_id };
-                return return_val;
+                const value_owned = try self.gpa.create(Object);
+                value_owned.* = value;
+                return Object{ .ReturnValue = value_owned };
             },
             .BlockExpression => |block| {
                 var result: Object = Object.Null;
                 for (block.expressions.items) |item| {
                     result = try self.eval(item, env);
                     switch (result) {
-                        .ReturnValue => |idx| return self.object_store.get(idx),
+                        .ReturnValue => |obj| return obj.*,
                         else => {},
                     }
                 }
@@ -264,13 +217,14 @@ pub const Evaluator = struct {
                 return val;
             },
             .ArrayLiteral => |array| {
-                var data: std.ArrayListUnmanaged(usize) = .{};
+                var data: std.ArrayListUnmanaged(Object) = .{};
                 for (array.items) |item| {
                     const evaluated = try self.eval(item, env);
-                    const id = try self.object_store.add(evaluated);
-                    try data.append(self.gpa, id);
+                    try data.append(self.gpa, evaluated);
                 }
-                return Object{ .Array = Array{ .data = data, .refs = 1 } };
+                const array_owned = try self.gpa.create(Array);
+                array_owned.* = Array{ .data = data, .refs = 1 };
+                return Object{ .Array = array_owned };
             },
             .IndexExpression => |index_expression| {
                 const evaluated = try self.eval(index_expression.left, env);
@@ -279,8 +233,7 @@ pub const Evaluator = struct {
                         const index = try self.eval(index_expression.index_expression, env);
                         switch (index) {
                             .Integer => |integer| {
-                                const id: usize = array.data.items[@intCast(integer)];
-                                return try self.object_store.get(id);
+                                return array.data.items[@intCast(integer)];
                             },
                             else => return self.runtimeError(
                                 "invalid type for index in index expression: {s}",
@@ -461,16 +414,16 @@ pub const Environment = struct {
         return env;
     }
 
-    pub fn deinit(self: *Environment, object_store: *ObjectStore) void {
+    pub fn deinit(self: *Environment) void {
         std.debug.print("deinit env\n", .{});
 
         for (self.children.items) |child| {
-            child.deinit(object_store);
+            child.deinit();
         }
 
         var object_iterator = self.store.valueIterator();
         while (object_iterator.next()) |object| {
-            object.deinit(self.gpa, object_store) catch |err| {
+            object.deinit(self.gpa) catch |err| {
                 std.debug.print("failed to deinit object: {any}\n", .{err});
             };
         }

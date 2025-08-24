@@ -14,7 +14,6 @@ const Parser = parser_module.Parser;
 const evaluator_module = @import("evaluator.zig");
 const Evaluator = evaluator_module.Evaluator;
 const Environment = evaluator_module.Environment;
-const ObjectStore = evaluator_module.ObjectStore;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -40,15 +39,10 @@ pub fn main() !void {
     var parser = try Parser.init(&lexer, arenaAllocator);
     const program = try parser.parseProgram();
 
-    var object_store = ObjectStore.init(gpaAllocator);
     const env = try Environment.init(gpaAllocator);
+    defer env.deinit();
 
-    defer {
-        env.deinit(&object_store);
-        object_store.deinit();
-    }
-
-    var evaluator = Evaluator.init(gpaAllocator, &object_store);
+    var evaluator = Evaluator.init(gpaAllocator);
     const result = try evaluator.eval(&program, env);
     std.debug.print("Result: {f}\n", .{result});
 }
