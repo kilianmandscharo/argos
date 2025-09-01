@@ -368,31 +368,31 @@ test "array memory leaks" {
             \\test(1, 2)
             ,
         },
-        // .{
-        //     .description = "unassigned array returned from function call",
-        //     .input =
-        //     \\fnc test() {
-        //     \\    return [1, 2, 3, 4, 5]
-        //     \\}
-        //     \\test()
-        //     ,
-        // },
-        // .{
-        //     .description = "assigned array on top level",
-        //     .input =
-        //     \\array = [1, 2, 3, 4, 5]
-        //     ,
-        // },
-        // .{
-        //     .description = "assigned array in function body",
-        //     .input =
-        //     \\fnc test() {
-        //     \\    array = [1, 2, 3, 4, 5]
-        //     \\    return array[0] + array[1]
-        //     \\}
-        //     \\test()
-        //     ,
-        // },
+        .{
+            .description = "unassigned array returned from function call",
+            .input =
+            \\fnc test() {
+            \\    return [1, 2, 3, 4, 5]
+            \\}
+            \\test()
+            ,
+        },
+        .{
+            .description = "assigned array on top level",
+            .input =
+            \\array = [1, 2, 3, 4, 5]
+            ,
+        },
+        .{
+            .description = "assigned array in function body",
+            .input =
+            \\fnc test() {
+            \\    array = [1, 2, 3, 4, 5]
+            \\    return array[0] + array[1]
+            \\}
+            \\test()
+            ,
+        },
     };
 
     try runTests(TestCase, "evaluate array memory leaks", &test_cases, run);

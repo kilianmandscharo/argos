@@ -195,6 +195,15 @@ pub const Evaluator = struct {
 
                         const result = try self.eval(&Expression{ .BlockExpression = function.body }, extended_env);
 
+                        switch (result) {
+                            .ReturnValue => |obj| {
+                                const retVal = obj.*;
+                                self.gpa.destroy(obj);
+                                return retVal;
+                            },
+                            else => {},
+                        }
+
                         // TODO: clean up extended_env at this point
 
                         return result;
