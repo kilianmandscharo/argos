@@ -45,6 +45,7 @@ pub const Object = union(enum) {
             .Array => |array| {
                 array.data.deinit(gpa);
                 gpa.destroy(array);
+                std.debug.print("destroyed array\n", .{});
             },
             .Null => {},
         };
@@ -123,7 +124,6 @@ pub const Evaluator = struct {
     }
 
     pub fn eval(self: *Evaluator, expression: *const Expression, env: *Environment) !Object {
-        // std.debug.print("eval {s} {f}\n", .{@tagName(expression.*), expression});
         return switch (expression.*) {
             .Program => |statements| {
                 return try self.evalProgram(statements, env);
@@ -144,10 +144,8 @@ pub const Evaluator = struct {
                 for (block.expressions.items) |item| {
                     result = try self.eval(item, env);
                     switch (result) {
-                        .ReturnValue => |obj| {
-                            const retVal = obj.*;
-                            self.gpa.destroy(obj);
-                            return retVal;
+                        .ReturnValue => {
+                            return result;
                         },
                         else => {},
                     }
@@ -317,7 +315,11 @@ pub const Evaluator = struct {
         for (expressions.items) |expression| {
             result = try self.eval(expression, env);
             switch (result) {
-                .ReturnValue => return result,
+                .ReturnValue => |obj| {
+                    const retVal = obj.*;
+                    self.gpa.destroy(obj);
+                    return retVal;
+                },
                 else => {},
             }
         }

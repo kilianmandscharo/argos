@@ -49,7 +49,7 @@ pub const Token = struct {
         self: @This(),
         writer: anytype,
     ) !void {
-        try writer.print("Token {any} --> {s}", .{ self.type, self.literal });
+        try writer.print("Token {any} '{s}'", .{ self.type, self.literal });
     }
 };
 

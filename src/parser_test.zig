@@ -42,7 +42,7 @@ const runExpressionTest = struct {
 
 fn getProgram(arena: std.mem.Allocator, content: []const u8) !Expression {
     var lexer = try Lexer.init(arena, content);
-    var parser = try Parser.init(&lexer, arena);
+    var parser = try Parser.init(&lexer, .{ .arena = arena, .debug = false });
     return try parser.parseProgram();
 }
 
@@ -811,6 +811,160 @@ test "function declaration" {
                                         .right = &Expression{
                                             .Identifier = "y",
                                         },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
+        },
+        .{
+            .description = "more complex return expression",
+            .input =
+            \\fnc test() {
+            \\    array = [1, 2]
+            \\    return array[0] + array[1]
+            \\}
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .name = "test",
+                    .is_one_liner = false,
+                    .params = .{},
+                    .body = BlockExpression{
+                        .is_one_liner = false,
+                        .expressions = try list(*const Expression, arena.allocator(), &.{
+                            &Expression{
+                                .Statement = &Expression{
+                                    .AssignmentExpression = AssignmentExpression{
+                                        .identifier = "array",
+                                        .expression = &Expression{
+                                            .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{
+                                                &Expression{
+                                                    .IntegerLiteral = 1,
+                                                },
+                                                &Expression{
+                                                    .IntegerLiteral = 2,
+                                                },
+                                            }),
+                                        },
+                                    },
+                                },
+                            },
+                            &Expression{
+                                .Statement = &Expression{
+                                    .ReturnExpression = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .left = &Expression{
+                                                .IndexExpression = IndexExpression{
+                                                    .left = &Expression{
+                                                        .Identifier = "array",
+                                                    },
+                                                    .index_expression = &Expression{
+                                                        .IntegerLiteral = 0,
+                                                    },
+                                                },
+                                            },
+                                            .right = &Expression{
+                                                .IndexExpression = IndexExpression{
+                                                    .left = &Expression{
+                                                        .Identifier = "array",
+                                                    },
+                                                    .index_expression = &Expression{
+                                                        .IntegerLiteral = 1,
+                                                    },
+                                                },
+                                            },
+                                            .operator = .Plus,
+                                        },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
+        },
+        .{
+            .description = "with if expression",
+            .input =
+            \\fnc test(n) {
+            \\    if n == 0 { 
+            \\        return 1 
+            \\    }
+            \\    if n == 1 { return 1 }
+            \\    return 0
+            \\}
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .name = "test",
+                    .is_one_liner = false,
+                    .params = try list([]const u8, arena.allocator(), &.{
+                        "n",
+                    }),
+                    .body = BlockExpression{
+                        .is_one_liner = false,
+                        .expressions = try list(*const Expression, arena.allocator(), &.{
+                            &Expression{
+                                .Statement = &Expression{
+                                    .IfExpression = IfExpression{
+                                        .condition = &Expression{
+                                            .InfixExpression = InfixExpression{
+                                                .left = &Expression{ .Identifier = "n" },
+                                                .right = &Expression{ .IntegerLiteral = 0 },
+                                                .operator = .Eq,
+                                            },
+                                        },
+                                        .body = BlockExpression{
+                                            .is_one_liner = false,
+                                            .expressions = try list(*const Expression, arena.allocator(), &.{
+                                                &Expression{
+                                                    .Statement = &Expression{
+                                                        .ReturnExpression = &Expression{
+                                                            .IntegerLiteral = 1,
+                                                        },
+                                                    },
+                                                },
+                                            }),
+                                        },
+                                        .alternative = null,
+                                        .is_one_liner = false,
+                                    },
+                                },
+                            },
+                            &Expression{
+                                .Statement = &Expression{
+                                    .IfExpression = IfExpression{
+                                        .condition = &Expression{
+                                            .InfixExpression = InfixExpression{
+                                                .left = &Expression{ .Identifier = "n" },
+                                                .right = &Expression{ .IntegerLiteral = 1 },
+                                                .operator = .Eq,
+                                            },
+                                        },
+                                        .body = BlockExpression{
+                                            .is_one_liner = true,
+                                            .expressions = try list(*const Expression, arena.allocator(), &.{
+                                                &Expression{
+                                                    .Statement = &Expression{
+                                                        .ReturnExpression = &Expression{
+                                                            .IntegerLiteral = 1,
+                                                        },
+                                                    },
+                                                },
+                                            }),
+                                        },
+                                        .alternative = null,
+                                        .is_one_liner = true,
+                                    },
+                                },
+                            },
+                            &Expression{
+                                .Statement = &Expression{
+                                    .ReturnExpression = &Expression{
+                                        .IntegerLiteral = 0,
                                     },
                                 },
                             },

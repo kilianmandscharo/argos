@@ -36,10 +36,12 @@ pub fn main() !void {
     defer arena.deinit();
 
     var lexer = try Lexer.init(arenaAllocator, content);
-    var parser = try Parser.init(&lexer, arenaAllocator);
+    var parser = try Parser.init(&lexer, .{ .arena = arenaAllocator, .debug = false });
     const program = try parser.parseProgram();
 
-    const env = try Environment.init(gpaAllocator);
+    const env = try Environment.init(.{
+        .gpa = gpaAllocator,
+    });
     defer env.deinit();
 
     var evaluator = Evaluator.init(gpaAllocator);

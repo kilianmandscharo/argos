@@ -27,6 +27,31 @@ pub const Expression = union(enum) {
     IndexExpression: IndexExpression,
     Statement: *const Expression,
 
+    pub fn getType(self: @This()) []const u8 {
+        return switch (self) {
+            .Program => "Program",
+            .Identifier => "Identifier",
+            .StringLiteral => "StringLiteral",
+            .IntegerLiteral => "IntegerLiteral",
+            .FloatLiteral => "FloatLiteral",
+            .BooleanLiteral => "BooleanLiteral",
+            .InfixExpression => "InfixExpression",
+            .PrefixExpression => "PrefixExpression",
+            .FunctionLiteral => "FunctionLiteral",
+            .CallExpression => "CallExpression",
+            .IfExpression => "IfExpression",
+            .RangeExpression => "RangeExpression",
+            .ForExpression => "ForExpression",
+            .ArrayLiteral => "ArrayLiteral",
+            .TableLiteral => "TableLiteral",
+            .BlockExpression => "BlockExpression",
+            .AssignmentExpression => "AssignmentExpression",
+            .ReturnExpression => "ReturnExpression",
+            .IndexExpression => "IndexExpression",
+            .Statement => "Statement",
+        };
+    }
+
     pub fn format(
         self: @This(),
         writer: anytype,
@@ -221,13 +246,21 @@ pub const ParserError = error{
     NoOperatorFound,
 };
 
+const DebugColor = enum {
+    Blue,
+    Green,
+    None,
+};
+
 pub const Parser = struct {
     cur_token: Token,
     peek_token: Token,
     lexer: *Lexer,
     arena: std.mem.Allocator,
+    debug: bool = false,
+    debug_indent: usize = 0,
 
-    pub fn init(lexer: *Lexer, arena: std.mem.Allocator) !Parser {
+    pub fn init(lexer: *Lexer, options: struct { arena: std.mem.Allocator, debug: bool = false }) !Parser {
         const cur_token = try lexer.next();
         if (cur_token.type == .Eof) {
             return ParserError.NoTokens;
@@ -237,14 +270,39 @@ pub const Parser = struct {
             .lexer = lexer,
             .cur_token = cur_token,
             .peek_token = peek_token,
-            .arena = arena,
+            .arena = options.arena,
+            .debug = options.debug,
         };
+    }
+
+    fn printDebug(self: *Parser, comptime fmt: []const u8, args: anytype, color: DebugColor) void {
+        if (!self.debug) return;
+        switch (color) {
+            .Blue => {
+                std.debug.print("\x1b[34m", .{});
+            },
+            .Green => {
+                std.debug.print("\x1b[32m", .{});
+            },
+            .None => {},
+        }
+        if (self.debug_indent > 0) {
+            for (0..self.debug_indent - 1) |_| {
+                std.debug.print("    ", .{});
+            }
+            std.debug.print("┗━━━", .{});
+        }
+        std.debug.print("[DEBUG] ", .{});
+        std.debug.print(fmt, args);
+        std.debug.print("\x1b[0m", .{});
     }
 
     pub fn parseProgram(self: *Parser) !Expression {
         var list: std.ArrayListUnmanaged(*const Expression) = .{};
         while (self.cur_token.type != .Eof) {
+            self.printDebug("parse statement on {f}\n", .{self.cur_token}, .None);
             const expression = try self.parseExpression(.Lowest);
+            self.printDebug("parsed statement {s}\n", .{expression.getType()}, .None);
             const wrapper = Expression{ .Statement = expression };
             const owned = try self.arena.create(Expression);
             owned.* = wrapper;
@@ -262,21 +320,30 @@ pub const Parser = struct {
     }
 
     fn parseExpression(self: *Parser, precedence: Precedence) anyerror!*Expression {
+        self.printDebug("parse expression on {f}\n", .{self.cur_token}, .Blue);
+        self.debug_indent += 1;
+
+        self.printDebug("parse left on {f}\n", .{self.cur_token}, .Green);
         var left = try self.parseLeft();
+        self.printDebug("parsed left {s}\n", .{left.getType()}, .Green);
         const left_owned = try self.arena.create(Expression);
 
         defer {
             left_owned.* = left;
+            self.debug_indent -= 1;
+            self.printDebug("parsed {s}\n", .{left_owned.getType()}, .Blue);
         }
 
         while (self.peek_token.type != .NewLine and @intFromEnum(precedence) < @intFromEnum(self.getPeekPrecedence())) {
             try self.advance();
+            self.printDebug("parse right on {f}\n", .{self.cur_token}, .Green);
             left = self.parseRight(left) catch |err| {
                 switch (err) {
                     ParserError.NoInfixFunctionFound => return left_owned,
                     else => return err,
                 }
             };
+            self.printDebug("parsed right {s}\n", .{left.getType()}, .Green);
         }
 
         return left_owned;
@@ -413,7 +480,7 @@ pub const Parser = struct {
 
         if (!self.currentTokenIs(.Else)) {
             if (!self.currentTokenIs(.Eof)) {
-                try self.expectAndAdvance(.NewLine);
+                try self.expectToken(.NewLine);
             }
             return if_expression;
         }
@@ -574,6 +641,8 @@ pub const Parser = struct {
         delimiter: TokenType,
         is_one_liner: bool,
     } {
+        self.printDebug("parse expression list on {f}\n", .{self.cur_token}, .None);
+
         const stopToken: TokenType = switch (self.cur_token.type) {
             .LBrace => .RBrace,
             .LBracket => .RBracket,
@@ -600,7 +669,10 @@ pub const Parser = struct {
 
             if (self.currentTokenIs(stopToken)) break;
 
-            try items.append(self.arena, try self.parseExpression(Precedence.Lowest));
+            self.printDebug("parse expression list item on {f}\n", .{self.cur_token}, .None);
+            const expression = try self.parseExpression(Precedence.Lowest);
+            self.printDebug("parsed expression list item {s}\n", .{expression.getType()}, .None);
+            try items.append(self.arena, expression);
 
             if (self.peekTokenIs(.Comma)) delimiter = .Comma;
 
@@ -631,6 +703,8 @@ pub const Parser = struct {
             }
         }
 
+        self.printDebug("parsed expression list\n", .{}, .None);
+
         return .{ .items = items, .delimiter = delimiter, .is_one_liner = is_one_liner };
     }
 
@@ -657,7 +731,7 @@ pub const Parser = struct {
     fn advance(self: *Parser) !void {
         self.cur_token = self.peek_token;
         self.peek_token = try self.lexer.next();
-        // std.debug.print("cur token: {f}\n", .{self.cur_token});
+        self.printDebug("advanced to {f}\n", .{self.cur_token}, .None);
     }
 
     fn getAndAdvance(self: *Parser) !Token {
