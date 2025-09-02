@@ -321,7 +321,27 @@ pub const Evaluator = struct {
             },
             .AssignmentExpression => |assignment| {
                 var val = try self.eval(assignment.expression, env);
-                try env.set(assignment.identifier, val);
+                switch (assignment.left.*) {
+                    .Identifier => |identifier| {
+                        try env.set(identifier, val);
+                    },
+                    .IndexExpression => |index_expression| {
+                        const left = try self.eval(index_expression.left, env);
+                        switch (left) {
+                            .Array => |array| {
+                                const index = try self.eval(index_expression.index_expression, env);
+                                array.data.items[@intCast(index.Integer)] = val;
+                            },
+                            .Table => |table| {
+                                var index = try self.eval(index_expression.index_expression, env);
+                                defer index.decRef(env);
+                                try table.data.put(self.gpa, index.String.data, val);
+                            },
+                            else => return self.runtimeError("invalid left side for index expression: {s}\n", .{left.getType()}),
+                        }
+                    },
+                    else => return self.runtimeError("invalid left side for assignment expression: {s}\n", .{assignment.left.getType()}),
+                }
                 val.incRef(env);
                 return val;
             },
@@ -339,7 +359,7 @@ pub const Evaluator = struct {
                 var data: std.StringHashMapUnmanaged(Object) = .{};
                 for (table.items) |item| {
                     // we know that every expression is of type Assignment
-                    const key = item.AssignmentExpression.identifier;
+                    const key = item.AssignmentExpression.left.Identifier;
                     const value = item.AssignmentExpression.expression;
                     const evaluated = try self.eval(value, env);
                     try data.put(self.gpa, key, evaluated);

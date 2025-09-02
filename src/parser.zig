@@ -119,7 +119,7 @@ pub const Expression = union(enum) {
                 try writer.print("{f}[{f}]", .{ index_expression.left, index_expression.index_expression });
             },
             .BlockExpression => |v| try v.format(writer),
-            .AssignmentExpression => |v| try writer.print("({s} = {f})", .{ v.identifier, v.expression }),
+            .AssignmentExpression => |v| try writer.print("({f} = {f})", .{ v.left, v.expression }),
             .ReturnExpression => |v| try writer.print("(return {f})", .{v}),
             .Statement => |v| try writer.print("({f})", .{v}),
         }
@@ -221,7 +221,7 @@ pub const BlockExpression = struct {
 };
 
 pub const AssignmentExpression = struct {
-    identifier: []const u8,
+    left: *const Expression,
     expression: *const Expression,
 };
 
@@ -420,7 +420,7 @@ pub const Parser = struct {
             is_one_liner = false;
         }
 
-        const result = try self.parseExpressionList();
+        const result = try self.parseExpressionList(null);
 
         return Expression{
             .FunctionLiteral = FunctionLiteral{
@@ -447,7 +447,7 @@ pub const Parser = struct {
             is_one_liner = false;
         }
 
-        const result = try self.parseExpressionList();
+        const result = try self.parseExpressionList(null);
 
         var if_expression = Expression{
             .IfExpression = .{
@@ -472,7 +472,7 @@ pub const Parser = struct {
 
         try self.advanceAndExpect(.LBrace);
 
-        const alternative = try self.parseExpressionList();
+        const alternative = try self.parseExpressionList(null);
         if_expression.IfExpression.alternative = BlockExpression{
             .expressions = alternative.items,
             .is_one_liner = alternative.is_one_liner,
@@ -498,7 +498,7 @@ pub const Parser = struct {
 
         try self.advanceAndExpect(.LBrace);
 
-        const body = try self.parseExpressionList();
+        const body = try self.parseExpressionList(null);
 
         return Expression{
             .ForExpression = ForExpression{
@@ -513,22 +513,23 @@ pub const Parser = struct {
     }
 
     fn parseBracket(self: *Parser) !Expression {
-        const result = try self.parseExpressionList();
+        const result = try self.parseExpressionList(null);
         return Expression{
             .ArrayLiteral = result.items,
         };
     }
 
     fn parseBrace(self: *Parser) !Expression {
-        const expression_list = try self.parseExpressionList();
+        const expression_list = try self.parseExpressionList(.Comma);
 
         const expression = switch (expression_list.delimiter) {
-            .NewLine => Expression{
-                .BlockExpression = BlockExpression{
-                    .expressions = expression_list.items,
-                    .is_one_liner = expression_list.is_one_liner,
-                },
-            },
+            // Do not allow block expression literals for now
+            // .NewLine => Expression{
+            //     .BlockExpression = BlockExpression{
+            //         .expressions = expression_list.items,
+            //         .is_one_liner = expression_list.is_one_liner,
+            //     },
+            // },
             .Comma => comma: {
                 const expr = Expression{
                     .TableLiteral = expression_list.items,
@@ -584,7 +585,7 @@ pub const Parser = struct {
     }
 
     fn parseCall(self: *Parser, left: Expression) !Expression {
-        const result = try self.parseExpressionList();
+        const result = try self.parseExpressionList(null);
         const left_owned = try self.arena.create(Expression);
         left_owned.* = left;
         return Expression{ .CallExpression = .{ .function = left_owned, .args = result.items } };
@@ -601,19 +602,18 @@ pub const Parser = struct {
     fn parseAssign(self: *Parser, left: Expression) !Expression {
         try self.advance();
         const expression = try self.parseExpression(.Lowest);
-        if (left == .Identifier) {
-            return Expression{
-                .AssignmentExpression = AssignmentExpression{
-                    .identifier = left.Identifier,
-                    .expression = expression,
-                },
-            };
-        }
-        return error.ExpectedIdentifier;
+        const left_owned = try self.arena.create(Expression);
+        left_owned.* = left;
+        return Expression{
+            .AssignmentExpression = AssignmentExpression{
+                .left = left_owned,
+                .expression = expression,
+            },
+        };
     }
 
     fn parseIndex(self: *Parser, left: Expression) !Expression {
-        const expression_list = try self.parseExpressionList();
+        const expression_list = try self.parseExpressionList(null);
         if (expression_list.items.items.len != 1) {
             return error.InvalidIndexExpression;
         }
@@ -629,7 +629,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseExpressionList(self: *Parser) !struct {
+    fn parseExpressionList(self: *Parser, defaultDelimiter: ?TokenType) !struct {
         items: std.ArrayListUnmanaged(*const Expression),
         delimiter: TokenType,
         is_one_liner: bool,
@@ -643,7 +643,7 @@ pub const Parser = struct {
             else => return error.UnknownEnclosingToken,
         };
 
-        var delimiter: TokenType = switch (self.cur_token.type) {
+        var delimiter: TokenType = defaultDelimiter orelse switch (self.cur_token.type) {
             .LBrace => .NewLine,
             .LBracket => .Comma,
             .LParen => .Comma,

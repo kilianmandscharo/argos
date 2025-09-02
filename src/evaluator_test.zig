@@ -332,6 +332,15 @@ test "table" {
             ,
             .expected_output = Object{ .Integer = -2 },
         },
+        .{
+            .description = "empty table assignment",
+            .input =
+            \\table = {}
+            \\table["a"] = 1
+            \\table["a"]
+            ,
+            .expected_output = Object{ .Integer = 1 },
+        },
     };
 
     try runTests(ObjectTestCase, "evaluate table", &test_cases, runObjectTest);
@@ -354,6 +363,15 @@ test "array" {
             \\array[2] * array[4]
             ,
             .expected_output = Object{ .Integer = 15 },
+        },
+        .{
+            .description = "empty array assignment",
+            .input =
+            \\array = [1, 2, 3]
+            \\array[0] = 100
+            \\array[0]
+            ,
+            .expected_output = Object{ .Integer = 100 },
         },
     };
 
