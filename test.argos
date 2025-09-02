@@ -1,8 +1,12 @@
-fnc test(n) {
-    if n == 0 { 
-        return 1 
+fnc fib(n) {
+    a = 0
+    b = 1
+    for i in 0..n {
+        tmp = b
+        b = a + b
+        a = tmp
     }
-    return n
+    a
 }
 
-test(0)
+fib(80)

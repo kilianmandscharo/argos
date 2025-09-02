@@ -136,6 +136,61 @@ test "should tokenize" {
             try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .RBrace, .literal = "}" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "1" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .LtOrEq, .literal = "<=" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "1" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .GtOrEq, .literal = ">=" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "1" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .LeftShift, .literal = "<<" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "1" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .RightShift, .literal = ">>" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .True, .literal = "true" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Or, .literal = "or" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .False, .literal = "false" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .True, .literal = "true" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .And, .literal = "and" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .False, .literal = "false" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "1" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Ampersand, .literal = "&" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "1" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Pipe, .literal = "|" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "1" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Caret, .literal = "^" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "1" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Tilde, .literal = "~" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "1" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Percent, .literal = "%" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
 
             try assertTokenEquals(Token{ .type = .Eof, .literal = "EOF" }, try lexer.next());
         }
@@ -164,6 +219,17 @@ test "should tokenize" {
             \\for i in 0..10 {
             \\    x = x * 5   
             \\}
+            \\1 <= 5
+            \\1 >= 5
+            \\1 << 5
+            \\1 >> 5
+            \\true or false
+            \\true and false
+            \\1 & 5
+            \\1 | 5
+            \\1 ^ 5
+            \\1 ~ 5
+            \\1 % 5
             ,
         },
     };

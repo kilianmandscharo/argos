@@ -228,6 +228,18 @@ test "should parse prefix expression" {
             },
         },
         .{
+            .description = "should parse tilde operator with false",
+            .input = "~false",
+            .expected_expression = Expression{
+                .PrefixExpression = PrefixExpression{
+                    .expression = &Expression{
+                        .BooleanLiteral = false,
+                    },
+                    .operator = .Tilde,
+                },
+            },
+        },
+        .{
             .description = "should parse plus operator with integer",
             .input = "+5",
             .expected_expression = Expression{
@@ -248,6 +260,18 @@ test "should parse prefix expression" {
                         .IntegerLiteral = 2,
                     },
                     .operator = .Minus,
+                },
+            },
+        },
+        .{
+            .description = "should parse tilde operator with integer",
+            .input = "~5",
+            .expected_expression = Expression{
+                .PrefixExpression = PrefixExpression{
+                    .expression = &Expression{
+                        .IntegerLiteral = 5,
+                    },
+                    .operator = .Tilde,
                 },
             },
         },
@@ -338,6 +362,17 @@ test "should parse infix expression" {
             },
         },
         .{
+            .description = "should parse integer mod",
+            .input = "33 % 2",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .IntegerLiteral = 33 },
+                    .right = &Expression{ .IntegerLiteral = 2 },
+                    .operator = .Percent,
+                },
+            },
+        },
+        .{
             .description = "should parse float multiplication",
             .input = "5.3 * 66.5",
             .expected_expression = Expression{
@@ -345,6 +380,17 @@ test "should parse infix expression" {
                     .left = &Expression{ .FloatLiteral = 5.3 },
                     .right = &Expression{ .FloatLiteral = 66.5 },
                     .operator = .Asterisk,
+                },
+            },
+        },
+        .{
+            .description = "should parse float mod",
+            .input = "1.1 % 5.3",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .FloatLiteral = 1.1 },
+                    .right = &Expression{ .FloatLiteral = 5.3 },
+                    .operator = .Percent,
                 },
             },
         },
@@ -382,6 +428,17 @@ test "should parse infix expression" {
             },
         },
         .{
+            .description = "should parse integer less than or equal",
+            .input = "1 <= 5",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .IntegerLiteral = 1 },
+                    .right = &Expression{ .IntegerLiteral = 5 },
+                    .operator = .LtOrEq,
+                },
+            },
+        },
+        .{
             .description = "should parse integer greater than",
             .input = "1 > 5",
             .expected_expression = Expression{
@@ -389,6 +446,17 @@ test "should parse infix expression" {
                     .left = &Expression{ .IntegerLiteral = 1 },
                     .right = &Expression{ .IntegerLiteral = 5 },
                     .operator = .Gt,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer greater than or equal",
+            .input = "1 >= 5",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .IntegerLiteral = 1 },
+                    .right = &Expression{ .IntegerLiteral = 5 },
+                    .operator = .GtOrEq,
                 },
             },
         },
@@ -415,6 +483,61 @@ test "should parse infix expression" {
             },
         },
         .{
+            .description = "should parse integer bitwise or",
+            .input = "3 | 3",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .IntegerLiteral = 3 },
+                    .right = &Expression{ .IntegerLiteral = 3 },
+                    .operator = .Pipe,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer bitwise and",
+            .input = "3 & 3",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .IntegerLiteral = 3 },
+                    .right = &Expression{ .IntegerLiteral = 3 },
+                    .operator = .Ampersand,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer bitwise xor",
+            .input = "3 ^ 3",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .IntegerLiteral = 3 },
+                    .right = &Expression{ .IntegerLiteral = 3 },
+                    .operator = .Caret,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer shift left",
+            .input = "3 << 3",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .IntegerLiteral = 3 },
+                    .right = &Expression{ .IntegerLiteral = 3 },
+                    .operator = .LeftShift,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer shift right",
+            .input = "3 >> 3",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .IntegerLiteral = 3 },
+                    .right = &Expression{ .IntegerLiteral = 3 },
+                    .operator = .RightShift,
+                },
+            },
+        },
+        .{
             .description = "should parse boolean equals",
             .input = "true == false",
             .expected_expression = Expression{
@@ -433,6 +556,28 @@ test "should parse infix expression" {
                     .left = &Expression{ .BooleanLiteral = true },
                     .right = &Expression{ .BooleanLiteral = false },
                     .operator = .NotEq,
+                },
+            },
+        },
+        .{
+            .description = "should parse boolean logical or",
+            .input = "true or false",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .BooleanLiteral = true },
+                    .right = &Expression{ .BooleanLiteral = false },
+                    .operator = .Or,
+                },
+            },
+        },
+        .{
+            .description = "should parse boolean logical and",
+            .input = "true and false",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .BooleanLiteral = true },
+                    .right = &Expression{ .BooleanLiteral = false },
+                    .operator = .And,
                 },
             },
         },

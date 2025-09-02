@@ -20,13 +20,16 @@ pub const TokenType = enum {
 
     Bang,
     Lt,
+    LtOrEq,
     Gt,
+    GtOrEq,
     Eq,
     NotEq,
     Plus,
     Minus,
     Slash,
     Asterisk,
+    Percent,
 
     Return,
     If,
@@ -38,6 +41,16 @@ pub const TokenType = enum {
 
     NewLine,
     Eof,
+
+    And,
+    Or,
+
+    Pipe,
+    Ampersand,
+    Caret,
+    Tilde,
+    LeftShift,
+    RightShift,
 };
 
 // TODO: implement col_x, col_y, row to give better debug info
@@ -73,49 +86,72 @@ pub const Lexer = struct {
         self.chopWhiteSpace();
 
         if (self.pos == self.buf.len) {
-            return Token{ .type = TokenType.Eof, .literal = "EOF" };
+            return Token{ .type = .Eof, .literal = "EOF" };
         }
 
         const char = self.buf[self.pos];
 
         const token = switch (char) {
-            ',' => Token{ .type = TokenType.Comma, .literal = "," },
-            '+' => Token{ .type = TokenType.Plus, .literal = "+" },
-            '-' => Token{ .type = TokenType.Minus, .literal = "-" },
-            '/' => Token{ .type = TokenType.Slash, .literal = "/" },
-            '*' => Token{ .type = TokenType.Asterisk, .literal = "*" },
-            '(' => Token{ .type = TokenType.LParen, .literal = "(" },
-            ')' => Token{ .type = TokenType.RParen, .literal = ")" },
-            '[' => Token{ .type = TokenType.LBracket, .literal = "[" },
-            ']' => Token{ .type = TokenType.RBracket, .literal = "]" },
-            '{' => Token{ .type = TokenType.LBrace, .literal = "{" },
-            '}' => Token{ .type = TokenType.RBrace, .literal = "}" },
-            '\n' => Token{ .type = TokenType.NewLine, .literal = "<newline>" },
-            '<' => Token{ .type = TokenType.Lt, .literal = "<" },
-            '>' => Token{ .type = TokenType.Gt, .literal = ">" },
-            '.' => {
-                return self.scanDot();
-            },
-            '!' => {
-                return self.scanBangChar();
-            },
-            '=' => {
-                return self.scanEqualChar();
-            },
-            '0'...'9' => {
-                return try self.scanNumber();
-            },
-            '"' => {
-                return try self.scanString();
-            },
-            else => {
-                return try self.scanIdentifier();
-            },
+            ',' => Token{ .type = .Comma, .literal = "," },
+            '+' => Token{ .type = .Plus, .literal = "+" },
+            '-' => Token{ .type = .Minus, .literal = "-" },
+            '/' => Token{ .type = .Slash, .literal = "/" },
+            '*' => Token{ .type = .Asterisk, .literal = "*" },
+            '(' => Token{ .type = .LParen, .literal = "(" },
+            ')' => Token{ .type = .RParen, .literal = ")" },
+            '[' => Token{ .type = .LBracket, .literal = "[" },
+            ']' => Token{ .type = .RBracket, .literal = "]" },
+            '{' => Token{ .type = .LBrace, .literal = "{" },
+            '}' => Token{ .type = .RBrace, .literal = "}" },
+            '\n' => Token{ .type = .NewLine, .literal = "<newline>" },
+            '&' => Token{ .type = .Ampersand, .literal = "&" },
+            '|' => Token{ .type = .Pipe, .literal = "|" },
+            '^' => Token{ .type = .Caret, .literal = "^" },
+            '~' => Token{ .type = .Tilde, .literal = "~" },
+            '%' => Token{ .type = .Percent, .literal = "%" },
+            '<' => return self.scanLt(),
+            '>' => return self.scanGt(),
+            '.' => return self.scanDot(),
+            '!' => return self.scanBangChar(),
+            '=' => return self.scanEqualChar(),
+            '0'...'9' => return try self.scanNumber(),
+            '"' => return try self.scanString(),
+            else => return try self.scanIdentifier(),
         };
 
         self.advancePos();
 
         return token;
+    }
+
+    fn scanLt(self: *Lexer) Token {
+        self.advancePos();
+        switch (self.getChar().?) {
+            '<' => {
+                self.advancePos();
+                return Token{ .type = .LeftShift, .literal = "<<" };
+            },
+            '=' => {
+                self.advancePos();
+                return Token{ .type = .LtOrEq, .literal = "<=" };
+            },
+            else => return Token{ .type = .Lt, .literal = "<" },
+        }
+    }
+
+    fn scanGt(self: *Lexer) !Token {
+        self.advancePos();
+        switch (self.getChar().?) {
+            '>' => {
+                self.advancePos();
+                return Token{ .type = .RightShift, .literal = ">>" };
+            },
+            '=' => {
+                self.advancePos();
+                return Token{ .type = .GtOrEq, .literal = ">=" };
+            },
+            else => return Token{ .type = .Gt, .literal = ">" },
+        }
     }
 
     fn scanDot(self: *Lexer) !Token {
@@ -124,25 +160,25 @@ pub const Lexer = struct {
             return error.UnexpectedChar;
         }
         self.advancePos();
-        return Token{ .type = TokenType.DotDot, .literal = ".." };
+        return Token{ .type = .DotDot, .literal = ".." };
     }
 
     fn scanBangChar(self: *Lexer) !Token {
         self.advancePos();
         if (self.getChar() == '=') {
             self.advancePos();
-            return Token{ .type = TokenType.NotEq, .literal = "!=" };
+            return Token{ .type = .NotEq, .literal = "!=" };
         }
-        return Token{ .type = TokenType.Bang, .literal = "!" };
+        return Token{ .type = .Bang, .literal = "!" };
     }
 
     fn scanEqualChar(self: *Lexer) !Token {
         self.advancePos();
         if (self.getChar() == '=') {
             self.advancePos();
-            return Token{ .type = TokenType.Eq, .literal = "==" };
+            return Token{ .type = .Eq, .literal = "==" };
         }
-        return Token{ .type = TokenType.Assign, .literal = "=" };
+        return Token{ .type = .Assign, .literal = "=" };
     }
 
     fn scanString(self: *Lexer) !Token {
@@ -161,7 +197,7 @@ pub const Lexer = struct {
 
         self.advancePos();
 
-        return Token{ .type = TokenType.String, .literal = arena_copy };
+        return Token{ .type = .String, .literal = arena_copy };
     }
 
     fn scanNumber(self: *Lexer) !Token {
@@ -184,9 +220,9 @@ pub const Lexer = struct {
         const arena_copy = try self.arena.dupe(u8, result);
 
         if (dec_separator_found) {
-            return Token{ .type = TokenType.Float, .literal = arena_copy };
+            return Token{ .type = .Float, .literal = arena_copy };
         }
-        return Token{ .type = TokenType.Integer, .literal = arena_copy };
+        return Token{ .type = .Integer, .literal = arena_copy };
     }
 
     fn scanIdentifier(self: *Lexer) !Token {
@@ -202,38 +238,46 @@ pub const Lexer = struct {
         const arena_copy = try self.arena.dupe(u8, result);
 
         if (std.mem.eql(u8, result, "false")) {
-            return Token{ .type = TokenType.False, .literal = arena_copy };
+            return Token{ .type = .False, .literal = arena_copy };
         }
 
         if (std.mem.eql(u8, result, "true")) {
-            return Token{ .type = TokenType.True, .literal = arena_copy };
+            return Token{ .type = .True, .literal = arena_copy };
         }
 
         if (std.mem.eql(u8, result, "if")) {
-            return Token{ .type = TokenType.If, .literal = arena_copy };
+            return Token{ .type = .If, .literal = arena_copy };
         }
 
         if (std.mem.eql(u8, result, "else")) {
-            return Token{ .type = TokenType.Else, .literal = arena_copy };
+            return Token{ .type = .Else, .literal = arena_copy };
         }
 
         if (std.mem.eql(u8, result, "return")) {
-            return Token{ .type = TokenType.Return, .literal = arena_copy };
+            return Token{ .type = .Return, .literal = arena_copy };
         }
 
         if (std.mem.eql(u8, result, "fnc")) {
-            return Token{ .type = TokenType.Function, .literal = arena_copy };
+            return Token{ .type = .Function, .literal = arena_copy };
         }
 
         if (std.mem.eql(u8, result, "in")) {
-            return Token{ .type = TokenType.In, .literal = arena_copy };
+            return Token{ .type = .In, .literal = arena_copy };
         }
 
         if (std.mem.eql(u8, result, "for")) {
-            return Token{ .type = TokenType.For, .literal = arena_copy };
+            return Token{ .type = .For, .literal = arena_copy };
         }
 
-        return Token{ .type = TokenType.Identifier, .literal = arena_copy };
+        if (std.mem.eql(u8, result, "or")) {
+            return Token{ .type = .Or, .literal = arena_copy };
+        }
+
+        if (std.mem.eql(u8, result, "and")) {
+            return Token{ .type = .And, .literal = arena_copy };
+        }
+
+        return Token{ .type = .Identifier, .literal = arena_copy };
     }
 
     fn charAllowedInIdent(char: u8) bool {

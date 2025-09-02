@@ -467,6 +467,15 @@ pub const Evaluator = struct {
                     },
                 }
             },
+            .Tilde => {
+                switch (right) {
+                    .Integer => |v| return Object{ .Integer = ~v },
+                    else => {
+                        self.printError("invalid type for tilde operator: {s}\n", .{right.getType()});
+                        return EvaluatorError.RuntimeError;
+                    },
+                }
+            },
             else => {
                 self.printError("invalid operator in prefix position: {any}\n", .{operator});
                 return EvaluatorError.RuntimeError;
@@ -526,6 +535,8 @@ pub const Evaluator = struct {
         return switch (operator) {
             .Eq => Object{ .Boolean = left == right },
             .NotEq => Object{ .Boolean = left != right },
+            .Or => Object{ .Boolean = left or right },
+            .And => Object{ .Boolean = left and right },
             else => {
                 self.printError("invalid operator '{f}' for type Boolean\n", .{operator});
                 return EvaluatorError.RuntimeError;
@@ -539,8 +550,11 @@ pub const Evaluator = struct {
             .Minus => Object{ .Float = left - right },
             .Slash => Object{ .Float = left / right },
             .Asterisk => Object{ .Float = left * right },
+            .Percent => Object{ .Float = @rem(left, right) },
             .Gt => Object{ .Boolean = left > right },
             .Lt => Object{ .Boolean = left < right },
+            .LtOrEq => Object{ .Boolean = left <= right },
+            .GtOrEq => Object{ .Boolean = left >= right },
             .Eq => Object{ .Boolean = left == right },
             .NotEq => Object{ .Boolean = left != right },
             else => {
@@ -560,8 +574,16 @@ pub const Evaluator = struct {
                 break :blk Object{ .Float = left_float / right_float };
             },
             .Asterisk => Object{ .Integer = left * right },
+            .Percent => Object{ .Integer = @rem(left, right) },
+            .Pipe => Object{ .Integer = left | right },
+            .Ampersand => Object{ .Integer = left & right },
+            .Caret => Object{ .Integer = left ^ right },
+            .LeftShift => Object{ .Integer = left << @intCast(right) },
+            .RightShift => Object{ .Integer = left >> @intCast(right) },
             .Gt => Object{ .Boolean = left > right },
             .Lt => Object{ .Boolean = left < right },
+            .GtOrEq => Object{ .Boolean = left >= right },
+            .LtOrEq => Object{ .Boolean = left <= right },
             .Eq => Object{ .Boolean = left == right },
             .NotEq => Object{ .Boolean = left != right },
             else => {
