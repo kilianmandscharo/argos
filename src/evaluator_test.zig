@@ -21,10 +21,10 @@ pub fn getResult(arena: std.mem.Allocator, input: []const u8) !Object {
 
     const allocator = std.testing.allocator;
 
-    const env = try Environment.init(.{ .gpa = allocator });
+    const env = try Environment.init(.{ .gpa = allocator, .debug = false });
     defer env.deinit();
 
-    var evaluator = Evaluator.init(allocator);
+    var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = false });
     const result = try evaluator.eval(&program, env);
 
     return result;
@@ -314,6 +314,52 @@ test "for expressions" {
     try runTests(ObjectTestCase, "evaluate for expressions", &test_cases, runObjectTest);
 }
 
+test "table" {
+    const test_cases = [_]ObjectTestCase{
+        .{
+            .description = "simple table",
+            .input =
+            \\table = { a = 1, b = 2, c = 3 }
+            \\table["a"]
+            ,
+            .expected_output = Object{ .Integer = 1 },
+        },
+        .{
+            .description = "index expression in infix",
+            .input =
+            \\table = { a = 1, b = 2, c = 3 }
+            \\table["a"] - table["c"]
+            ,
+            .expected_output = Object{ .Integer = -2 },
+        },
+    };
+
+    try runTests(ObjectTestCase, "evaluate table", &test_cases, runObjectTest);
+}
+
+test "array" {
+    const test_cases = [_]ObjectTestCase{
+        .{
+            .description = "simple array",
+            .input =
+            \\array = [1, 2, 3, 4, 5]
+            \\array[3]
+            ,
+            .expected_output = Object{ .Integer = 4 },
+        },
+        .{
+            .description = "index expression in infix",
+            .input =
+            \\array = [1, 2, 3, 4, 5]
+            \\array[2] * array[4]
+            ,
+            .expected_output = Object{ .Integer = 15 },
+        },
+    };
+
+    try runTests(ObjectTestCase, "evaluate array", &test_cases, runObjectTest);
+}
+
 test "program" {
     const test_cases = [_]ObjectTestCase{
         .{
@@ -332,7 +378,7 @@ test "program" {
     try runTests(ObjectTestCase, "evaluate program", &test_cases, runObjectTest);
 }
 
-test "array memory leaks" {
+test "memory leaks" {
     const TestCase = struct {
         description: []const u8,
         input: []const u8,
@@ -395,5 +441,5 @@ test "array memory leaks" {
         },
     };
 
-    try runTests(TestCase, "evaluate array memory leaks", &test_cases, run);
+    try runTests(TestCase, "evaluate memory leaks", &test_cases, run);
 }

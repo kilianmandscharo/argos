@@ -1,5 +1,9 @@
 const std = @import("std");
 
+const logging = @import("logging.zig");
+const LogColor = logging.LogColor;
+const log = logging.log;
+
 const lexer_module = @import("lexer.zig");
 const Token = lexer_module.Token;
 const TokenType = lexer_module.TokenType;
@@ -246,12 +250,6 @@ pub const ParserError = error{
     NoOperatorFound,
 };
 
-const DebugColor = enum {
-    Blue,
-    Green,
-    None,
-};
-
 pub const Parser = struct {
     cur_token: Token,
     peek_token: Token,
@@ -275,26 +273,13 @@ pub const Parser = struct {
         };
     }
 
-    fn printDebug(self: *Parser, comptime fmt: []const u8, args: anytype, color: DebugColor) void {
-        if (!self.debug) return;
-        switch (color) {
-            .Blue => {
-                std.debug.print("\x1b[34m", .{});
-            },
-            .Green => {
-                std.debug.print("\x1b[32m", .{});
-            },
-            .None => {},
-        }
-        if (self.debug_indent > 0) {
-            for (0..self.debug_indent - 1) |_| {
-                std.debug.print("    ", .{});
-            }
-            std.debug.print("┗━━━", .{});
-        }
-        std.debug.print("[DEBUG] ", .{});
-        std.debug.print(fmt, args);
-        std.debug.print("\x1b[0m", .{});
+    fn printDebug(self: *Parser, comptime fmt: []const u8, args: anytype, color: LogColor) void {
+        log(fmt, args, .{
+            .messageLevel = .Debug,
+            .currentLevel = if (self.debug) .Debug else .Fatal,
+            .color = color,
+            .indent = self.debug_indent,
+        });
     }
 
     pub fn parseProgram(self: *Parser) !Expression {
@@ -544,8 +529,16 @@ pub const Parser = struct {
                     .is_one_liner = expression_list.is_one_liner,
                 },
             },
-            .Comma => Expression{
-                .TableLiteral = expression_list.items,
+            .Comma => comma: {
+                const expr = Expression{
+                    .TableLiteral = expression_list.items,
+                };
+                for (expression_list.items.items) |item| {
+                    if (item.* != .AssignmentExpression) {
+                        return error.ExpectedAssignment;
+                    }
+                }
+                break :comma expr;
             },
             else => return error.UnknownExpressionListDelimiter,
         };
