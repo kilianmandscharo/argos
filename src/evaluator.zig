@@ -133,15 +133,15 @@ pub const Object = union(enum) {
         writer: anytype,
     ) !void {
         switch (self) {
-            .Integer => |v| try writer.print("{d}", .{v}),
-            .Float => |v| try writer.print("{d}", .{v}),
-            .String => |v| try writer.print("{s}", .{v.data}),
-            .Boolean => |v| try writer.print("{}", .{v}),
-            .ReturnValue => |v| try writer.print("{any}", .{v}),
-            .Function => try writer.print("Function", .{}),
-            .Array => try writer.print("Array", .{}),
-            .Table => try writer.print("Table", .{}),
-            .Null => try writer.print("Null", .{}),
+            .Integer => |v| try writer.print("{s} {d}", .{ self.getType(), v }),
+            .Float => |v| try writer.print("{s} {d}", .{ self.getType(), v }),
+            .String => |v| try writer.print("{s} {s}", .{ self.getType(), v.data }),
+            .Boolean => |v| try writer.print("{s} {}", .{ self.getType(), v }),
+            .ReturnValue => |v| try writer.print("{s} {any}", .{ self.getType(), v }),
+            .Function => try writer.print("{s}", .{self.getType()}),
+            .Array => try writer.print("{s}", .{self.getType()}),
+            .Table => try writer.print("{s}", .{self.getType()}),
+            .Null => try writer.print("{s}", .{self.getType()}),
         }
     }
 };
@@ -413,6 +413,7 @@ pub const Evaluator = struct {
                     ),
                 }
             },
+            .Null => .Null,
             else => {
                 self.printError("unknown expression: {s}\n", .{@tagName(expression.*)});
                 return EvaluatorError.RuntimeError;

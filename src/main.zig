@@ -15,9 +15,16 @@ const evaluator_module = @import("evaluator.zig");
 const Evaluator = evaluator_module.Evaluator;
 const Environment = evaluator_module.Environment;
 
+const Repl = @import("repl.zig");
+
 pub fn main() !void {
+    if (std.os.argv.len <= 1) {
+        try Repl.start();
+    }
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const gpaAllocator = gpa.allocator();
+
     defer {
         const status = gpa.deinit();
         if (status != .ok) {

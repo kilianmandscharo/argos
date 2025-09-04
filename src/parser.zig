@@ -30,6 +30,7 @@ pub const Expression = union(enum) {
     ReturnExpression: *const Expression,
     IndexExpression: IndexExpression,
     Statement: *const Expression,
+    Null,
 
     pub fn getType(self: @This()) []const u8 {
         return switch (self) {
@@ -53,6 +54,7 @@ pub const Expression = union(enum) {
             .ReturnExpression => "ReturnExpression",
             .IndexExpression => "IndexExpression",
             .Statement => "Statement",
+            .Null => "Null",
         };
     }
 
@@ -122,6 +124,7 @@ pub const Expression = union(enum) {
             .AssignmentExpression => |v| try writer.print("({f} = {f})", .{ v.left, v.expression }),
             .ReturnExpression => |v| try writer.print("(return {f})", .{v}),
             .Statement => |v| try writer.print("({f})", .{v}),
+            .Null => try writer.print("null", .{}),
         }
     }
 };
@@ -374,6 +377,7 @@ pub const Parser = struct {
             .LBrace => try self.parseBrace(),
             .Return => try self.parseReturn(),
             .LParen => try self.parseGroupedExpression(),
+            .Null => self.parseNull(),
             else => {
                 std.debug.print("unknown token type: {any}\n", .{self.cur_token.type});
                 return ParserError.UnknownTokenType;
@@ -567,6 +571,11 @@ pub const Parser = struct {
         const expression = try self.parseExpression(.Lowest);
         try self.advanceAndExpect(.RParen);
         return expression.*;
+    }
+
+    fn parseNull(self: *Parser) Expression {
+        _ = self.cur_token.literal;
+        return .Null;
     }
 
     fn parseRight(self: *Parser, left: Expression) !Expression {

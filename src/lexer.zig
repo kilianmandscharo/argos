@@ -13,6 +13,7 @@ pub const TokenType = enum {
     Float,
     True,
     False,
+    Null,
 
     Identifier,
     Assign,
@@ -77,6 +78,7 @@ const keywords = std.StaticStringMap(Token).initComptime(.{
     .{ "for", Token{ .type = .For, .literal = "for" } },
     .{ "or", Token{ .type = .Or, .literal = "or" } },
     .{ "and", Token{ .type = .And, .literal = "and" } },
+    .{ "null", Token{ .type = .Null, .literal = "null" } },
 });
 
 pub const Lexer = struct {
