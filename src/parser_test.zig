@@ -90,13 +90,11 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
         },
         .FunctionLiteral => |func_literal| {
             try std.testing.expectEqualStrings(func_literal.name, actual.FunctionLiteral.name);
-            try std.testing.expectEqual(func_literal.is_one_liner, actual.FunctionLiteral.is_one_liner);
             try std.testing.expectEqual(func_literal.params.items.len, actual.FunctionLiteral.params.items.len);
             try expectExpression(Expression{ .BlockExpression = func_literal.body }, Expression{ .BlockExpression = actual.FunctionLiteral.body });
         },
         .IfExpression => |if_expression| {
             try expectExpression(if_expression.condition.*, actual.IfExpression.condition.*);
-            try std.testing.expectEqual(if_expression.is_one_liner, actual.IfExpression.is_one_liner);
             try expectExpression(Expression{ .BlockExpression = if_expression.body }, Expression{ .BlockExpression = actual.IfExpression.body });
             if (if_expression.alternative) |alternative| {
                 try expectExpression(Expression{ .BlockExpression = alternative }, Expression{ .BlockExpression = actual.IfExpression.alternative.? });
@@ -132,7 +130,6 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
         },
         .BlockExpression => |block_expression| {
             try std.testing.expectEqual(block_expression.expressions.items.len, actual.BlockExpression.expressions.items.len);
-            try std.testing.expectEqual(block_expression.is_one_liner, actual.BlockExpression.is_one_liner);
             for (block_expression.expressions.items, 0..) |expression, i| {
                 try expectExpression(expression.*, actual.BlockExpression.expressions.items[i].*);
             }
@@ -373,6 +370,69 @@ test "should parse infix expression" {
             },
         },
         .{
+            .description = "should preserve order of operations without parens",
+            .input = "3 * 4 / 3",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .left = &Expression{
+                                .IntegerLiteral = 3,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 4,
+                            },
+                            .operator = .Asterisk,
+                        },
+                    },
+                    .right = &Expression{ .IntegerLiteral = 3 },
+                    .operator = .Slash,
+                },
+            },
+        },
+        .{
+            .description = "should respect parentheses in first pos",
+            .input = "(3 * 4) / 3",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .left = &Expression{
+                                .IntegerLiteral = 3,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 4,
+                            },
+                            .operator = .Asterisk,
+                        },
+                    },
+                    .right = &Expression{ .IntegerLiteral = 3 },
+                    .operator = .Slash,
+                },
+            },
+        },
+        .{
+            .description = "should respect parentheses in second pos",
+            .input = "3 * (4 / 3)",
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{ .IntegerLiteral = 3 },
+                    .right = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .left = &Expression{
+                                .IntegerLiteral = 4,
+                            },
+                            .right = &Expression{
+                                .IntegerLiteral = 3,
+                            },
+                            .operator = .Slash,
+                        },
+                    },
+                    .operator = .Asterisk,
+                },
+            },
+        },
+        .{
             .description = "should parse float multiplication",
             .input = "5.3 * 66.5",
             .expected_expression = Expression{
@@ -599,10 +659,8 @@ test "function declaration" {
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
                     .name = "test",
-                    .is_one_liner = true,
                     .params = .{},
                     .body = BlockExpression{
-                        .is_one_liner = true,
                         .expressions = .{},
                     },
                 },
@@ -618,10 +676,8 @@ test "function declaration" {
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
                     .name = "test",
-                    .is_one_liner = false,
                     .params = .{},
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = .{},
                     },
                 },
@@ -635,13 +691,11 @@ test "function declaration" {
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
                     .name = "test",
-                    .is_one_liner = true,
                     .params = try list([]const u8, arena.allocator(), &.{
                         "a",
                         "b",
                     }),
                     .body = BlockExpression{
-                        .is_one_liner = true,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -673,13 +727,11 @@ test "function declaration" {
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
                     .name = "test",
-                    .is_one_liner = false,
                     .params = try list([]const u8, arena.allocator(), &.{
                         "a",
                         "b",
                     }),
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -713,13 +765,11 @@ test "function declaration" {
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
                     .name = "test",
-                    .is_one_liner = false,
                     .params = try list([]const u8, arena.allocator(), &.{
                         "a",
                         "b",
                     }),
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -796,13 +846,11 @@ test "function declaration" {
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
                     .name = "test",
-                    .is_one_liner = false,
                     .params = try list([]const u8, arena.allocator(), &.{
                         "a",
                         "b",
                     }),
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -872,13 +920,11 @@ test "function declaration" {
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
                     .name = "test",
-                    .is_one_liner = true,
                     .params = try list([]const u8, arena.allocator(), &.{
                         "a",
                         "b",
                     }),
                     .body = BlockExpression{
-                        .is_one_liner = true,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -910,13 +956,11 @@ test "function declaration" {
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
                     .name = "test",
-                    .is_one_liner = false,
                     .params = try list([]const u8, arena.allocator(), &.{
                         "a",
                         "b",
                     }),
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -987,10 +1031,8 @@ test "function declaration" {
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
                     .name = "test",
-                    .is_one_liner = false,
                     .params = .{},
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -1059,12 +1101,10 @@ test "function declaration" {
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
                     .name = "test",
-                    .is_one_liner = false,
                     .params = try list([]const u8, arena.allocator(), &.{
                         "n",
                     }),
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -1077,7 +1117,6 @@ test "function declaration" {
                                             },
                                         },
                                         .body = BlockExpression{
-                                            .is_one_liner = false,
                                             .expressions = try list(*const Expression, arena.allocator(), &.{
                                                 &Expression{
                                                     .Statement = &Expression{
@@ -1089,7 +1128,6 @@ test "function declaration" {
                                             }),
                                         },
                                         .alternative = null,
-                                        .is_one_liner = false,
                                     },
                                 },
                             },
@@ -1104,7 +1142,6 @@ test "function declaration" {
                                             },
                                         },
                                         .body = BlockExpression{
-                                            .is_one_liner = true,
                                             .expressions = try list(*const Expression, arena.allocator(), &.{
                                                 &Expression{
                                                     .Statement = &Expression{
@@ -1116,7 +1153,6 @@ test "function declaration" {
                                             }),
                                         },
                                         .alternative = null,
-                                        .is_one_liner = true,
                                     },
                                 },
                             },
@@ -1149,7 +1185,6 @@ test "if expressions" {
             ,
             .expected_expression = Expression{
                 .IfExpression = IfExpression{
-                    .is_one_liner = true,
                     .condition = &Expression{
                         .InfixExpression = InfixExpression{
                             .operator = .Eq,
@@ -1162,7 +1197,6 @@ test "if expressions" {
                         },
                     },
                     .body = BlockExpression{
-                        .is_one_liner = true,
                         .expressions = .{},
                     },
                     .alternative = null,
@@ -1176,7 +1210,6 @@ test "if expressions" {
             ,
             .expected_expression = Expression{
                 .IfExpression = IfExpression{
-                    .is_one_liner = true,
                     .condition = &Expression{
                         .InfixExpression = InfixExpression{
                             .operator = .Eq,
@@ -1189,11 +1222,9 @@ test "if expressions" {
                         },
                     },
                     .body = BlockExpression{
-                        .is_one_liner = true,
                         .expressions = .{},
                     },
                     .alternative = BlockExpression{
-                        .is_one_liner = true,
                         .expressions = .{},
                     },
                 },
@@ -1206,7 +1237,6 @@ test "if expressions" {
             ,
             .expected_expression = Expression{
                 .IfExpression = IfExpression{
-                    .is_one_liner = true,
                     .condition = &Expression{
                         .InfixExpression = InfixExpression{
                             .operator = .Eq,
@@ -1219,7 +1249,6 @@ test "if expressions" {
                         },
                     },
                     .body = BlockExpression{
-                        .is_one_liner = true,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -1247,7 +1276,6 @@ test "if expressions" {
             ,
             .expected_expression = Expression{
                 .IfExpression = IfExpression{
-                    .is_one_liner = true,
                     .condition = &Expression{
                         .InfixExpression = InfixExpression{
                             .operator = .Eq,
@@ -1260,7 +1288,6 @@ test "if expressions" {
                         },
                     },
                     .body = BlockExpression{
-                        .is_one_liner = true,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -1278,7 +1305,6 @@ test "if expressions" {
                         }),
                     },
                     .alternative = BlockExpression{
-                        .is_one_liner = true,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -1307,7 +1333,6 @@ test "if expressions" {
             ,
             .expected_expression = Expression{
                 .IfExpression = IfExpression{
-                    .is_one_liner = false,
                     .condition = &Expression{
                         .InfixExpression = InfixExpression{
                             .operator = .Eq,
@@ -1320,7 +1345,6 @@ test "if expressions" {
                         },
                     },
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = .{},
                     },
                     .alternative = null,
@@ -1335,7 +1359,6 @@ test "if expressions" {
             ,
             .expected_expression = Expression{
                 .IfExpression = IfExpression{
-                    .is_one_liner = false,
                     .condition = &Expression{
                         .InfixExpression = InfixExpression{
                             .operator = .Eq,
@@ -1348,7 +1371,6 @@ test "if expressions" {
                         },
                     },
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = .{},
                     },
                     .alternative = null,
@@ -1364,7 +1386,6 @@ test "if expressions" {
             ,
             .expected_expression = Expression{
                 .IfExpression = IfExpression{
-                    .is_one_liner = false,
                     .condition = &Expression{
                         .InfixExpression = InfixExpression{
                             .operator = .Eq,
@@ -1377,11 +1398,9 @@ test "if expressions" {
                         },
                     },
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = .{},
                     },
                     .alternative = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = .{},
                     },
                 },
@@ -1396,7 +1415,6 @@ test "if expressions" {
             ,
             .expected_expression = Expression{
                 .IfExpression = IfExpression{
-                    .is_one_liner = false,
                     .condition = &Expression{
                         .InfixExpression = InfixExpression{
                             .operator = .Eq,
@@ -1409,7 +1427,6 @@ test "if expressions" {
                         },
                     },
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -1441,7 +1458,6 @@ test "if expressions" {
             ,
             .expected_expression = Expression{
                 .IfExpression = IfExpression{
-                    .is_one_liner = false,
                     .condition = &Expression{
                         .InfixExpression = InfixExpression{
                             .operator = .Eq,
@@ -1454,7 +1470,6 @@ test "if expressions" {
                         },
                     },
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -1472,7 +1487,6 @@ test "if expressions" {
                         }),
                     },
                     .alternative = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -1602,7 +1616,6 @@ test "for expression" {
                         },
                     },
                     .body = BlockExpression{
-                        .is_one_liner = false,
                         .expressions = try list(*const Expression, arena.allocator(), &.{
                             &Expression{
                                 .Statement = &Expression{
@@ -1724,14 +1737,12 @@ test "function call" {
                 .CallExpression = CallExpression{
                     .function = &Expression{
                         .FunctionLiteral = FunctionLiteral{
-                            .is_one_liner = false,
                             .name = "test",
                             .params = try list([]const u8, arena.allocator(), &.{
                                 "a",
                                 "b",
                             }),
                             .body = BlockExpression{
-                                .is_one_liner = false,
                                 .expressions = try list(*const Expression, arena.allocator(), &.{
                                     &Expression{
                                         .Statement = &Expression{
@@ -1768,14 +1779,12 @@ test "function call" {
                 .CallExpression = CallExpression{
                     .function = &Expression{
                         .FunctionLiteral = FunctionLiteral{
-                            .is_one_liner = true,
                             .name = "test",
                             .params = try list([]const u8, arena.allocator(), &.{
                                 "a",
                                 "b",
                             }),
                             .body = BlockExpression{
-                                .is_one_liner = true,
                                 .expressions = try list(*const Expression, arena.allocator(), &.{
                                     &Expression{
                                         .Statement = &Expression{
@@ -2493,13 +2502,11 @@ test "parse program" {
                     &Expression{
                         .Statement = &Expression{
                             .FunctionLiteral = FunctionLiteral{
-                                .is_one_liner = false,
                                 .name = "fib",
                                 .params = try list([]const u8, arena.allocator(), &.{
                                     "n",
                                 }),
                                 .body = BlockExpression{
-                                    .is_one_liner = false,
                                     .expressions = try list(*const Expression, arena.allocator(), &.{
                                         &Expression{
                                             .Statement = &Expression{
@@ -2538,7 +2545,6 @@ test "parse program" {
                                                         },
                                                     },
                                                     .body = BlockExpression{
-                                                        .is_one_liner = false,
                                                         .expressions = try list(*const Expression, arena.allocator(), &.{
                                                             &Expression{
                                                                 .Statement = &Expression{

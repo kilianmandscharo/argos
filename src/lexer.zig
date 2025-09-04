@@ -66,6 +66,19 @@ pub const Token = struct {
     }
 };
 
+const keywords = std.StaticStringMap(Token).initComptime(.{
+    .{ "false", Token{ .type = .False, .literal = "false" } },
+    .{ "true", Token{ .type = .True, .literal = "true" } },
+    .{ "if", Token{ .type = .If, .literal = "if" } },
+    .{ "else", Token{ .type = .Else, .literal = "else" } },
+    .{ "return", Token{ .type = .Return, .literal = "return" } },
+    .{ "fnc", Token{ .type = .Function, .literal = "fnc" } },
+    .{ "in", Token{ .type = .In, .literal = "in" } },
+    .{ "for", Token{ .type = .For, .literal = "for" } },
+    .{ "or", Token{ .type = .Or, .literal = "or" } },
+    .{ "and", Token{ .type = .And, .literal = "and" } },
+});
+
 pub const Lexer = struct {
     buf: []const u8,
     pos: usize,
@@ -235,19 +248,6 @@ pub const Lexer = struct {
         }
 
         const result = self.buf[start..self.pos];
-
-        const keywords = std.StaticStringMap(Token).initComptime(.{
-            .{ "false", Token{ .type = .False, .literal = "false" } },
-            .{ "true", Token{ .type = .True, .literal = "true" } },
-            .{ "if", Token{ .type = .If, .literal = "if" } },
-            .{ "else", Token{ .type = .Else, .literal = "else" } },
-            .{ "return", Token{ .type = .Return, .literal = "return" } },
-            .{ "fnc", Token{ .type = .Function, .literal = "fnc" } },
-            .{ "in", Token{ .type = .In, .literal = "in" } },
-            .{ "for", Token{ .type = .For, .literal = "for" } },
-            .{ "or", Token{ .type = .Or, .literal = "or" } },
-            .{ "and", Token{ .type = .And, .literal = "and" } },
-        });
 
         if (keywords.get(result)) |token| {
             return token;
