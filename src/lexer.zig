@@ -235,48 +235,25 @@ pub const Lexer = struct {
         }
 
         const result = self.buf[start..self.pos];
+
+        const keywords = std.StaticStringMap(Token).initComptime(.{
+            .{ "false", Token{ .type = .False, .literal = "false" } },
+            .{ "true", Token{ .type = .True, .literal = "true" } },
+            .{ "if", Token{ .type = .If, .literal = "if" } },
+            .{ "else", Token{ .type = .Else, .literal = "else" } },
+            .{ "return", Token{ .type = .Return, .literal = "return" } },
+            .{ "fnc", Token{ .type = .Function, .literal = "fnc" } },
+            .{ "in", Token{ .type = .In, .literal = "in" } },
+            .{ "for", Token{ .type = .For, .literal = "for" } },
+            .{ "or", Token{ .type = .Or, .literal = "or" } },
+            .{ "and", Token{ .type = .And, .literal = "and" } },
+        });
+
+        if (keywords.get(result)) |token| {
+            return token;
+        }
+
         const arena_copy = try self.arena.dupe(u8, result);
-
-        if (std.mem.eql(u8, result, "false")) {
-            return Token{ .type = .False, .literal = arena_copy };
-        }
-
-        if (std.mem.eql(u8, result, "true")) {
-            return Token{ .type = .True, .literal = arena_copy };
-        }
-
-        if (std.mem.eql(u8, result, "if")) {
-            return Token{ .type = .If, .literal = arena_copy };
-        }
-
-        if (std.mem.eql(u8, result, "else")) {
-            return Token{ .type = .Else, .literal = arena_copy };
-        }
-
-        if (std.mem.eql(u8, result, "return")) {
-            return Token{ .type = .Return, .literal = arena_copy };
-        }
-
-        if (std.mem.eql(u8, result, "fnc")) {
-            return Token{ .type = .Function, .literal = arena_copy };
-        }
-
-        if (std.mem.eql(u8, result, "in")) {
-            return Token{ .type = .In, .literal = arena_copy };
-        }
-
-        if (std.mem.eql(u8, result, "for")) {
-            return Token{ .type = .For, .literal = arena_copy };
-        }
-
-        if (std.mem.eql(u8, result, "or")) {
-            return Token{ .type = .Or, .literal = arena_copy };
-        }
-
-        if (std.mem.eql(u8, result, "and")) {
-            return Token{ .type = .And, .literal = arena_copy };
-        }
-
         return Token{ .type = .Identifier, .literal = arena_copy };
     }
 
