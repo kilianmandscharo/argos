@@ -192,7 +192,9 @@ pub const Evaluator = struct {
             },
             .Statement => |statement| {
                 var value = try self.eval(statement, env);
-                value.decRef(env);
+                if (statement.* != .Identifier) {
+                    value.decRef(env);
+                }
                 return value;
             },
             .ReturnExpression => |return_expression| {

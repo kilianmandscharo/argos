@@ -15,17 +15,19 @@ const String = evaluator_module.String;
 const test_utils = @import("test_utils.zig");
 const runTests = test_utils.runTests;
 
+const DEBUG = true;
+
 pub fn assertResult(arena: std.mem.Allocator, input: []const u8, expected: Object) !void {
     var lexer = try Lexer.init(arena, input);
-    var parser = try Parser.init(&lexer, .{ .arena = arena, .debug = false });
+    var parser = try Parser.init(&lexer, .{ .arena = arena, .debug = DEBUG });
     const program = try parser.parseProgram();
 
     const allocator = std.testing.allocator;
 
-    const env = try Environment.init(.{ .gpa = allocator, .debug = true });
+    const env = try Environment.init(.{ .gpa = allocator, .debug = DEBUG });
     defer env.deinit();
 
-    var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = false });
+    var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = DEBUG });
     const result = try evaluator.eval(&program, env);
 
     try expectObject(expected, result);
@@ -476,15 +478,15 @@ test "memory leaks" {
     const run = struct {
         fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
             var lexer = try Lexer.init(arena, test_case.input);
-            var parser = try Parser.init(&lexer, .{ .arena = arena, .debug = false });
+            var parser = try Parser.init(&lexer, .{ .arena = arena, .debug = DEBUG });
             const program = try parser.parseProgram();
 
             const allocator = std.testing.allocator;
 
-            const env = try Environment.init(.{ .gpa = allocator, .debug = true });
+            const env = try Environment.init(.{ .gpa = allocator, .debug = DEBUG });
             defer env.deinit();
 
-            var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = false });
+            var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = DEBUG });
             const result = try evaluator.eval(&program, env);
             _ = result;
         }
@@ -606,6 +608,15 @@ test "memory leaks" {
             \\first = "Hello, "
             \\second = "World!"
             \\result = first + second
+            ,
+        },
+        .{
+            .description = "string concatenation with string vars and assignment",
+            .input =
+            \\s = "a"
+            \\s
+            \\s + "b"
+            \\s + "c"
             ,
         },
     };

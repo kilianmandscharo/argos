@@ -20,7 +20,7 @@ pub fn start() !void {
         }
     }
 
-    var env = try Environment.init(.{ .gpa = gpaAllocator });
+    var env = try Environment.init(.{ .gpa = gpaAllocator, .debug = true });
     defer env.deinit();
 
     var stdin_buf: [1024]u8 = undefined;
