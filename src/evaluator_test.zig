@@ -10,24 +10,25 @@ const evaluator_module = @import("evaluator.zig");
 const Evaluator = evaluator_module.Evaluator;
 const Object = evaluator_module.Object;
 const Environment = evaluator_module.Environment;
+const String = evaluator_module.String;
 
 const test_utils = @import("test_utils.zig");
 const runTests = test_utils.runTests;
 
-pub fn getResult(arena: std.mem.Allocator, input: []const u8) !Object {
+pub fn assertResult(arena: std.mem.Allocator, input: []const u8, expected: Object) !void {
     var lexer = try Lexer.init(arena, input);
     var parser = try Parser.init(&lexer, .{ .arena = arena, .debug = false });
     const program = try parser.parseProgram();
 
     const allocator = std.testing.allocator;
 
-    const env = try Environment.init(.{ .gpa = allocator, .debug = false });
+    const env = try Environment.init(.{ .gpa = allocator, .debug = true });
     defer env.deinit();
 
     var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = false });
     const result = try evaluator.eval(&program, env);
 
-    return result;
+    try expectObject(expected, result);
 }
 
 const ObjectTestCase = struct {
@@ -36,10 +37,26 @@ const ObjectTestCase = struct {
     expected_output: Object,
 };
 
+fn expectObject(expected: Object, actual: Object) !void {
+    const Tag = std.meta.Tag(@TypeOf(expected));
+
+    const expectedTag = @as(Tag, expected);
+    const actualTag = @as(Tag, actual);
+
+    try std.testing.expectEqual(expectedTag, actualTag);
+
+    switch (expected) {
+        .String => |string| {
+            try std.testing.expectEqual(string.ref_count, actual.String.ref_count);
+            try std.testing.expectEqualStrings(string.data, actual.String.data);
+        },
+        else => try std.testing.expectEqual(expected, actual),
+    }
+}
+
 const runObjectTest = struct {
     fn runTest(arena: std.mem.Allocator, test_case: ObjectTestCase) anyerror!void {
-        const result = try getResult(arena, test_case.input);
-        try std.testing.expectEqual(test_case.expected_output, result);
+        try assertResult(arena, test_case.input, test_case.expected_output);
     }
 }.runTest;
 
@@ -397,6 +414,41 @@ test "array" {
     try runTests(ObjectTestCase, "evaluate array", &test_cases, runObjectTest);
 }
 
+test "string" {
+    const test_cases = [_]ObjectTestCase{
+        .{
+            .description = "equals true",
+            .input =
+            \\"test" == "test"
+            ,
+            .expected_output = Object{ .Boolean = true },
+        },
+        .{
+            .description = "equals false",
+            .input =
+            \\"test" == "not test"
+            ,
+            .expected_output = Object{ .Boolean = false },
+        },
+        .{
+            .description = "not equals true",
+            .input =
+            \\"test" != "not test"
+            ,
+            .expected_output = Object{ .Boolean = true },
+        },
+        .{
+            .description = "not equals false",
+            .input =
+            \\"test" != "test"
+            ,
+            .expected_output = Object{ .Boolean = false },
+        },
+    };
+
+    try runTests(ObjectTestCase, "evaluate string", &test_cases, runObjectTest);
+}
+
 test "program" {
     const test_cases = [_]ObjectTestCase{
         .{
@@ -423,7 +475,17 @@ test "memory leaks" {
 
     const run = struct {
         fn runTest(arena: std.mem.Allocator, test_case: TestCase) anyerror!void {
-            const result = try getResult(arena, test_case.input);
+            var lexer = try Lexer.init(arena, test_case.input);
+            var parser = try Parser.init(&lexer, .{ .arena = arena, .debug = false });
+            const program = try parser.parseProgram();
+
+            const allocator = std.testing.allocator;
+
+            const env = try Environment.init(.{ .gpa = allocator, .debug = true });
+            defer env.deinit();
+
+            var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = false });
+            const result = try evaluator.eval(&program, env);
             _ = result;
         }
     }.runTest;
@@ -474,6 +536,76 @@ test "memory leaks" {
             \\    return array[0] + array[1]
             \\}
             \\test()
+            ,
+        },
+        .{
+            .description = "string literal",
+            .input =
+            \\"Hello, World!"
+            ,
+        },
+        .{
+            .description = "string assignment",
+            .input =
+            \\s = "Hello, World!"
+            ,
+        },
+        .{
+            .description = "array of strings",
+            .input =
+            \\["a", "b", "c", "d", "e"]
+            ,
+        },
+        .{
+            .description = "array of strings assignment",
+            .input =
+            \\a = ["a", "b", "c", "d", "e"]
+            ,
+        },
+        .{
+            .description = "array of array of strings",
+            .input =
+            \\[["a", "b"], ["c", "d"], ["e", "f"]]
+            ,
+        },
+        .{
+            .description = "table literal",
+            .input =
+            \\{a = 1, b = 2, c = 3}
+            ,
+        },
+        .{
+            .description = "table assignment",
+            .input =
+            \\t = {a = 1, b = 2, c = 3}
+            ,
+        },
+        .{
+            .description = "table literal of strings",
+            .input =
+            \\{a = "a", b = "b", c = "c"}
+            ,
+        },
+        .{
+            .description = "string concatenation",
+            .input =
+            \\"Hello, " + "World!"
+            ,
+        },
+        .{
+            .description = "string concatenation with string vars",
+            .input =
+            \\first = "Hello, "
+            \\second = "World!"
+            \\first + second
+            ,
+        },
+        .{
+            .description = "string concatenation with string vars and assignment",
+            .input =
+            \\first = "Hello, "
+            \\second = "World!"
+            \\result = first + second
             ,
         },
     };

@@ -67,7 +67,7 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
 
     try std.testing.expectEqual(expectedTag, actualTag);
 
-    return switch (expected) {
+    switch (expected) {
         .Program => |program| {
             try std.testing.expectEqual(program.items.len, actual.Program.items.len);
             for (program.items, 0..) |item, i| {
@@ -146,7 +146,7 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
             try expectExpression(index_expression.index_expression.*, actual.IndexExpression.index_expression.*);
         },
         else => try std.testing.expectEqual(expected, actual),
-    };
+    }
 }
 
 test "parse expressions" {

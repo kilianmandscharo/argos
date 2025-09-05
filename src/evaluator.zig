@@ -59,11 +59,18 @@ pub const Object = union(enum) {
                 printDebug("destroyed string\n", .{}, env.debug);
             },
             .Array => |array| {
+                for (array.data.items) |*item| {
+                    item.decRef(env);
+                }
                 array.data.deinit(env.gpa);
                 env.gpa.destroy(array);
                 printDebug("destroyed array\n", .{}, env.debug);
             },
             .Table => |table| {
+                var iterator = table.data.iterator();
+                while (iterator.next()) |item| {
+                    item.value_ptr.decRef(env);
+                }
                 table.data.deinit(env.gpa);
                 env.gpa.destroy(table);
                 printDebug("destroyed table\n", .{}, env.debug);
@@ -152,19 +159,19 @@ const Function = struct {
     env: *Environment,
 };
 
-const Array = struct {
+pub const Array = struct {
     data: std.ArrayListUnmanaged(Object),
     ref_count: usize,
 };
 
-const Table = struct {
+pub const Table = struct {
     data: std.StringHashMapUnmanaged(Object),
     ref_count: usize,
 };
 
-const String = struct {
+pub const String = struct {
     data: []const u8,
-    ref_count: usize = 1,
+    ref_count: usize,
 };
 
 pub const Evaluator = struct {
@@ -216,12 +223,19 @@ pub const Evaluator = struct {
             .BooleanLiteral => |boolean| return Object{ .Boolean = boolean },
             .StringLiteral => |string| {
                 const string_owned = try self.gpa.dupe(u8, string);
-                return Object{ .String = String{ .data = string_owned } };
+                return Object{ .String = String{ .data = string_owned, .ref_count = 1 } };
             },
             .InfixExpression => |infix| {
-                const left = try self.eval(infix.left, env);
-                const right = try self.eval(infix.right, env);
-                return self.evalInfixExpression(left, right, infix.operator);
+                var left = try self.eval(infix.left, env);
+                var right = try self.eval(infix.right, env);
+                const evaluated = self.evalInfixExpression(&left, &right, infix.operator);
+                if (infix.left.* == .StringLiteral) {
+                    left.decRef(env);
+                }
+                if (infix.right.* == .StringLiteral) {
+                    right.decRef(env);
+                }
+                return evaluated;
             },
             .PrefixExpression => |prefix| {
                 const right = try self.eval(prefix.expression, env);
@@ -484,10 +498,10 @@ pub const Evaluator = struct {
         }
     }
 
-    fn evalInfixExpression(self: *Evaluator, left: Object, right: Object, operator: Operator) !Object {
-        switch (left) {
+    fn evalInfixExpression(self: *Evaluator, left: *Object, right: *Object, operator: Operator) !Object {
+        switch (left.*) {
             .Integer => |left_int| {
-                switch (right) {
+                switch (right.*) {
                     .Integer => |right_int| {
                         return try self.evalIntegerInfixExpression(left_int, right_int, operator);
                     },
@@ -495,13 +509,12 @@ pub const Evaluator = struct {
                         return self.evalFloatInfixExpression(@floatFromInt(left_int), right_float, operator);
                     },
                     else => {
-                        self.printError("type mismatch: {s} <> {s}\n", .{ left.getType(), right.getType() });
-                        return EvaluatorError.RuntimeError;
+                        return self.runtimeError("type mismatch: {s} <> {s}\n", .{ left.getType(), right.getType() });
                     },
                 }
             },
             .Float => |left_float| {
-                switch (right) {
+                switch (right.*) {
                     .Integer => |right_int| {
                         return try self.evalFloatInfixExpression(left_float, @floatFromInt(right_int), operator);
                     },
@@ -509,27 +522,55 @@ pub const Evaluator = struct {
                         return try self.evalFloatInfixExpression(left_float, right_float, operator);
                     },
                     else => {
-                        self.printError("type mismatch: {s} <> {s}\n", .{ left.getType(), right.getType() });
-                        return EvaluatorError.RuntimeError;
+                        return self.runtimeError("type mismatch: {s} <> {s}\n", .{ left.getType(), right.getType() });
                     },
                 }
             },
             .Boolean => |left_bool| {
-                switch (right) {
+                switch (right.*) {
                     .Boolean => |right_bool| {
                         return self.evalBooleanInfixExpression(left_bool, right_bool, operator);
                     },
                     else => {
-                        self.printError("type mismatch: {s} <> {s}\n", .{ left.getType(), right.getType() });
-                        return EvaluatorError.RuntimeError;
+                        return self.runtimeError("type mismatch: {s} <> {s}\n", .{ left.getType(), right.getType() });
+                    },
+                }
+            },
+            .String => |left_string| {
+                switch (right.*) {
+                    .String => |right_string| {
+                        return self.evalStringInfixExpression(left_string, right_string, operator);
+                    },
+                    else => {
+                        return self.runtimeError("type mismatch: {s} <> {s}\n", .{ left.getType(), right.getType() });
                     },
                 }
             },
             else => {
-                self.printError("unknown left expression in infix expression: {s}\n", .{@tagName(left)});
-                return EvaluatorError.RuntimeError;
+                return self.runtimeError("unknown left expression in infix expression: {s}\n", .{@tagName(left.*)});
             },
         }
+    }
+
+    fn evalStringInfixExpression(self: *Evaluator, left: String, right: String, operator: Operator) !Object {
+        return switch (operator) {
+            .Plus => {
+                const data = try self.gpa.alloc(u8, left.data.len + right.data.len);
+                @memcpy(data[0..left.data.len], left.data);
+                @memcpy(data[left.data.len..], right.data);
+                return Object{ .String = String{ .data = data, .ref_count = 1 } };
+            },
+            .Eq => {
+                return Object{ .Boolean = std.mem.eql(u8, left.data, right.data) };
+            },
+            .NotEq => {
+                return Object{ .Boolean = !std.mem.eql(u8, left.data, right.data) };
+            },
+            else => {
+                self.printError("invalid operator '{f}' for type String\n", .{operator});
+                return EvaluatorError.RuntimeError;
+            },
+        };
     }
 
     fn evalBooleanInfixExpression(self: *Evaluator, left: bool, right: bool, operator: Operator) !Object {
