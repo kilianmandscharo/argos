@@ -8,6 +8,7 @@ const log = logging.log;
 const Expression = parser_module.Expression;
 const Operator = parser_module.Operator;
 const BlockExpression = parser_module.BlockExpression;
+const FunctionParam = parser_module.FunctionParam;
 
 const EvaluatorError = error{
     RuntimeError,
@@ -154,8 +155,8 @@ pub const Object = union(enum) {
 };
 
 const Function = struct {
-    params: std.ArrayListUnmanaged([]const u8),
-    body: BlockExpression,
+    params: std.ArrayListUnmanaged(FunctionParam),
+    body: *const Expression,
     env: *Environment,
 };
 
@@ -245,7 +246,6 @@ pub const Evaluator = struct {
             },
             .FunctionLiteral => |function| {
                 const object = Object{ .Function = .{ .params = function.params, .body = function.body, .env = env } };
-                try env.set(function.name, object);
                 return object;
             },
             .CallExpression => |call_expression| {
@@ -262,13 +262,17 @@ pub const Evaluator = struct {
                 switch (func) {
                     .Function => |function| {
                         const extended_env = try Environment.initEnclosed(self.gpa, function.env);
-                        for (0..function.params.items.len) |i| {
-                            const name = function.params.items[i];
-                            const arg = args.items[i];
-                            try extended_env.set(name, arg);
+                        for (function.params.items, 0..) |param, i| {
+                            switch (param) {
+                                .Identifier => |name| {
+                                    const arg = args.items[i];
+                                    try extended_env.set(name, arg);
+                                },
+                                else => return error.NotImplemented,
+                            }
                         }
 
-                        const result = try self.eval(&Expression{ .BlockExpression = function.body }, extended_env);
+                        const result = try self.eval(function.body, extended_env);
 
                         switch (result) {
                             .ReturnValue => |obj| {

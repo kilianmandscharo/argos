@@ -35,10 +35,10 @@ pub const TokenType = enum {
     Return,
     If,
     Else,
-    Function,
     For,
     In,
     DotDot,
+    Arrow,
 
     NewLine,
     Eof,
@@ -73,7 +73,6 @@ const keywords = std.StaticStringMap(Token).initComptime(.{
     .{ "if", Token{ .type = .If, .literal = "if" } },
     .{ "else", Token{ .type = .Else, .literal = "else" } },
     .{ "return", Token{ .type = .Return, .literal = "return" } },
-    .{ "fnc", Token{ .type = .Function, .literal = "fnc" } },
     .{ "in", Token{ .type = .In, .literal = "in" } },
     .{ "for", Token{ .type = .For, .literal = "for" } },
     .{ "or", Token{ .type = .Or, .literal = "or" } },
@@ -109,7 +108,6 @@ pub const Lexer = struct {
         const token = switch (char) {
             ',' => Token{ .type = .Comma, .literal = "," },
             '+' => Token{ .type = .Plus, .literal = "+" },
-            '-' => Token{ .type = .Minus, .literal = "-" },
             '/' => Token{ .type = .Slash, .literal = "/" },
             '*' => Token{ .type = .Asterisk, .literal = "*" },
             '(' => Token{ .type = .LParen, .literal = "(" },
@@ -124,6 +122,7 @@ pub const Lexer = struct {
             '^' => Token{ .type = .Caret, .literal = "^" },
             '~' => Token{ .type = .Tilde, .literal = "~" },
             '%' => Token{ .type = .Percent, .literal = "%" },
+            '-' => return self.scanMinus(),
             '<' => return self.scanLt(),
             '>' => return self.scanGt(),
             '.' => return self.scanDot(),
@@ -137,6 +136,17 @@ pub const Lexer = struct {
         self.advancePos();
 
         return token;
+    }
+
+    fn scanMinus(self: *Lexer) Token {
+        self.advancePos();
+        switch (self.getChar().?) {
+            '>' => {
+                self.advancePos();
+                return Token{ .type = .Arrow, .literal = "->" };
+            },
+            else => return Token{ .type = .Minus, .literal = "-" },
+        }
     }
 
     fn scanLt(self: *Lexer) Token {

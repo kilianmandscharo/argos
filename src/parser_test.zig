@@ -14,6 +14,7 @@ const RangeExpression = parser_module.RangeExpression;
 const ForExpression = parser_module.ForExpression;
 const CallExpression = parser_module.CallExpression;
 const FunctionLiteral = parser_module.FunctionLiteral;
+const FunctionParam = parser_module.FunctionParam;
 const BlockExpression = parser_module.BlockExpression;
 const IndexExpression = parser_module.IndexExpression;
 const AssignmentExpression = parser_module.AssignmentExpression;
@@ -89,9 +90,8 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
             try expectExpression(infix_expression.right.*, actual.InfixExpression.right.*);
         },
         .FunctionLiteral => |func_literal| {
-            try std.testing.expectEqualStrings(func_literal.name, actual.FunctionLiteral.name);
             try std.testing.expectEqual(func_literal.params.items.len, actual.FunctionLiteral.params.items.len);
-            try expectExpression(Expression{ .BlockExpression = func_literal.body }, Expression{ .BlockExpression = actual.FunctionLiteral.body });
+            try expectExpression(func_literal.body.*, actual.FunctionLiteral.body.*);
         },
         .IfExpression => |if_expression| {
             try expectExpression(if_expression.condition.*, actual.IfExpression.condition.*);
@@ -654,14 +654,15 @@ test "function declaration" {
         .{
             .description = "empty function one line",
             .input =
-            \\fnc test() {}
+            \\() -> {}
             ,
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
-                    .name = "test",
                     .params = .{},
-                    .body = BlockExpression{
-                        .expressions = .{},
+                    .body = &Expression{
+                        .BlockExpression = BlockExpression{
+                            .expressions = .{},
+                        },
                     },
                 },
             },
@@ -669,16 +670,17 @@ test "function declaration" {
         .{
             .description = "empty function multi lines",
             .input =
-            \\fnc test() {
+            \\() -> {
             \\
             \\}
             ,
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
-                    .name = "test",
                     .params = .{},
-                    .body = BlockExpression{
-                        .expressions = .{},
+                    .body = &Expression{
+                        .BlockExpression = BlockExpression{
+                            .expressions = .{},
+                        },
                     },
                 },
             },
@@ -686,33 +688,34 @@ test "function declaration" {
         .{
             .description = "one liner with params",
             .input =
-            \\fnc test(a, b) { return a + b }
+            \\(a, b) -> { return a + b }
             ,
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
-                    .name = "test",
-                    .params = try list([]const u8, arena.allocator(), &.{
-                        "a",
-                        "b",
+                    .params = try list(FunctionParam, arena.allocator(), &.{
+                        FunctionParam{ .Identifier = "a" },
+                        FunctionParam{ .Identifier = "b" },
                     }),
-                    .body = BlockExpression{
-                        .expressions = try list(*const Expression, arena.allocator(), &.{
-                            &Expression{
-                                .Statement = &Expression{
-                                    .ReturnExpression = &Expression{
-                                        .InfixExpression = InfixExpression{
-                                            .operator = .Plus,
-                                            .left = &Expression{
-                                                .Identifier = "a",
-                                            },
-                                            .right = &Expression{
-                                                .Identifier = "b",
+                    .body = &Expression{
+                        .BlockExpression = BlockExpression{
+                            .expressions = try list(*const Expression, arena.allocator(), &.{
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .ReturnExpression = &Expression{
+                                            .InfixExpression = InfixExpression{
+                                                .operator = .Plus,
+                                                .left = &Expression{
+                                                    .Identifier = "a",
+                                                },
+                                                .right = &Expression{
+                                                    .Identifier = "b",
+                                                },
                                             },
                                         },
                                     },
                                 },
-                            },
-                        }),
+                            }),
+                        },
                     },
                 },
             },
@@ -720,22 +723,217 @@ test "function declaration" {
         .{
             .description = "multiple lines with params",
             .input =
-            \\fnc test(a, b) {
+            \\(a, b) -> {
             \\    return a + b
             \\}
             ,
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
-                    .name = "test",
-                    .params = try list([]const u8, arena.allocator(), &.{
-                        "a",
-                        "b",
+                    .params = try list(FunctionParam, arena.allocator(), &.{
+                        FunctionParam{ .Identifier = "a" },
+                        FunctionParam{ .Identifier = "b" },
                     }),
-                    .body = BlockExpression{
-                        .expressions = try list(*const Expression, arena.allocator(), &.{
-                            &Expression{
-                                .Statement = &Expression{
-                                    .ReturnExpression = &Expression{
+                    .body = &Expression{
+                        .BlockExpression = BlockExpression{
+                            .expressions = try list(*const Expression, arena.allocator(), &.{
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .ReturnExpression = &Expression{
+                                            .InfixExpression = InfixExpression{
+                                                .operator = .Plus,
+                                                .left = &Expression{
+                                                    .Identifier = "a",
+                                                },
+                                                .right = &Expression{
+                                                    .Identifier = "b",
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            }),
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .description = "multi liner with params and multiple statements",
+            .input =
+            \\(a, b) -> {
+            \\    x = a * b
+            \\    y = a / b
+            \\    return x + y
+            \\}
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .params = try list(FunctionParam, arena.allocator(), &.{
+                        FunctionParam{ .Identifier = "a" },
+                        FunctionParam{ .Identifier = "b" },
+                    }),
+                    .body = &Expression{
+                        .BlockExpression = BlockExpression{
+                            .expressions = try list(*const Expression, arena.allocator(), &.{
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .AssignmentExpression = AssignmentExpression{
+                                            .left = &Expression{
+                                                .Identifier = "x",
+                                            },
+                                            .expression = &Expression{
+                                                .InfixExpression = InfixExpression{
+                                                    .operator = .Asterisk,
+                                                    .left = &Expression{
+                                                        .Identifier = "a",
+                                                    },
+                                                    .right = &Expression{
+                                                        .Identifier = "b",
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .AssignmentExpression = AssignmentExpression{
+                                            .left = &Expression{
+                                                .Identifier = "y",
+                                            },
+                                            .expression = &Expression{
+                                                .InfixExpression = InfixExpression{
+                                                    .operator = .Slash,
+                                                    .left = &Expression{
+                                                        .Identifier = "a",
+                                                    },
+                                                    .right = &Expression{
+                                                        .Identifier = "b",
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .ReturnExpression = &Expression{
+                                            .InfixExpression = InfixExpression{
+                                                .operator = .Plus,
+                                                .left = &Expression{
+                                                    .Identifier = "x",
+                                                },
+                                                .right = &Expression{
+                                                    .Identifier = "y",
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            }),
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .description = "multi liner with gaps",
+            .input =
+            \\(a, b) -> {
+            \\
+            \\    x = a * b
+            \\
+            \\    y = a / b
+            \\
+            \\    return x + y
+            \\}
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .params = try list(FunctionParam, arena.allocator(), &.{
+                        FunctionParam{ .Identifier = "a" },
+                        FunctionParam{ .Identifier = "b" },
+                    }),
+                    .body = &Expression{
+                        .BlockExpression = BlockExpression{
+                            .expressions = try list(*const Expression, arena.allocator(), &.{
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .AssignmentExpression = AssignmentExpression{
+                                            .left = &Expression{
+                                                .Identifier = "x",
+                                            },
+                                            .expression = &Expression{
+                                                .InfixExpression = InfixExpression{
+                                                    .operator = .Asterisk,
+                                                    .left = &Expression{
+                                                        .Identifier = "a",
+                                                    },
+                                                    .right = &Expression{
+                                                        .Identifier = "b",
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .AssignmentExpression = AssignmentExpression{
+                                            .left = &Expression{
+                                                .Identifier = "y",
+                                            },
+                                            .expression = &Expression{
+                                                .InfixExpression = InfixExpression{
+                                                    .operator = .Slash,
+                                                    .left = &Expression{
+                                                        .Identifier = "a",
+                                                    },
+                                                    .right = &Expression{
+                                                        .Identifier = "b",
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .ReturnExpression = &Expression{
+                                            .InfixExpression = InfixExpression{
+                                                .operator = .Plus,
+                                                .left = &Expression{
+                                                    .Identifier = "x",
+                                                },
+                                                .right = &Expression{
+                                                    .Identifier = "y",
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            }),
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .description = "one liner without return",
+            .input =
+            \\(a, b) -> { a + b }
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .params = try list(FunctionParam, arena.allocator(), &.{
+                        FunctionParam{ .Identifier = "a" },
+                        FunctionParam{ .Identifier = "b" },
+                    }),
+                    .body = &Expression{
+                        .BlockExpression = BlockExpression{
+                            .expressions = try list(*const Expression, arena.allocator(), &.{
+                                &Expression{
+                                    .Statement = &Expression{
                                         .InfixExpression = InfixExpression{
                                             .operator = .Plus,
                                             .left = &Expression{
@@ -747,199 +945,8 @@ test "function declaration" {
                                         },
                                     },
                                 },
-                            },
-                        }),
-                    },
-                },
-            },
-        },
-        .{
-            .description = "multi liner with params and multiple statements",
-            .input =
-            \\fnc test(a, b) {
-            \\    x = a * b
-            \\    y = a / b
-            \\    return x + y
-            \\}
-            ,
-            .expected_expression = Expression{
-                .FunctionLiteral = FunctionLiteral{
-                    .name = "test",
-                    .params = try list([]const u8, arena.allocator(), &.{
-                        "a",
-                        "b",
-                    }),
-                    .body = BlockExpression{
-                        .expressions = try list(*const Expression, arena.allocator(), &.{
-                            &Expression{
-                                .Statement = &Expression{
-                                    .AssignmentExpression = AssignmentExpression{
-                                        .left = &Expression{
-                                            .Identifier = "x",
-                                        },
-                                        .expression = &Expression{
-                                            .InfixExpression = InfixExpression{
-                                                .operator = .Asterisk,
-                                                .left = &Expression{
-                                                    .Identifier = "a",
-                                                },
-                                                .right = &Expression{
-                                                    .Identifier = "b",
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                            &Expression{
-                                .Statement = &Expression{
-                                    .AssignmentExpression = AssignmentExpression{
-                                        .left = &Expression{
-                                            .Identifier = "y",
-                                        },
-                                        .expression = &Expression{
-                                            .InfixExpression = InfixExpression{
-                                                .operator = .Slash,
-                                                .left = &Expression{
-                                                    .Identifier = "a",
-                                                },
-                                                .right = &Expression{
-                                                    .Identifier = "b",
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                            &Expression{
-                                .Statement = &Expression{
-                                    .ReturnExpression = &Expression{
-                                        .InfixExpression = InfixExpression{
-                                            .operator = .Plus,
-                                            .left = &Expression{
-                                                .Identifier = "x",
-                                            },
-                                            .right = &Expression{
-                                                .Identifier = "y",
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        }),
-                    },
-                },
-            },
-        },
-        .{
-            .description = "multi liner with gaps",
-            .input =
-            \\fnc test(a, b) {
-            \\
-            \\    x = a * b
-            \\
-            \\    y = a / b
-            \\
-            \\    return x + y
-            \\}
-            ,
-            .expected_expression = Expression{
-                .FunctionLiteral = FunctionLiteral{
-                    .name = "test",
-                    .params = try list([]const u8, arena.allocator(), &.{
-                        "a",
-                        "b",
-                    }),
-                    .body = BlockExpression{
-                        .expressions = try list(*const Expression, arena.allocator(), &.{
-                            &Expression{
-                                .Statement = &Expression{
-                                    .AssignmentExpression = AssignmentExpression{
-                                        .left = &Expression{
-                                            .Identifier = "x",
-                                        },
-                                        .expression = &Expression{
-                                            .InfixExpression = InfixExpression{
-                                                .operator = .Asterisk,
-                                                .left = &Expression{
-                                                    .Identifier = "a",
-                                                },
-                                                .right = &Expression{
-                                                    .Identifier = "b",
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                            &Expression{
-                                .Statement = &Expression{
-                                    .AssignmentExpression = AssignmentExpression{
-                                        .left = &Expression{
-                                            .Identifier = "y",
-                                        },
-                                        .expression = &Expression{
-                                            .InfixExpression = InfixExpression{
-                                                .operator = .Slash,
-                                                .left = &Expression{
-                                                    .Identifier = "a",
-                                                },
-                                                .right = &Expression{
-                                                    .Identifier = "b",
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                            &Expression{
-                                .Statement = &Expression{
-                                    .ReturnExpression = &Expression{
-                                        .InfixExpression = InfixExpression{
-                                            .operator = .Plus,
-                                            .left = &Expression{
-                                                .Identifier = "x",
-                                            },
-                                            .right = &Expression{
-                                                .Identifier = "y",
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        }),
-                    },
-                },
-            },
-        },
-        .{
-            .description = "one liner without return",
-            .input =
-            \\fnc test(a, b) { a + b }
-            ,
-            .expected_expression = Expression{
-                .FunctionLiteral = FunctionLiteral{
-                    .name = "test",
-                    .params = try list([]const u8, arena.allocator(), &.{
-                        "a",
-                        "b",
-                    }),
-                    .body = BlockExpression{
-                        .expressions = try list(*const Expression, arena.allocator(), &.{
-                            &Expression{
-                                .Statement = &Expression{
-                                    .InfixExpression = InfixExpression{
-                                        .operator = .Plus,
-                                        .left = &Expression{
-                                            .Identifier = "a",
-                                        },
-                                        .right = &Expression{
-                                            .Identifier = "b",
-                                        },
-                                    },
-                                },
-                            },
-                        }),
+                            }),
+                        },
                     },
                 },
             },
@@ -947,7 +954,7 @@ test "function declaration" {
         .{
             .description = "multi liner without return",
             .input =
-            \\fnc test(a, b) {
+            \\(a, b) -> {
             \\    x = a * b
             \\    y = a / b
             \\    x + y
@@ -955,67 +962,68 @@ test "function declaration" {
             ,
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
-                    .name = "test",
-                    .params = try list([]const u8, arena.allocator(), &.{
-                        "a",
-                        "b",
+                    .params = try list(FunctionParam, arena.allocator(), &.{
+                        FunctionParam{ .Identifier = "a" },
+                        FunctionParam{ .Identifier = "b" },
                     }),
-                    .body = BlockExpression{
-                        .expressions = try list(*const Expression, arena.allocator(), &.{
-                            &Expression{
-                                .Statement = &Expression{
-                                    .AssignmentExpression = AssignmentExpression{
-                                        .left = &Expression{
-                                            .Identifier = "x",
-                                        },
-                                        .expression = &Expression{
-                                            .InfixExpression = InfixExpression{
-                                                .operator = .Asterisk,
-                                                .left = &Expression{
-                                                    .Identifier = "a",
-                                                },
-                                                .right = &Expression{
-                                                    .Identifier = "b",
+                    .body = &Expression{
+                        .BlockExpression = BlockExpression{
+                            .expressions = try list(*const Expression, arena.allocator(), &.{
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .AssignmentExpression = AssignmentExpression{
+                                            .left = &Expression{
+                                                .Identifier = "x",
+                                            },
+                                            .expression = &Expression{
+                                                .InfixExpression = InfixExpression{
+                                                    .operator = .Asterisk,
+                                                    .left = &Expression{
+                                                        .Identifier = "a",
+                                                    },
+                                                    .right = &Expression{
+                                                        .Identifier = "b",
+                                                    },
                                                 },
                                             },
                                         },
                                     },
                                 },
-                            },
-                            &Expression{
-                                .Statement = &Expression{
-                                    .AssignmentExpression = AssignmentExpression{
-                                        .left = &Expression{
-                                            .Identifier = "y",
-                                        },
-                                        .expression = &Expression{
-                                            .InfixExpression = InfixExpression{
-                                                .operator = .Slash,
-                                                .left = &Expression{
-                                                    .Identifier = "a",
-                                                },
-                                                .right = &Expression{
-                                                    .Identifier = "b",
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .AssignmentExpression = AssignmentExpression{
+                                            .left = &Expression{
+                                                .Identifier = "y",
+                                            },
+                                            .expression = &Expression{
+                                                .InfixExpression = InfixExpression{
+                                                    .operator = .Slash,
+                                                    .left = &Expression{
+                                                        .Identifier = "a",
+                                                    },
+                                                    .right = &Expression{
+                                                        .Identifier = "b",
+                                                    },
                                                 },
                                             },
                                         },
                                     },
                                 },
-                            },
-                            &Expression{
-                                .Statement = &Expression{
-                                    .InfixExpression = InfixExpression{
-                                        .operator = .Plus,
-                                        .left = &Expression{
-                                            .Identifier = "x",
-                                        },
-                                        .right = &Expression{
-                                            .Identifier = "y",
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .InfixExpression = InfixExpression{
+                                            .operator = .Plus,
+                                            .left = &Expression{
+                                                .Identifier = "x",
+                                            },
+                                            .right = &Expression{
+                                                .Identifier = "y",
+                                            },
                                         },
                                     },
                                 },
-                            },
-                        }),
+                            }),
+                        },
                     },
                 },
             },
@@ -1023,66 +1031,67 @@ test "function declaration" {
         .{
             .description = "more complex return expression",
             .input =
-            \\fnc test() {
+            \\() -> {
             \\    array = [1, 2]
             \\    return array[0] + array[1]
             \\}
             ,
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
-                    .name = "test",
                     .params = .{},
-                    .body = BlockExpression{
-                        .expressions = try list(*const Expression, arena.allocator(), &.{
-                            &Expression{
-                                .Statement = &Expression{
-                                    .AssignmentExpression = AssignmentExpression{
-                                        .left = &Expression{
-                                            .Identifier = "array",
-                                        },
-                                        .expression = &Expression{
-                                            .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{
-                                                &Expression{
-                                                    .IntegerLiteral = 1,
-                                                },
-                                                &Expression{
-                                                    .IntegerLiteral = 2,
-                                                },
-                                            }),
-                                        },
-                                    },
-                                },
-                            },
-                            &Expression{
-                                .Statement = &Expression{
-                                    .ReturnExpression = &Expression{
-                                        .InfixExpression = InfixExpression{
+                    .body = &Expression{
+                        .BlockExpression = BlockExpression{
+                            .expressions = try list(*const Expression, arena.allocator(), &.{
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .AssignmentExpression = AssignmentExpression{
                                             .left = &Expression{
-                                                .IndexExpression = IndexExpression{
-                                                    .left = &Expression{
-                                                        .Identifier = "array",
-                                                    },
-                                                    .index_expression = &Expression{
-                                                        .IntegerLiteral = 0,
-                                                    },
-                                                },
+                                                .Identifier = "array",
                                             },
-                                            .right = &Expression{
-                                                .IndexExpression = IndexExpression{
-                                                    .left = &Expression{
-                                                        .Identifier = "array",
-                                                    },
-                                                    .index_expression = &Expression{
+                                            .expression = &Expression{
+                                                .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{
+                                                    &Expression{
                                                         .IntegerLiteral = 1,
                                                     },
-                                                },
+                                                    &Expression{
+                                                        .IntegerLiteral = 2,
+                                                    },
+                                                }),
                                             },
-                                            .operator = .Plus,
                                         },
                                     },
                                 },
-                            },
-                        }),
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .ReturnExpression = &Expression{
+                                            .InfixExpression = InfixExpression{
+                                                .left = &Expression{
+                                                    .IndexExpression = IndexExpression{
+                                                        .left = &Expression{
+                                                            .Identifier = "array",
+                                                        },
+                                                        .index_expression = &Expression{
+                                                            .IntegerLiteral = 0,
+                                                        },
+                                                    },
+                                                },
+                                                .right = &Expression{
+                                                    .IndexExpression = IndexExpression{
+                                                        .left = &Expression{
+                                                            .Identifier = "array",
+                                                        },
+                                                        .index_expression = &Expression{
+                                                            .IntegerLiteral = 1,
+                                                        },
+                                                    },
+                                                },
+                                                .operator = .Plus,
+                                            },
+                                        },
+                                    },
+                                },
+                            }),
+                        },
                     },
                 },
             },
@@ -1090,9 +1099,9 @@ test "function declaration" {
         .{
             .description = "with if expression",
             .input =
-            \\fnc test(n) {
-            \\    if n == 0 { 
-            \\        return 1 
+            \\(n) -> {
+            \\    if n == 0 {
+            \\        return 1
             \\    }
             \\    if n == 1 { return 1 }
             \\    return 0
@@ -1100,70 +1109,131 @@ test "function declaration" {
             ,
             .expected_expression = Expression{
                 .FunctionLiteral = FunctionLiteral{
-                    .name = "test",
-                    .params = try list([]const u8, arena.allocator(), &.{
-                        "n",
+                    .params = try list(FunctionParam, arena.allocator(), &.{
+                        FunctionParam{ .Identifier = "n" },
                     }),
-                    .body = BlockExpression{
-                        .expressions = try list(*const Expression, arena.allocator(), &.{
-                            &Expression{
-                                .Statement = &Expression{
-                                    .IfExpression = IfExpression{
-                                        .condition = &Expression{
-                                            .InfixExpression = InfixExpression{
-                                                .left = &Expression{ .Identifier = "n" },
-                                                .right = &Expression{ .IntegerLiteral = 0 },
-                                                .operator = .Eq,
+                    .body = &Expression{
+                        .BlockExpression = BlockExpression{
+                            .expressions = try list(*const Expression, arena.allocator(), &.{
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .IfExpression = IfExpression{
+                                            .condition = &Expression{
+                                                .InfixExpression = InfixExpression{
+                                                    .left = &Expression{ .Identifier = "n" },
+                                                    .right = &Expression{ .IntegerLiteral = 0 },
+                                                    .operator = .Eq,
+                                                },
                                             },
-                                        },
-                                        .body = BlockExpression{
-                                            .expressions = try list(*const Expression, arena.allocator(), &.{
-                                                &Expression{
-                                                    .Statement = &Expression{
-                                                        .ReturnExpression = &Expression{
-                                                            .IntegerLiteral = 1,
+                                            .body = BlockExpression{
+                                                .expressions = try list(*const Expression, arena.allocator(), &.{
+                                                    &Expression{
+                                                        .Statement = &Expression{
+                                                            .ReturnExpression = &Expression{
+                                                                .IntegerLiteral = 1,
+                                                            },
                                                         },
                                                     },
-                                                },
-                                            }),
+                                                }),
+                                            },
+                                            .alternative = null,
                                         },
-                                        .alternative = null,
                                     },
                                 },
-                            },
-                            &Expression{
-                                .Statement = &Expression{
-                                    .IfExpression = IfExpression{
-                                        .condition = &Expression{
-                                            .InfixExpression = InfixExpression{
-                                                .left = &Expression{ .Identifier = "n" },
-                                                .right = &Expression{ .IntegerLiteral = 1 },
-                                                .operator = .Eq,
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .IfExpression = IfExpression{
+                                            .condition = &Expression{
+                                                .InfixExpression = InfixExpression{
+                                                    .left = &Expression{ .Identifier = "n" },
+                                                    .right = &Expression{ .IntegerLiteral = 1 },
+                                                    .operator = .Eq,
+                                                },
                                             },
-                                        },
-                                        .body = BlockExpression{
-                                            .expressions = try list(*const Expression, arena.allocator(), &.{
-                                                &Expression{
-                                                    .Statement = &Expression{
-                                                        .ReturnExpression = &Expression{
-                                                            .IntegerLiteral = 1,
+                                            .body = BlockExpression{
+                                                .expressions = try list(*const Expression, arena.allocator(), &.{
+                                                    &Expression{
+                                                        .Statement = &Expression{
+                                                            .ReturnExpression = &Expression{
+                                                                .IntegerLiteral = 1,
+                                                            },
                                                         },
                                                     },
-                                                },
-                                            }),
+                                                }),
+                                            },
+                                            .alternative = null,
                                         },
-                                        .alternative = null,
                                     },
                                 },
-                            },
-                            &Expression{
-                                .Statement = &Expression{
-                                    .ReturnExpression = &Expression{
-                                        .IntegerLiteral = 0,
+                                &Expression{
+                                    .Statement = &Expression{
+                                        .ReturnExpression = &Expression{
+                                            .IntegerLiteral = 0,
+                                        },
                                     },
                                 },
+                            }),
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .description = "one liner with params and no braces",
+            .input =
+            \\(a, b) -> a + b
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .params = try list(FunctionParam, arena.allocator(), &.{
+                        FunctionParam{ .Identifier = "a" },
+                        FunctionParam{ .Identifier = "b" },
+                    }),
+                    .body = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Plus,
+                            .left = &Expression{
+                                .Identifier = "a",
                             },
-                        }),
+                            .right = &Expression{
+                                .Identifier = "b",
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .description = "with default params",
+            .input =
+            \\(a = 1, b = 2) -> a + b
+            ,
+            .expected_expression = Expression{
+                .FunctionLiteral = FunctionLiteral{
+                    .params = try list(FunctionParam, arena.allocator(), &.{
+                        FunctionParam{
+                            .AssignmentExpression = AssignmentExpression{
+                                .expression = &Expression{ .IntegerLiteral = 1 },
+                                .left = &Expression{ .Identifier = "a" },
+                            },
+                        },
+                        FunctionParam{
+                            .AssignmentExpression = AssignmentExpression{
+                                .expression = &Expression{ .IntegerLiteral = 2 },
+                                .left = &Expression{ .Identifier = "b" },
+                            },
+                        },
+                    }),
+                    .body = &Expression{
+                        .InfixExpression = InfixExpression{
+                            .operator = .Plus,
+                            .left = &Expression{
+                                .Identifier = "a",
+                            },
+                            .right = &Expression{
+                                .Identifier = "b",
+                            },
+                        },
                     },
                 },
             },
@@ -1729,7 +1799,7 @@ test "function call" {
         .{
             .description = "iife",
             .input =
-            \\fnc test(a, b) {
+            \\(a, b) -> {
             \\    return a + b
             \\}(1, 2)
             ,
@@ -1737,29 +1807,30 @@ test "function call" {
                 .CallExpression = CallExpression{
                     .function = &Expression{
                         .FunctionLiteral = FunctionLiteral{
-                            .name = "test",
-                            .params = try list([]const u8, arena.allocator(), &.{
-                                "a",
-                                "b",
+                            .params = try list(FunctionParam, arena.allocator(), &.{
+                                FunctionParam{ .Identifier = "a" },
+                                FunctionParam{ .Identifier = "b" },
                             }),
-                            .body = BlockExpression{
-                                .expressions = try list(*const Expression, arena.allocator(), &.{
-                                    &Expression{
-                                        .Statement = &Expression{
-                                            .ReturnExpression = &Expression{
-                                                .InfixExpression = InfixExpression{
-                                                    .operator = .Plus,
-                                                    .left = &Expression{
-                                                        .Identifier = "a",
-                                                    },
-                                                    .right = &Expression{
-                                                        .Identifier = "b",
+                            .body = &Expression{
+                                .BlockExpression = BlockExpression{
+                                    .expressions = try list(*const Expression, arena.allocator(), &.{
+                                        &Expression{
+                                            .Statement = &Expression{
+                                                .ReturnExpression = &Expression{
+                                                    .InfixExpression = InfixExpression{
+                                                        .operator = .Plus,
+                                                        .left = &Expression{
+                                                            .Identifier = "a",
+                                                        },
+                                                        .right = &Expression{
+                                                            .Identifier = "b",
+                                                        },
                                                     },
                                                 },
                                             },
                                         },
-                                    },
-                                }),
+                                    }),
+                                },
                             },
                         },
                     },
@@ -1773,35 +1844,36 @@ test "function call" {
         .{
             .description = "one liner iife",
             .input =
-            \\fnc test(a, b) { return a + b }(1, 2)
+            \\(a, b) -> { return a + b }(1, 2)
             ,
             .expected_expression = Expression{
                 .CallExpression = CallExpression{
                     .function = &Expression{
                         .FunctionLiteral = FunctionLiteral{
-                            .name = "test",
-                            .params = try list([]const u8, arena.allocator(), &.{
-                                "a",
-                                "b",
+                            .params = try list(FunctionParam, arena.allocator(), &.{
+                                FunctionParam{ .Identifier = "a" },
+                                FunctionParam{ .Identifier = "b" },
                             }),
-                            .body = BlockExpression{
-                                .expressions = try list(*const Expression, arena.allocator(), &.{
-                                    &Expression{
-                                        .Statement = &Expression{
-                                            .ReturnExpression = &Expression{
-                                                .InfixExpression = InfixExpression{
-                                                    .operator = .Plus,
-                                                    .left = &Expression{
-                                                        .Identifier = "a",
-                                                    },
-                                                    .right = &Expression{
-                                                        .Identifier = "b",
+                            .body = &Expression{
+                                .BlockExpression = BlockExpression{
+                                    .expressions = try list(*const Expression, arena.allocator(), &.{
+                                        &Expression{
+                                            .Statement = &Expression{
+                                                .ReturnExpression = &Expression{
+                                                    .InfixExpression = InfixExpression{
+                                                        .operator = .Plus,
+                                                        .left = &Expression{
+                                                            .Identifier = "a",
+                                                        },
+                                                        .right = &Expression{
+                                                            .Identifier = "b",
+                                                        },
                                                     },
                                                 },
                                             },
                                         },
-                                    },
-                                }),
+                                    }),
+                                },
                             },
                         },
                     },
@@ -2484,7 +2556,7 @@ test "parse program" {
         .{
             .description = "fibonacci",
             .input =
-            \\fnc fib(n) {
+            \\fib = (n) -> {
             \\    a = 0
             \\    b = 1
             \\    for _ in 0..n {
@@ -2501,106 +2573,112 @@ test "parse program" {
                 .Program = try list(*const Expression, arena.allocator(), &.{
                     &Expression{
                         .Statement = &Expression{
-                            .FunctionLiteral = FunctionLiteral{
-                                .name = "fib",
-                                .params = try list([]const u8, arena.allocator(), &.{
-                                    "n",
-                                }),
-                                .body = BlockExpression{
-                                    .expressions = try list(*const Expression, arena.allocator(), &.{
-                                        &Expression{
-                                            .Statement = &Expression{
-                                                .AssignmentExpression = AssignmentExpression{
-                                                    .left = &Expression{
-                                                        .Identifier = "a",
-                                                    },
-                                                    .expression = &Expression{
-                                                        .IntegerLiteral = 0,
-                                                    },
-                                                },
-                                            },
-                                        },
-                                        &Expression{
-                                            .Statement = &Expression{
-                                                .AssignmentExpression = AssignmentExpression{
-                                                    .left = &Expression{
-                                                        .Identifier = "b",
-                                                    },
-                                                    .expression = &Expression{
-                                                        .IntegerLiteral = 1,
-                                                    },
-                                                },
-                                            },
-                                        },
-                                        &Expression{
-                                            .Statement = &Expression{
-                                                .ForExpression = ForExpression{
-                                                    .variable = "_",
-                                                    .range = RangeExpression{
-                                                        .left = &Expression{
-                                                            .IntegerLiteral = 0,
-                                                        },
-                                                        .right = &Expression{
-                                                            .Identifier = "n",
-                                                        },
-                                                    },
-                                                    .body = BlockExpression{
-                                                        .expressions = try list(*const Expression, arena.allocator(), &.{
-                                                            &Expression{
-                                                                .Statement = &Expression{
-                                                                    .AssignmentExpression = AssignmentExpression{
-                                                                        .left = &Expression{
-                                                                            .Identifier = "tmp",
-                                                                        },
-                                                                        .expression = &Expression{
-                                                                            .Identifier = "b",
-                                                                        },
-                                                                    },
+                            .AssignmentExpression = AssignmentExpression{
+                                .left = &Expression{ .Identifier = "fib" },
+                                .expression = &Expression{
+                                    .FunctionLiteral = FunctionLiteral{
+                                        .params = try list(FunctionParam, arena.allocator(), &.{
+                                            FunctionParam{ .Identifier = "n" },
+                                        }),
+                                        .body = &Expression{
+                                            .BlockExpression = BlockExpression{
+                                                .expressions = try list(*const Expression, arena.allocator(), &.{
+                                                    &Expression{
+                                                        .Statement = &Expression{
+                                                            .AssignmentExpression = AssignmentExpression{
+                                                                .left = &Expression{
+                                                                    .Identifier = "a",
+                                                                },
+                                                                .expression = &Expression{
+                                                                    .IntegerLiteral = 0,
                                                                 },
                                                             },
-                                                            &Expression{
-                                                                .Statement = &Expression{
-                                                                    .AssignmentExpression = AssignmentExpression{
-                                                                        .left = &Expression{
-                                                                            .Identifier = "b",
-                                                                        },
-                                                                        .expression = &Expression{
-                                                                            .InfixExpression = InfixExpression{
-                                                                                .operator = .Plus,
-                                                                                .left = &Expression{
-                                                                                    .Identifier = "a",
-                                                                                },
-                                                                                .right = &Expression{
-                                                                                    .Identifier = "b",
+                                                        },
+                                                    },
+                                                    &Expression{
+                                                        .Statement = &Expression{
+                                                            .AssignmentExpression = AssignmentExpression{
+                                                                .left = &Expression{
+                                                                    .Identifier = "b",
+                                                                },
+                                                                .expression = &Expression{
+                                                                    .IntegerLiteral = 1,
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                    &Expression{
+                                                        .Statement = &Expression{
+                                                            .ForExpression = ForExpression{
+                                                                .variable = "_",
+                                                                .range = RangeExpression{
+                                                                    .left = &Expression{
+                                                                        .IntegerLiteral = 0,
+                                                                    },
+                                                                    .right = &Expression{
+                                                                        .Identifier = "n",
+                                                                    },
+                                                                },
+                                                                .body = BlockExpression{
+                                                                    .expressions = try list(*const Expression, arena.allocator(), &.{
+                                                                        &Expression{
+                                                                            .Statement = &Expression{
+                                                                                .AssignmentExpression = AssignmentExpression{
+                                                                                    .left = &Expression{
+                                                                                        .Identifier = "tmp",
+                                                                                    },
+                                                                                    .expression = &Expression{
+                                                                                        .Identifier = "b",
+                                                                                    },
                                                                                 },
                                                                             },
                                                                         },
-                                                                    },
+                                                                        &Expression{
+                                                                            .Statement = &Expression{
+                                                                                .AssignmentExpression = AssignmentExpression{
+                                                                                    .left = &Expression{
+                                                                                        .Identifier = "b",
+                                                                                    },
+                                                                                    .expression = &Expression{
+                                                                                        .InfixExpression = InfixExpression{
+                                                                                            .operator = .Plus,
+                                                                                            .left = &Expression{
+                                                                                                .Identifier = "a",
+                                                                                            },
+                                                                                            .right = &Expression{
+                                                                                                .Identifier = "b",
+                                                                                            },
+                                                                                        },
+                                                                                    },
+                                                                                },
+                                                                            },
+                                                                        },
+                                                                        &Expression{
+                                                                            .Statement = &Expression{
+                                                                                .AssignmentExpression = AssignmentExpression{
+                                                                                    .left = &Expression{
+                                                                                        .Identifier = "a",
+                                                                                    },
+                                                                                    .expression = &Expression{
+                                                                                        .Identifier = "tmp",
+                                                                                    },
+                                                                                },
+                                                                            },
+                                                                        },
+                                                                    }),
                                                                 },
                                                             },
-                                                            &Expression{
-                                                                .Statement = &Expression{
-                                                                    .AssignmentExpression = AssignmentExpression{
-                                                                        .left = &Expression{
-                                                                            .Identifier = "a",
-                                                                        },
-                                                                        .expression = &Expression{
-                                                                            .Identifier = "tmp",
-                                                                        },
-                                                                    },
-                                                                },
-                                                            },
-                                                        }),
+                                                        },
                                                     },
-                                                },
+                                                    &Expression{
+                                                        .Statement = &Expression{
+                                                            .Identifier = "a",
+                                                        },
+                                                    },
+                                                }),
                                             },
                                         },
-                                        &Expression{
-                                            .Statement = &Expression{
-                                                .Identifier = "a",
-                                            },
-                                        },
-                                    }),
+                                    },
                                 },
                             },
                         },

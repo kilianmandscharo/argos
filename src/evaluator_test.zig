@@ -15,7 +15,7 @@ const String = evaluator_module.String;
 const test_utils = @import("test_utils.zig");
 const runTests = test_utils.runTests;
 
-const DEBUG = true;
+const DEBUG = false;
 
 pub fn assertResult(arena: std.mem.Allocator, input: []const u8, expected: Object) !void {
     var lexer = try Lexer.init(arena, input);
@@ -116,7 +116,7 @@ test "function calls" {
         .{
             .description = "function call with return",
             .input =
-            \\fnc square(a) {
+            \\square = (a) -> {
             \\    return a * a
             \\}
             \\
@@ -127,7 +127,7 @@ test "function calls" {
         .{
             .description = "function call without return",
             .input =
-            \\fnc square(a) {
+            \\square = (a) -> {
             \\    a * a
             \\}
             \\
@@ -140,7 +140,7 @@ test "function calls" {
             .input =
             \\x = 10
             \\
-            \\fnc add(a) {
+            \\add = (a) -> {
             \\    a + x
             \\}
             \\
@@ -153,7 +153,7 @@ test "function calls" {
             .input =
             \\x = 10
             \\
-            \\fnc add(a) {
+            \\add = (a) -> {
             \\    x = 17
             \\    a + x
             \\}
@@ -167,7 +167,7 @@ test "function calls" {
             .input =
             \\a = 10
             \\
-            \\fnc subtract(a, b) {
+            \\subtract = (a, b) -> {
             \\    a - b 
             \\}
             \\
@@ -178,11 +178,11 @@ test "function calls" {
         .{
             .description = "function call with callback function",
             .input =
-            \\fnc callback(x) {
+            \\callback = (x) -> {
             \\    x * x
             \\}
             \\
-            \\fnc test(val, cb) {
+            \\test = (val, cb) -> {
             \\    cb(val)
             \\}
             \\
@@ -193,8 +193,8 @@ test "function calls" {
         .{
             .description = "function call with inner function declaration",
             .input =
-            \\fnc test() {
-            \\    fnc inner(y) { y * y }
+            \\test = () -> {
+            \\    inner = (y) -> { y * y }
             \\    inner(10)
             \\}
             \\test()
@@ -204,8 +204,8 @@ test "function calls" {
         .{
             .description = "function call higher order function",
             .input =
-            \\fnc adder(val) {
-            \\    fnc inner(x) { val + x }
+            \\adder = (val) -> {
+            \\    inner = (x) -> { val + x }
             \\    inner
             \\}
             \\add_five = adder(5)
@@ -292,7 +292,7 @@ test "if expressions" {
             .description = "in context",
             .input =
             \\y = 17
-            \\fnc calculate(x) { y * x }
+            \\calculate = (x) -> { y * x }
             \\result = if y < 20 { 
             \\    calculate(5)
             \\} else {
@@ -333,7 +333,7 @@ test "for expressions" {
         .{
             .description = "fibonacci",
             .input =
-            \\fnc fib(n) {
+            \\fib = (n) -> {
             \\    a = 0
             \\    b = 1
             \\    for i in 0..n {
@@ -456,7 +456,7 @@ test "program" {
         .{
             .description = "return array from function",
             .input =
-            \\fnc test() {
+            \\test = () -> {
             \\    return [1, 2, 3, 4, 5]
             \\}
             \\array = test()
@@ -508,7 +508,7 @@ test "memory leaks" {
         .{
             .description = "unassigned array in function body",
             .input =
-            \\fnc test(a, b) {
+            \\test = (a, b) -> {
             \\    [1, 2, 3, 4, 5]
             \\    a + b
             \\}
@@ -518,7 +518,7 @@ test "memory leaks" {
         .{
             .description = "unassigned array returned from function call",
             .input =
-            \\fnc test() {
+            \\test = () -> {
             \\    return [1, 2, 3, 4, 5]
             \\}
             \\test()
@@ -533,7 +533,7 @@ test "memory leaks" {
         .{
             .description = "assigned array in function body",
             .input =
-            \\fnc test() {
+            \\test = () -> {
             \\    array = [1, 2, 3, 4, 5]
             \\    return array[0] + array[1]
             \\}

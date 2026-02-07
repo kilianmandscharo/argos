@@ -9,6 +9,21 @@ const Token = lexer_module.Token;
 const TokenType = lexer_module.TokenType;
 const Lexer = lexer_module.Lexer;
 
+pub const FunctionParam = union(enum) {
+    Identifier: []const u8,
+    AssignmentExpression: AssignmentExpression,
+
+    pub fn format(
+        self: @This(),
+        writer: anytype,
+    ) !void {
+        switch (self) {
+            .Identifier => |v| try writer.print("{s}", .{v}),
+            .AssignmentExpression => |v| try writer.print("{f}", .{v}),
+        }
+    }
+};
+
 pub const Expression = union(enum) {
     Program: std.ArrayListUnmanaged(*const Expression),
     Identifier: []const u8,
@@ -76,14 +91,14 @@ pub const Expression = union(enum) {
             .InfixExpression => |v| try writer.print("({f} {f} {f})", .{ v.left, v.operator, v.right }),
             .PrefixExpression => |v| try writer.print("({f}{f})", .{ v.operator, v.expression }),
             .FunctionLiteral => |v| {
-                try writer.print("fnc {s}(", .{v.name});
+                try writer.print("(", .{});
                 for (v.params.items, 0..) |param, i| {
                     if (i > 0) {
                         try writer.print(", ", .{});
                     }
-                    try writer.print("{s}", .{param});
+                    try writer.print("{f}", .{param});
                 }
-                try writer.print(") ", .{});
+                try writer.print(") -> ", .{});
                 try v.body.format(writer);
             },
             .CallExpression => |v| {
@@ -121,7 +136,7 @@ pub const Expression = union(enum) {
                 try writer.print("{f}[{f}]", .{ index_expression.left, index_expression.index_expression });
             },
             .BlockExpression => |v| try v.format(writer),
-            .AssignmentExpression => |v| try writer.print("({f} = {f})", .{ v.left, v.expression }),
+            .AssignmentExpression => |v| try v.format(writer),
             .ReturnExpression => |v| try writer.print("(return {f})", .{v}),
             .Statement => |v| try writer.print("({f})", .{v}),
             .Null => try writer.print("null", .{}),
@@ -194,9 +209,8 @@ pub const PrefixExpression = struct {
 };
 
 pub const FunctionLiteral = struct {
-    name: []const u8,
-    params: std.ArrayListUnmanaged([]const u8),
-    body: BlockExpression,
+    params: std.ArrayListUnmanaged(FunctionParam),
+    body: *const Expression,
 };
 
 pub const CallExpression = struct {
@@ -243,6 +257,13 @@ pub const BlockExpression = struct {
 pub const AssignmentExpression = struct {
     left: *const Expression,
     expression: *const Expression,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        try writer.print("({f} = {f})", .{ self.left, self.expression });
+    }
 };
 
 pub const IndexExpression = struct {
@@ -370,13 +391,12 @@ pub const Parser = struct {
             .Float => try self.parseFloat(),
             .True, .False => try self.parseBoolean(),
             .Bang, .Plus, .Minus, .Tilde => try self.parsePrefix(),
-            .Function => try self.parseFunction(),
             .If => try self.parseIf(),
             .For => try self.parseFor(),
             .LBracket => try self.parseBracket(),
             .LBrace => try self.parseBrace(),
             .Return => try self.parseReturn(),
-            .LParen => try self.parseGroupedExpression(),
+            .LParen => try self.parseParen(),
             .Null => self.parseNull(),
             else => {
                 std.debug.print("unknown token type: {any}\n", .{self.cur_token.type});
@@ -417,43 +437,32 @@ pub const Parser = struct {
         return Expression{ .PrefixExpression = prefix_expression };
     }
 
-    fn parseFunction(self: *Parser) !Expression {
-        var name: []const u8 = "";
-        if (self.peekTokenIs(.Identifier)) {
-            try self.advance();
-            name = self.cur_token.literal;
+    fn parseFunction(self: *Parser, params: std.ArrayListUnmanaged(*const Expression)) !Expression {
+        // TODO: the params list should be freed immediately after transformation,
+        // this requires reworking the memory management strategy of the parser
+        var final_params: std.ArrayListUnmanaged(FunctionParam) = .{};
+        for (params.items) |expression| {
+            switch (expression.*) {
+                .Identifier => |val| try final_params.append(self.arena, FunctionParam{ .Identifier = val }),
+                .AssignmentExpression => |val| try final_params.append(self.arena, FunctionParam{ .AssignmentExpression = val }),
+                else => return error.InvalidFunctionParam,
+            }
         }
 
-        try self.advanceAndExpect(.LParen);
-        try self.advance();
+        const body = try self.arena.create(Expression);
 
-        var params: std.ArrayListUnmanaged([]const u8) = .{};
-        while (!self.currentTokenIs(.RParen)) {
-            if (self.currentTokenIs(.Eof)) {
-                return ParserError.ReachedEndOfFile;
-            }
-
-            try self.expectToken(.Identifier);
-            try params.append(self.arena, self.cur_token.literal);
-
-            if (!self.peekTokenIs(.RParen)) {
-                try self.advanceAndExpect(.Comma);
-            }
-
-            try self.advance();
+        if (self.currentTokenIs(.LBrace)) {
+            const result = try self.parseExpressionList(null);
+            body.* = Expression{ .BlockExpression = BlockExpression{ .expressions = result.items } };
+        } else {
+            const expression = try self.parseExpression(.Lowest);
+            body.* = expression.*;
         }
-
-        try self.advanceAndExpect(.LBrace);
-
-        const result = try self.parseExpressionList(null);
 
         return Expression{
             .FunctionLiteral = FunctionLiteral{
-                .name = name,
-                .params = params,
-                .body = BlockExpression{
-                    .expressions = result.items,
-                },
+                .params = final_params,
+                .body = body,
             },
         };
     }
@@ -537,12 +546,6 @@ pub const Parser = struct {
         const expression_list = try self.parseExpressionList(.Comma);
 
         const expression = switch (expression_list.delimiter) {
-            // Do not allow block expression literals for now
-            // .NewLine => Expression{
-            //     .BlockExpression = BlockExpression{
-            //         .expressions = expression_list.items,
-            //     },
-            // },
             .Comma => comma: {
                 const expr = Expression{
                     .TableLiteral = expression_list.items,
@@ -566,11 +569,15 @@ pub const Parser = struct {
         return Expression{ .ReturnExpression = expression };
     }
 
-    fn parseGroupedExpression(self: *Parser) !Expression {
-        try self.advance();
-        const expression = try self.parseExpression(.Lowest);
-        try self.advanceAndExpect(.RParen);
-        return expression.*;
+    fn parseParen(self: *Parser) !Expression {
+        const result = try self.parseExpressionList(.Comma);
+        if (self.peekTokenIs(.Arrow)) {
+            try self.advance();
+            try self.advance();
+            return try self.parseFunction(result.items);
+        }
+        if (result.items.items.len == 0) return error.NoExpressionsInParen;
+        return result.items.items[0].*;
     }
 
     fn parseNull(self: *Parser) Expression {

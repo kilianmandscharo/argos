@@ -49,12 +49,12 @@ test "should tokenize" {
             try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
 
-            try assertTokenEquals(Token{ .type = .Function, .literal = "fnc" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .LParen, .literal = "(" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .Identifier, .literal = "first" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .Comma, .literal = "," }, try lexer.next());
             try assertTokenEquals(Token{ .type = .Identifier, .literal = "second" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .RParen, .literal = ")" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Arrow, .literal = "->" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .LBrace, .literal = "{" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .Return, .literal = "return" }, try lexer.next());
@@ -202,7 +202,7 @@ test "should tokenize" {
             .input =
             \\a = 1
             \\b = (5 + 1) / 3 * 1 - 5
-            \\fnc(first, second) {
+            \\(first, second) -> {
             \\    return first + second
             \\}
             \\arr = [100, 3.1415, "hello world", true]
