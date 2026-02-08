@@ -230,43 +230,51 @@ test "function calls" {
         .{
             .description = "function with default args",
             .input =
-            \\square = (a = 1, b = 2) -> a + b
-            \\square()
+            \\foo = (a = 1, b = 2) -> a + b
+            \\foo()
             ,
             .expected_output = Object{ .Integer = 3 },
         },
         .{
             .description = "function call with keyword arguments",
             .input =
-            \\square = (a, b, c) -> a * (b + c)
-            \\square(c = 1, b = 2, a = 3)
+            \\foo = (a, b, c) -> a * (b + c)
+            \\foo(c = 1, b = 2, a = 3)
             ,
             .expected_output = Object{ .Integer = 9 },
         },
         .{
             .description = "function call with keyword arguments",
             .input =
-            \\square = (a, b, c) -> a * (b + c)
-            \\square(c = 1, b = 2, a = 3)
+            \\foo = (a, b, c) -> a * (b + c)
+            \\foo(c = 1, b = 2, a = 3)
             ,
             .expected_output = Object{ .Integer = 9 },
         },
         .{
             .description = "function call with positional and keyword arguments",
             .input =
-            \\square = (a, b, c) -> a * (b + c)
-            \\square(1, c = 10, b = 5)
+            \\foo = (a, b, c) -> a * (b + c)
+            \\foo(1, c = 10, b = 5)
             ,
             .expected_output = Object{ .Integer = 15 },
         },
         .{
             .description = "function call with positional and keyword arguments and default args",
             .input =
-            \\square = (a = 5, b = 3, c = 1) -> a * (b + c)
-            \\square(3, c = 4)
+            \\foo = (a = 5, b = 3, c = 1) -> a * (b + c)
+            \\foo(3, c = 4)
             ,
             .expected_output = Object{ .Integer = 21 },
         },
+        // .{
+        //     .description = "function call with string default args",
+        //     .input =
+        //     \\foo = (first = "Hello, ", second = "World!") -> first + second
+        //     \\foo()
+        //     ,
+        //     .expected_output = Object{ .String = String{ .data = "Hello, World!", .ref_count = 0 } },
+        // },
     };
 
     try runTests(ObjectTestCase, "evaluate function calls", &test_cases, runObjectTest);

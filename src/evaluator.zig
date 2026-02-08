@@ -256,6 +256,8 @@ pub const Evaluator = struct {
                 const params = function.params.items;
                 const args = call_expression.args.items;
 
+                // TODO: this means allocating heap memory for each function call,
+                // can we make this more efficient?
                 var resolved_identifiers: std.ArrayList([]const u8) = .{};
                 defer resolved_identifiers.deinit(self.gpa);
 
