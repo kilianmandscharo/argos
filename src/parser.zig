@@ -25,7 +25,7 @@ pub const FunctionParam = union(enum) {
 };
 
 pub const Expression = union(enum) {
-    Program: std.ArrayListUnmanaged(*const Expression),
+    Program: std.ArrayList(*const Expression),
     Identifier: []const u8,
     StringLiteral: []const u8,
     IntegerLiteral: i64,
@@ -38,8 +38,8 @@ pub const Expression = union(enum) {
     IfExpression: IfExpression,
     RangeExpression: RangeExpression,
     ForExpression: ForExpression,
-    ArrayLiteral: std.ArrayListUnmanaged(*const Expression),
-    TableLiteral: std.ArrayListUnmanaged(*const Expression),
+    ArrayLiteral: std.ArrayList(*const Expression),
+    TableLiteral: std.ArrayList(*const Expression),
     BlockExpression: BlockExpression,
     AssignmentExpression: AssignmentExpression,
     ReturnExpression: *const Expression,
@@ -209,13 +209,13 @@ pub const PrefixExpression = struct {
 };
 
 pub const FunctionLiteral = struct {
-    params: std.ArrayListUnmanaged(FunctionParam),
+    params: std.ArrayList(FunctionParam),
     body: *const Expression,
 };
 
 pub const CallExpression = struct {
     function: *const Expression,
-    args: std.ArrayListUnmanaged(*const Expression),
+    args: std.ArrayList(*const Expression),
 };
 
 pub const IfExpression = struct {
@@ -236,7 +236,7 @@ pub const ForExpression = struct {
 };
 
 pub const BlockExpression = struct {
-    expressions: std.ArrayListUnmanaged(*const Expression),
+    expressions: std.ArrayList(*const Expression),
 
     pub fn format(
         self: @This(),
@@ -332,7 +332,7 @@ pub const Parser = struct {
     }
 
     pub fn parseProgram(self: *Parser) !Expression {
-        var list: std.ArrayListUnmanaged(*const Expression) = .{};
+        var list: std.ArrayList(*const Expression) = .{};
         while (self.cur_token.type != .Eof) {
             self.printDebug("parse statement on {f}\n", .{self.cur_token}, .None);
             const expression = try self.parseExpression(.Lowest);
@@ -437,10 +437,10 @@ pub const Parser = struct {
         return Expression{ .PrefixExpression = prefix_expression };
     }
 
-    fn parseFunction(self: *Parser, params: std.ArrayListUnmanaged(*const Expression)) !Expression {
+    fn parseFunction(self: *Parser, params: std.ArrayList(*const Expression)) !Expression {
         // TODO: the params list should be freed immediately after transformation,
         // this requires reworking the memory management strategy of the parser
-        var final_params: std.ArrayListUnmanaged(FunctionParam) = .{};
+        var final_params: std.ArrayList(FunctionParam) = .{};
         for (params.items) |expression| {
             switch (expression.*) {
                 .Identifier => |val| try final_params.append(self.arena, FunctionParam{ .Identifier = val }),
@@ -636,8 +636,22 @@ pub const Parser = struct {
 
     fn parseCall(self: *Parser, left: Expression) !Expression {
         const result = try self.parseExpressionList(null);
+
+        var keyword_arg_found = false;
+        for (result.items.items) |arg| {
+            switch (arg.*) {
+                .AssignmentExpression => {
+                    keyword_arg_found = true;
+                },
+                else => {
+                    if (keyword_arg_found) return error.PositionalAfterKeywordArg;
+                },
+            }
+        }
+
         const left_owned = try self.arena.create(Expression);
         left_owned.* = left;
+
         return Expression{ .CallExpression = .{ .function = left_owned, .args = result.items } };
     }
 
@@ -680,7 +694,7 @@ pub const Parser = struct {
     }
 
     fn parseExpressionList(self: *Parser, defaultDelimiter: ?TokenType) !struct {
-        items: std.ArrayListUnmanaged(*const Expression),
+        items: std.ArrayList(*const Expression),
         delimiter: TokenType,
     } {
         self.printDebug("parse expression list on {f}\n", .{self.cur_token}, .None);
@@ -701,7 +715,7 @@ pub const Parser = struct {
 
         try self.advance();
 
-        var items: std.ArrayListUnmanaged(*const Expression) = .{};
+        var items: std.ArrayList(*const Expression) = .{};
 
         while (!self.currentTokenIs(stopToken)) {
             if (self.currentTokenIs(.Eof)) return ParserError.ReachedEndOfFile;

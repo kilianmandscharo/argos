@@ -37,6 +37,7 @@ const ObjectTestCase = struct {
     input: []const u8,
     description: []const u8,
     expected_output: Object,
+    expected_error: ?anyerror = null,
 };
 
 fn expectObject(expected: Object, actual: Object) !void {
@@ -58,7 +59,12 @@ fn expectObject(expected: Object, actual: Object) !void {
 
 const runObjectTest = struct {
     fn runTest(arena: std.mem.Allocator, test_case: ObjectTestCase) anyerror!void {
-        try assertResult(arena, test_case.input, test_case.expected_output);
+        const result = assertResult(arena, test_case.input, test_case.expected_output);
+        if (test_case.expected_error) |expected_error| {
+            try std.testing.expectError(expected_error, result);
+        } else {
+            try result;
+        }
     }
 }.runTest;
 
@@ -212,6 +218,54 @@ test "function calls" {
             \\add_five(10)
             ,
             .expected_output = Object{ .Integer = 15 },
+        },
+        .{
+            .description = "function call without braces",
+            .input =
+            \\square = (a) -> a * a
+            \\square(11)
+            ,
+            .expected_output = Object{ .Integer = 121 },
+        },
+        .{
+            .description = "function with default args",
+            .input =
+            \\square = (a = 1, b = 2) -> a + b
+            \\square()
+            ,
+            .expected_output = Object{ .Integer = 3 },
+        },
+        .{
+            .description = "function call with keyword arguments",
+            .input =
+            \\square = (a, b, c) -> a * (b + c)
+            \\square(c = 1, b = 2, a = 3)
+            ,
+            .expected_output = Object{ .Integer = 9 },
+        },
+        .{
+            .description = "function call with keyword arguments",
+            .input =
+            \\square = (a, b, c) -> a * (b + c)
+            \\square(c = 1, b = 2, a = 3)
+            ,
+            .expected_output = Object{ .Integer = 9 },
+        },
+        .{
+            .description = "function call with positional and keyword arguments",
+            .input =
+            \\square = (a, b, c) -> a * (b + c)
+            \\square(1, c = 10, b = 5)
+            ,
+            .expected_output = Object{ .Integer = 15 },
+        },
+        .{
+            .description = "function call with positional and keyword arguments and default args",
+            .input =
+            \\square = (a = 5, b = 3, c = 1) -> a * (b + c)
+            \\square(3, c = 4)
+            ,
+            .expected_output = Object{ .Integer = 21 },
         },
     };
 

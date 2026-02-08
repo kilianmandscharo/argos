@@ -155,13 +155,13 @@ pub const Object = union(enum) {
 };
 
 const Function = struct {
-    params: std.ArrayListUnmanaged(FunctionParam),
+    params: std.ArrayList(FunctionParam),
     body: *const Expression,
     env: *Environment,
 };
 
 pub const Array = struct {
-    data: std.ArrayListUnmanaged(Object),
+    data: std.ArrayList(Object),
     ref_count: usize,
 };
 
@@ -249,49 +249,71 @@ pub const Evaluator = struct {
                 return object;
             },
             .CallExpression => |call_expression| {
-                const func = try self.eval(call_expression.function, env);
+                const evaluated_function = try self.eval(call_expression.function, env);
+                if (evaluated_function != .Function) return error.CalledNonFunction;
 
-                var args: std.ArrayListUnmanaged(Object) = .{};
-                defer args.deinit(self.gpa);
+                const function = evaluated_function.Function;
+                const params = function.params.items;
+                const args = call_expression.args.items;
 
-                for (call_expression.args.items) |arg| {
-                    const evaluated = try self.eval(arg, env);
-                    try args.append(self.gpa, evaluated);
-                }
+                var resolved_identifiers: std.ArrayList([]const u8) = .{};
+                defer resolved_identifiers.deinit(self.gpa);
 
-                switch (func) {
-                    .Function => |function| {
-                        const extended_env = try Environment.initEnclosed(self.gpa, function.env);
-                        for (function.params.items, 0..) |param, i| {
-                            switch (param) {
-                                .Identifier => |name| {
-                                    const arg = args.items[i];
-                                    try extended_env.set(name, arg);
-                                },
-                                else => return error.NotImplemented,
+                var resolved_args: std.ArrayList(*const Expression) = .{};
+                defer resolved_args.deinit(self.gpa);
+
+                outer: for (params, 0..) |param, i| {
+                    const param_name = switch (param) {
+                        .Identifier => |val| val,
+                        .AssignmentExpression => |val| blk: {
+                            switch (val.left.*) {
+                                .Identifier => |ident| break :blk ident,
+                                else => return error.InvalidLeftInFunctionParam,
                             }
+                        },
+                    };
+
+                    try resolved_identifiers.append(self.gpa, param_name);
+
+                    if (i < args.len and args[i].* != .AssignmentExpression) {
+                        try resolved_args.append(self.gpa, args[i]);
+                        continue;
+                    }
+
+                    for (args) |arg| {
+                        if (arg.* != .AssignmentExpression) continue;
+                        const assignment_left = arg.AssignmentExpression.left;
+                        if (assignment_left.* != .Identifier) return error.InvalidLeftInFunctionArg;
+                        if (std.mem.eql(u8, param_name, assignment_left.Identifier)) {
+                            try resolved_args.append(self.gpa, arg.AssignmentExpression.expression);
+                            continue :outer;
                         }
+                    }
 
-                        const result = try self.eval(function.body, extended_env);
-
-                        switch (result) {
-                            .ReturnValue => |obj| {
-                                const retVal = obj.*;
-                                self.gpa.destroy(obj);
-                                return retVal;
-                            },
-                            else => {},
-                        }
-
-                        // TODO: clean up extended_env at this point
-
-                        return result;
-                    },
-                    else => {
-                        self.printError("can't call a non-function: {f}\n", .{expression});
-                        return EvaluatorError.RuntimeError;
-                    },
+                    if (param != .AssignmentExpression) return error.ArgNotFound;
+                    try resolved_args.append(self.gpa, param.AssignmentExpression.expression);
                 }
+
+                const extended_env = try Environment.initEnclosed(self.gpa, function.env);
+                for (resolved_identifiers.items, 0..) |name, i| {
+                    const arg = try self.eval(resolved_args.items[i], env);
+                    try extended_env.set(name, arg);
+                }
+
+                const result = try self.eval(function.body, extended_env);
+
+                switch (result) {
+                    .ReturnValue => |obj| {
+                        const retVal = obj.*;
+                        self.gpa.destroy(obj);
+                        return retVal;
+                    },
+                    else => {},
+                }
+
+                // TODO: clean up extended_env at this point
+
+                return result;
             },
             .IfExpression => |if_expression| {
                 const condition = try self.eval(if_expression.condition, env);
@@ -366,7 +388,7 @@ pub const Evaluator = struct {
                 return val;
             },
             .ArrayLiteral => |array| {
-                var data: std.ArrayListUnmanaged(Object) = .{};
+                var data: std.ArrayList(Object) = .{};
                 for (array.items) |item| {
                     const evaluated = try self.eval(item, env);
                     try data.append(self.gpa, evaluated);
@@ -451,7 +473,7 @@ pub const Evaluator = struct {
         std.debug.print(format, args);
     }
 
-    fn evalProgram(self: *Evaluator, expressions: std.ArrayListUnmanaged(*const Expression), env: *Environment) anyerror!Object {
+    fn evalProgram(self: *Evaluator, expressions: std.ArrayList(*const Expression), env: *Environment) anyerror!Object {
         var result: Object = Object.Null;
         for (expressions.items) |expression| {
             result = try self.eval(expression, env);

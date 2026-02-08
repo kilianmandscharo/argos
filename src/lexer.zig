@@ -83,16 +83,16 @@ const keywords = std.StaticStringMap(Token).initComptime(.{
 pub const Lexer = struct {
     buf: []const u8,
     pos: usize,
-    arena: std.mem.Allocator,
+    static_lifetime_arena: std.mem.Allocator,
 
-    pub fn init(arena: std.mem.Allocator, content: []const u8) !Lexer {
+    pub fn init(static_lifetime_arena: std.mem.Allocator, content: []const u8) !Lexer {
         if (content.len == 0) {
             return error.NoContent;
         }
         return Lexer{
             .buf = content,
             .pos = 0,
-            .arena = arena,
+            .static_lifetime_arena = static_lifetime_arena,
         };
     }
 
@@ -218,7 +218,7 @@ pub const Lexer = struct {
         }
 
         const result = self.buf[start..self.pos];
-        const arena_copy = try self.arena.dupe(u8, result);
+        const arena_copy = try self.static_lifetime_arena.dupe(u8, result);
 
         self.advancePos();
 
@@ -242,7 +242,7 @@ pub const Lexer = struct {
         }
 
         const result = self.buf[start..self.pos];
-        const arena_copy = try self.arena.dupe(u8, result);
+        const arena_copy = try self.static_lifetime_arena.dupe(u8, result);
 
         if (dec_separator_found) {
             return Token{ .type = .Float, .literal = arena_copy };
@@ -265,7 +265,7 @@ pub const Lexer = struct {
             return token;
         }
 
-        const arena_copy = try self.arena.dupe(u8, result);
+        const arena_copy = try self.static_lifetime_arena.dupe(u8, result);
         return Token{ .type = .Identifier, .literal = arena_copy };
     }
 

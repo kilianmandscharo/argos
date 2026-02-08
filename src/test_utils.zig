@@ -1,7 +1,7 @@
 const std = @import("std");
 
-pub fn list(comptime T: type, arena: std.mem.Allocator, items: []const T) !std.ArrayListUnmanaged(T) {
-    var ret: std.ArrayListUnmanaged(T) = .{};
+pub fn list(comptime T: type, arena: std.mem.Allocator, items: []const T) !std.ArrayList(T) {
+    var ret: std.ArrayList(T) = .{};
     for (items) |item| {
         try ret.append(arena, item);
     }
