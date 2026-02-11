@@ -43,7 +43,7 @@ const runExpressionTest = struct {
 
 fn getProgram(arena: std.mem.Allocator, content: []const u8) !Expression {
     var lexer = try Lexer.init(arena, content);
-    var parser = try Parser.init(&lexer, .{ .arena = arena, .debug = false });
+    var parser = try Parser.init(&lexer, .{ .arena = arena, .debug = true });
     return try parser.parseProgram();
 }
 
@@ -2450,6 +2450,32 @@ test "table expression" {
                         },
                     },
                 }),
+            },
+        },
+        .{
+            .description = "table method call",
+            .input =
+            \\table = { inc = () -> 5 }
+            \\table.inc()
+            ,
+            .expected_expression = Expression{
+                .AssignmentExpression = AssignmentExpression{ .left = &Expression{ .Identifier = "table" }, .expression = &Expression{
+                    .TableLiteral = try list(*const Expression, arena.allocator(), &.{
+                        &Expression{
+                            .AssignmentExpression = AssignmentExpression{
+                                .left = &Expression{ .Identifier = "inc" },
+                                .expression = &Expression{
+                                    .FunctionLiteral = FunctionLiteral{
+                                        .body = &Expression{
+                                            .IntegerLiteral = 5,
+                                        },
+                                        .params = .{},
+                                    },
+                                },
+                            },
+                        },
+                    }),
+                } },
             },
         },
     };

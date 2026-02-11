@@ -27,8 +27,8 @@ pub fn assertResult(arena: std.mem.Allocator, input: []const u8, expected: Objec
     const env = try Environment.init(.{ .gpa = allocator, .debug = DEBUG });
     defer env.deinit();
 
-    var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = DEBUG });
-    const result = try evaluator.eval(&program, env);
+    var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = true });
+    const result = try evaluator.eval(&program, env, 0);
 
     try expectObject(expected, result);
 }
@@ -443,11 +443,27 @@ test "table" {
             .expected_output = Object{ .Integer = 1 },
         },
         .{
-            .description = "table dot index",
+            .description = "table bracket index with string",
+            .input =
+            \\table = { a = "bar" }
+            \\table["a"] == "bar"
+            ,
+            .expected_output = Object{ .Boolean = true },
+        },
+        .{
+            .description = "table bracket index with identifier",
             .input =
             \\table = { a = "bar" }
             \\foo = "a"
-            \\table.foo == "bar"
+            \\table[foo] == "bar"
+            ,
+            .expected_output = Object{ .Boolean = true },
+        },
+        .{
+            .description = "table dot index with identifier",
+            .input =
+            \\table = { a = "bar" }
+            \\table.a == "bar"
             ,
             .expected_output = Object{ .Boolean = true },
         },
@@ -467,6 +483,15 @@ test "table" {
             ,
             .expected_output = Object.Null,
         },
+        // .{
+        //     .description = "table method call",
+        //     .input =
+        //     \\table = { inc = () -> 5 }
+        //     \\result = table.inc()
+        //     \\result == 5
+        //     ,
+        //     .expected_output = Object{ .Boolean = true },
+        // },
     };
 
     try runTests(ObjectTestCase, "evaluate table", &test_cases, runObjectTest);

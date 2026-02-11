@@ -46,7 +46,7 @@ pub fn start() !void {
         const program = try parser.parseProgram();
 
         var evaluator = Evaluator.init(.{ .gpa = gpaAllocator, .debug = false });
-        const result = try evaluator.eval(&program, env);
+        const result = try evaluator.eval(&program, env, 0);
 
         try result.format(stdout);
         try stdout.writeAll("\n");

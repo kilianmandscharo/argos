@@ -52,7 +52,7 @@ pub fn main() !void {
     defer env.deinit();
 
     var evaluator = Evaluator.init(.{ .gpa = gpaAllocator, .debug = false });
-    const result = try evaluator.eval(&program, env);
+    const result = try evaluator.eval(&program, env, 0);
     std.debug.print("==========\n", .{});
     std.debug.print("Result: {f}\n", .{result});
     std.debug.print("==========\n", .{});
