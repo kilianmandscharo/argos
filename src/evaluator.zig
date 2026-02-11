@@ -56,6 +56,7 @@ pub const Object = union(enum) {
             .ReturnValue => {},
             .Function => {},
             .String => |*string| {
+                if (string.static_lifetime) return;
                 env.gpa.free(string.data);
                 printDebug("destroyed string\n", .{}, env.debug);
             },
@@ -90,6 +91,7 @@ pub const Object = union(enum) {
             .Function => {},
             .Null => {},
             .String => |*string| {
+                if (string.static_lifetime) return;
                 printDebug("dec string refCount, new count: {d}\n", .{string.ref_count - 1}, env.debug);
                 string.ref_count -= 1;
                 if (string.ref_count == 0) {
@@ -122,6 +124,7 @@ pub const Object = union(enum) {
             .Function => {},
             .Null => {},
             .String => |*string| {
+                if (string.static_lifetime) return;
                 printDebug("inc string refCount, new count: {d}\n", .{string.ref_count + 1}, env.debug);
                 string.ref_count += 1;
             },
@@ -172,7 +175,8 @@ pub const Table = struct {
 
 pub const String = struct {
     data: []const u8,
-    ref_count: usize,
+    ref_count: usize = 0,
+    static_lifetime: bool = false,
 };
 
 pub const Evaluator = struct {
@@ -225,8 +229,7 @@ pub const Evaluator = struct {
             .FloatLiteral => |float| return Object{ .Float = float },
             .BooleanLiteral => |boolean| return Object{ .Boolean = boolean },
             .StringLiteral => |string| {
-                const string_owned = try self.gpa.dupe(u8, string);
-                return Object{ .String = String{ .data = string_owned, .ref_count = 1 } };
+                return Object{ .String = String{ .data = string, .ref_count = 1, .static_lifetime = true } };
             },
             .InfixExpression => |infix| {
                 var left = try self.eval(infix.left, env);

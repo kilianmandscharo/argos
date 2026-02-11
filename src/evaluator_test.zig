@@ -267,6 +267,7 @@ test "function calls" {
             ,
             .expected_output = Object{ .Integer = 21 },
         },
+        // TODO: how to make sure the string is not deallocated before testing it?
         // .{
         //     .description = "function call with string default args",
         //     .input =
