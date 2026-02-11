@@ -191,6 +191,13 @@ test "should tokenize" {
             try assertTokenEquals(Token{ .type = .Integer, .literal = "1" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .Percent, .literal = "%" }, try lexer.next());
             try assertTokenEquals(Token{ .type = .Integer, .literal = "5" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .NewLine, .literal = "<newline>" }, try lexer.next());
+
+            try assertTokenEquals(Token{ .type = .Identifier, .literal = "table" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Dot, .literal = "." }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .Identifier, .literal = "foo" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .LParen, .literal = "(" }, try lexer.next());
+            try assertTokenEquals(Token{ .type = .RParen, .literal = ")" }, try lexer.next());
 
             try assertTokenEquals(Token{ .type = .Eof, .literal = "EOF" }, try lexer.next());
         }
@@ -230,6 +237,7 @@ test "should tokenize" {
             \\1 ^ 5
             \\1 ~ 5
             \\1 % 5
+            \\table.foo()
             ,
         },
     };

@@ -430,7 +430,7 @@ pub const Evaluator = struct {
                                 return val;
                             },
                             else => return self.runtimeError(
-                                "invalid type for index in array index expression: {s}",
+                                "invalid type for index in array index expression: {s}\n",
                                 .{index.getType()},
                             ),
                         }
@@ -449,7 +449,7 @@ pub const Evaluator = struct {
                                 return val orelse .Null;
                             },
                             else => return self.runtimeError(
-                                "invalid type for index in table index expression: {s}",
+                                "invalid type for index in table index expression: {s}\n",
                                 .{index.getType()},
                             ),
                         }

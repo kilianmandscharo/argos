@@ -668,6 +668,27 @@ test "function declaration" {
             },
         },
         .{
+            .description = "empty function one line with assignment",
+            .input =
+            \\foo = () -> {}
+            ,
+            .expected_expression = Expression{
+                .AssignmentExpression = AssignmentExpression{
+                    .left = &Expression{ .Identifier = "foo" },
+                    .expression = &Expression{
+                        .FunctionLiteral = FunctionLiteral{
+                            .params = .{},
+                            .body = &Expression{
+                                .BlockExpression = BlockExpression{
+                                    .expressions = .{},
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        .{
             .description = "empty function multi lines",
             .input =
             \\() -> {
@@ -1723,6 +1744,20 @@ test "function call" {
 
     const test_cases = [_]ExpressionTestCase{
         .{
+            .description = "function without args",
+            .input =
+            \\test()
+            ,
+            .expected_expression = Expression{
+                .CallExpression = CallExpression{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = try list(*const Expression, arena.allocator(), &.{}),
+                },
+            },
+        },
+        .{
             .description = "function call one line no trailing comma",
             .input =
             \\test(1, 2)
@@ -2532,6 +2567,155 @@ test "index expression" {
                     },
                     .index_expression = &Expression{
                         .StringLiteral = "foo",
+                    },
+                },
+            },
+        },
+        .{
+            .description = "index identifier with dot notation",
+            .input =
+            \\table.foo
+            ,
+            .expected_expression = Expression{
+                .IndexExpression = IndexExpression{
+                    .left = &Expression{
+                        .Identifier = "table",
+                    },
+                    .index_expression = &Expression{
+                        .Identifier = "foo",
+                    },
+                },
+            },
+        },
+        .{
+            .description = "index identifier with dot notation and string",
+            .input =
+            \\table."foo"
+            ,
+            .expected_expression = Expression{
+                .IndexExpression = IndexExpression{
+                    .left = &Expression{
+                        .Identifier = "table",
+                    },
+                    .index_expression = &Expression{
+                        .StringLiteral = "foo",
+                    },
+                },
+            },
+        },
+        .{
+            .description = "index table literal with dot notation",
+            .input =
+            \\{ a = 6 }.a
+            ,
+            .expected_expression = Expression{
+                .IndexExpression = IndexExpression{
+                    .left = &Expression{
+                        .TableLiteral = try list(*const Expression, arena.allocator(), &.{
+                            &Expression{
+                                .AssignmentExpression = AssignmentExpression{
+                                    .left = &Expression{
+                                        .Identifier = "a",
+                                    },
+                                    .expression = &Expression{
+                                        .IntegerLiteral = 6,
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                    .index_expression = &Expression{
+                        .Identifier = "a",
+                    },
+                },
+            },
+        },
+        .{
+            .description = "index table literal with dot notation and string",
+            .input =
+            \\{ a = 6 }."a"
+            ,
+            .expected_expression = Expression{
+                .IndexExpression = IndexExpression{
+                    .left = &Expression{
+                        .TableLiteral = try list(*const Expression, arena.allocator(), &.{
+                            &Expression{
+                                .AssignmentExpression = AssignmentExpression{
+                                    .left = &Expression{
+                                        .Identifier = "a",
+                                    },
+                                    .expression = &Expression{
+                                        .IntegerLiteral = 6,
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                    .index_expression = &Expression{
+                        .StringLiteral = "a",
+                    },
+                },
+            },
+        },
+        .{
+            .description = "index array literal with dot notation",
+            .input =
+            \\[1, 2].0
+            ,
+            .expected_expression = Expression{
+                .IndexExpression = IndexExpression{
+                    .left = &Expression{
+                        .ArrayLiteral = try list(*const Expression, arena.allocator(), &.{
+                            &Expression{
+                                .IntegerLiteral = 1,
+                            },
+                            &Expression{
+                                .IntegerLiteral = 2,
+                            },
+                        }),
+                    },
+                    .index_expression = &Expression{
+                        .IntegerLiteral = 0,
+                    },
+                },
+            },
+        },
+        .{
+            .description = "index bracket precedence",
+            .input =
+            \\table["foo"] == 5
+            ,
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{
+                        .IndexExpression = IndexExpression{
+                            .left = &Expression{ .Identifier = "table" },
+                            .index_expression = &Expression{ .StringLiteral = "foo" },
+                        },
+                    },
+                    .operator = .Eq,
+                    .right = &Expression{
+                        .IntegerLiteral = 5,
+                    },
+                },
+            },
+        },
+        .{
+            .description = "dot precedence",
+            .input =
+            \\table.foo == 5
+            ,
+            .expected_expression = Expression{
+                .InfixExpression = InfixExpression{
+                    .left = &Expression{
+                        .IndexExpression = IndexExpression{
+                            .left = &Expression{ .Identifier = "table" },
+                            .index_expression = &Expression{ .Identifier = "foo" },
+                        },
+                    },
+                    .operator = .Eq,
+                    .right = &Expression{
+                        .IntegerLiteral = 5,
                     },
                 },
             },

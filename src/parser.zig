@@ -610,6 +610,7 @@ pub const Parser = struct {
             .DotDot => self.parseRange(left),
             .Assign => self.parseAssign(left),
             .LBracket => self.parseIndex(left),
+            .Dot => self.parseDot(left),
             else => ParserError.NoInfixFunctionFound,
         };
     }
@@ -689,6 +690,21 @@ pub const Parser = struct {
             .IndexExpression = IndexExpression{
                 .left = left_owned,
                 .index_expression = expression_list.items.items[0],
+            },
+        };
+    }
+
+    fn parseDot(self: *Parser, left: Expression) !Expression {
+        try self.advance();
+        const expression = try self.parseExpression(.Index);
+
+        const left_owned = try self.arena.create(Expression);
+        left_owned.* = left;
+
+        return Expression{
+            .IndexExpression = IndexExpression{
+                .left = left_owned,
+                .index_expression = expression,
             },
         };
     }
@@ -853,6 +869,7 @@ pub const Parser = struct {
             .Tilde => .Prefix,
             .LParen => .Call,
             .LBracket => .Index,
+            .Dot => .Index,
             else => .Lowest,
         };
     }

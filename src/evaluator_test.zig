@@ -267,15 +267,15 @@ test "function calls" {
             ,
             .expected_output = Object{ .Integer = 21 },
         },
-        // TODO: how to make sure the string is not deallocated before testing it?
-        // .{
-        //     .description = "function call with string default args",
-        //     .input =
-        //     \\foo = (first = "Hello, ", second = "World!") -> first + second
-        //     \\foo()
-        //     ,
-        //     .expected_output = Object{ .String = String{ .data = "Hello, World!", .ref_count = 0 } },
-        // },
+        .{
+            .description = "function call with string default args",
+            .input =
+            \\foo = (first = "Hello, ", second = "World!") -> first + second
+            \\result = foo()
+            \\result == "Hello, World!"
+            ,
+            .expected_output = Object{ .Boolean = true },
+        },
     };
 
     try runTests(ObjectTestCase, "evaluate function calls", &test_cases, runObjectTest);
@@ -442,6 +442,31 @@ test "table" {
             ,
             .expected_output = Object{ .Integer = 1 },
         },
+        .{
+            .description = "table dot index",
+            .input =
+            \\table = { a = "bar" }
+            \\foo = "a"
+            \\table.foo == "bar"
+            ,
+            .expected_output = Object{ .Boolean = true },
+        },
+        .{
+            .description = "table dot index with string",
+            .input =
+            \\table = { a = "bar" }
+            \\table."a" == "bar"
+            ,
+            .expected_output = Object{ .Boolean = true },
+        },
+        .{
+            .description = "table key not found",
+            .input =
+            \\table = { a = "bar" }
+            \\table["b"]
+            ,
+            .expected_output = Object.Null,
+        },
     };
 
     try runTests(ObjectTestCase, "evaluate table", &test_cases, runObjectTest);
@@ -473,6 +498,15 @@ test "array" {
             \\array[0]
             ,
             .expected_output = Object{ .Integer = 100 },
+        },
+        .{
+            .description = "array index with dot notation",
+            .input =
+            \\array = [1, 2, 3]
+            \\array.0 = 100
+            \\array.0 == 100
+            ,
+            .expected_output = Object{ .Boolean = true },
         },
     };
 
@@ -680,6 +714,26 @@ test "memory leaks" {
             \\s
             \\s + "b"
             \\s + "c"
+            ,
+        },
+        .{
+            .description = "string assignment",
+            .input =
+            \\foo = "bar" + "baz"
+            ,
+        },
+        .{
+            .description = "string discarded from a function call",
+            .input =
+            \\foo = () -> "Hello, " + "World!"
+            \\foo()
+            ,
+        },
+        .{
+            .description = "static string discarded from a function call",
+            .input =
+            \\foo = () -> "Hello, World!"
+            \\foo()
             ,
         },
     };

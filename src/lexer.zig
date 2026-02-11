@@ -37,6 +37,7 @@ pub const TokenType = enum {
     Else,
     For,
     In,
+    Dot,
     DotDot,
     Arrow,
 
@@ -181,11 +182,11 @@ pub const Lexer = struct {
 
     fn scanDot(self: *Lexer) !Token {
         self.advancePos();
-        if (self.getChar() != '.') {
-            return error.UnexpectedChar;
+        if (self.getChar() == '.') {
+            self.advancePos();
+            return Token{ .type = .DotDot, .literal = ".." };
         }
-        self.advancePos();
-        return Token{ .type = .DotDot, .literal = ".." };
+        return Token{ .type = .Dot, .literal = "." };
     }
 
     fn scanBangChar(self: *Lexer) !Token {
