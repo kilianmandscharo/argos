@@ -662,6 +662,14 @@ test "memory leaks" {
             ,
         },
         .{
+            .description = "array of non static strings",
+            .input =
+            \\foo = "foo"
+            \\bar = "bar"
+            \\a = [foo + bar, bar + foo]
+            ,
+        },
+        .{
             .description = "array of array of strings",
             .input =
             \\[["a", "b"], ["c", "d"], ["e", "f"]]
