@@ -258,7 +258,7 @@ pub const Evaluator = struct {
                 if (evaluated_function != .Function) return error.CalledNonFunction;
 
                 const function = evaluated_function.Function;
-                const params = function.params.items;
+                var params = function.params.items;
                 const args = call_expression.args.items;
 
                 // TODO: this means allocating heap memory for each function call,
@@ -268,6 +268,17 @@ pub const Evaluator = struct {
 
                 var resolved_args: std.ArrayList(*const Expression) = .{};
                 defer resolved_args.deinit(self.gpa);
+
+                if (call_expression.function.* == .IndexExpression and params.len > 0) {
+                    const firstParam = params[0];
+                    const isFirstParamSelf = firstParam == .Identifier and std.mem.eql(u8, firstParam.Identifier, "self");
+                    const isIndexExpression = call_expression.function.* == .IndexExpression;
+                    if (isFirstParamSelf and isIndexExpression) {
+                        try resolved_identifiers.append(self.gpa, "self");
+                        try resolved_args.append(self.gpa, call_expression.function.IndexExpression.left);
+                        params = params[1..];
+                    }
+                }
 
                 outer: for (params, 0..) |param, i| {
                     const param_name = switch (param) {

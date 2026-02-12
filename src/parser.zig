@@ -698,13 +698,18 @@ pub const Parser = struct {
         try self.advance();
         const expression = try self.parseExpression(.Index);
 
+        if (expression.* != .Identifier) return error.InvalidDotIndexExpression;
+
+        const right_owned = try self.arena.create(Expression);
+        right_owned.* = Expression{ .StringLiteral = expression.Identifier };
+
         const left_owned = try self.arena.create(Expression);
         left_owned.* = left;
 
         return Expression{
             .IndexExpression = IndexExpression{
                 .left = left_owned,
-                .index_expression = expression,
+                .index_expression = right_owned,
             },
         };
     }

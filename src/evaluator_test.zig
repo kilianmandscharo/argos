@@ -468,14 +468,6 @@ test "table" {
             .expected_output = Object{ .Boolean = true },
         },
         .{
-            .description = "table dot index with string",
-            .input =
-            \\table = { a = "bar" }
-            \\table."a" == "bar"
-            ,
-            .expected_output = Object{ .Boolean = true },
-        },
-        .{
             .description = "table key not found",
             .input =
             \\table = { a = "bar" }
@@ -483,15 +475,24 @@ test "table" {
             ,
             .expected_output = Object.Null,
         },
-        // .{
-        //     .description = "table method call",
-        //     .input =
-        //     \\table = { inc = () -> 5 }
-        //     \\result = table.inc()
-        //     \\result == 5
-        //     ,
-        //     .expected_output = Object{ .Boolean = true },
-        // },
+        .{
+            .description = "table method call",
+            .input =
+            \\table = { inc = () -> 5 }
+            \\result = table.inc()
+            \\result == 5
+            ,
+            .expected_output = Object{ .Boolean = true },
+        },
+        .{
+            .description = "table method call with self",
+            .input =
+            \\table = { count = 1, inc = (self) -> self.count = self.count + 1 }
+            \\table.inc()
+            \\table.count == 2
+            ,
+            .expected_output = Object{ .Boolean = true },
+        },
     };
 
     try runTests(ObjectTestCase, "evaluate table", &test_cases, runObjectTest);
