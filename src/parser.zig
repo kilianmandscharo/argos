@@ -328,6 +328,7 @@ pub const Parser = struct {
             .currentLevel = if (self.debug) .Debug else .Fatal,
             .color = color,
             .indent = self.debug_indent,
+            .module = "Parser",
         });
     }
 

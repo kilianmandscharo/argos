@@ -20,6 +20,7 @@ fn printDebug(comptime fmt: []const u8, args: anytype, debug: bool, ident: usize
         .messageLevel = .Debug,
         .currentLevel = if (debug) .Debug else .Fatal,
         .indent = ident,
+        .module = "Evaluator",
     });
 }
 
@@ -48,95 +49,87 @@ pub const Object = union(enum) {
         };
     }
 
-    fn deinit(self: *Object, env: *Environment) void {
-        printDebug("deinit object {s}\n", .{self.getType()}, env.debug, 0);
+    fn deinit(self: *Object, env: *Environment, level: usize) void {
+        printDebug("deinit object {s}\n", .{self.getType()}, env.debug, level);
         return switch (self.*) {
-            .Integer => {},
-            .Float => {},
-            .Boolean => {},
-            .ReturnValue => {},
-            .Function => {},
             .String => |*string| {
+                printDebug("ref count: {d}\n", .{string.ref_count}, env.debug, level);
                 if (string.static_lifetime) return;
                 env.gpa.free(string.data);
-                printDebug("destroyed string\n", .{}, env.debug, 0);
             },
             .Array => |array| {
                 for (array.data.items) |*item| {
-                    item.decRef(env);
+                    item.decRef(env, level);
                 }
                 array.data.deinit(env.gpa);
                 env.gpa.destroy(array);
-                printDebug("destroyed array\n", .{}, env.debug, 0);
             },
             .Table => |table| {
                 var iterator = table.data.iterator();
                 while (iterator.next()) |item| {
-                    item.value_ptr.decRef(env);
+                    item.value_ptr.decRef(env, level);
                 }
                 table.data.deinit(env.gpa);
                 env.gpa.destroy(table);
-                printDebug("destroyed table\n", .{}, env.debug, 0);
             },
-            .Null => {},
+            else => {},
         };
     }
 
-    // TODO: dec all array/table elements on deinitialization
-    fn decRef(self: *Object, env: *Environment) void {
+    fn checkRef(self: *Object, env: *Environment, level: usize) void {
         return switch (self.*) {
-            .Integer => {},
-            .Float => {},
-            .Boolean => {},
-            .ReturnValue => {},
-            .Function => {},
-            .Null => {},
             .String => |*string| {
                 if (string.static_lifetime) return;
-                printDebug("dec string refCount, new count: {d}\n", .{string.ref_count - 1}, env.debug, 0);
-                string.ref_count -= 1;
-                if (string.ref_count == 0) {
-                    self.deinit(env);
-                }
+                if (string.ref_count == 0) self.deinit(env, level);
             },
             .Array => |array| {
-                printDebug("dec array refCount, new count: {d}\n", .{array.ref_count - 1}, env.debug, 0);
-                array.ref_count -= 1;
-                if (array.ref_count == 0) {
-                    self.deinit(env);
-                }
+                if (array.ref_count == 0) self.deinit(env, level);
             },
             .Table => |table| {
-                printDebug("dec table refCount, new count: {d}\n", .{table.ref_count - 1}, env.debug, 0);
-                table.ref_count -= 1;
-                if (table.ref_count == 0) {
-                    self.deinit(env);
-                }
+                if (table.ref_count == 0) self.deinit(env, level);
             },
+            else => {},
         };
     }
 
-    fn incRef(self: *Object, env: *Environment) void {
+    fn decRef(self: *Object, env: *Environment, level: usize) void {
         return switch (self.*) {
-            .Integer => {},
-            .Float => {},
-            .Boolean => {},
-            .ReturnValue => {},
-            .Function => {},
-            .Null => {},
             .String => |*string| {
                 if (string.static_lifetime) return;
-                printDebug("inc string refCount, new count: {d}\n", .{string.ref_count + 1}, env.debug, 0);
+                string.ref_count -= 1;
+                printDebug("dec string refCount, new count: {d}\n", .{string.ref_count}, env.debug, level);
+                self.checkRef(env, level);
+            },
+            .Array => |array| {
+                array.ref_count -= 1;
+                printDebug("dec array refCount, new count: {d}\n", .{array.ref_count}, env.debug, level);
+                self.checkRef(env, level);
+            },
+            .Table => |table| {
+                table.ref_count -= 1;
+                printDebug("dec table refCount, new count: {d}\n", .{table.ref_count}, env.debug, level);
+                self.checkRef(env, level);
+            },
+            else => {},
+        };
+    }
+
+    fn incRef(self: *Object, env: *Environment, level: usize) void {
+        return switch (self.*) {
+            .String => |*string| {
+                if (string.static_lifetime) return;
+                printDebug("inc string refCount, new count: {d}\n", .{string.ref_count + 1}, env.debug, level);
                 string.ref_count += 1;
             },
             .Array => |array| {
-                printDebug("inc array refCount, new count: {d}\n", .{array.ref_count + 1}, env.debug, 0);
+                printDebug("inc array refCount, new count: {d}\n", .{array.ref_count + 1}, env.debug, level);
                 array.ref_count += 1;
             },
             .Table => |table| {
-                printDebug("inc table refCount, new count: {d}\n", .{table.ref_count + 1}, env.debug, 0);
+                printDebug("inc table refCount, new count: {d}\n", .{table.ref_count + 1}, env.debug, level);
                 table.ref_count += 1;
             },
+            else => {},
         };
     }
 
@@ -183,6 +176,7 @@ pub const String = struct {
 pub const Evaluator = struct {
     gpa: std.mem.Allocator,
     debug: bool = false,
+    level: usize = 0,
 
     pub fn init(options: struct { gpa: std.mem.Allocator, debug: bool = false }) Evaluator {
         return Evaluator{
@@ -191,21 +185,23 @@ pub const Evaluator = struct {
         };
     }
 
-    pub fn eval(self: *Evaluator, expression: *const Expression, env: *Environment, level: usize) !Object {
-        printDebug("eval {s}\n", .{@tagName(expression.*)}, self.debug, level);
+    pub fn eval(self: *Evaluator, expression: *const Expression, env: *Environment) !Object {
+        printDebug("eval {s}\n", .{@tagName(expression.*)}, self.debug, self.level);
+
+        self.level += 1;
+        defer self.level -= 1;
+
         return switch (expression.*) {
             .Program => |statements| {
                 return try self.evalProgram(statements, env);
             },
             .Statement => |statement| {
-                var value = try self.eval(statement, env, level + 1);
-                if (statement.* != .Identifier) {
-                    value.decRef(env);
-                }
+                var value = try self.eval(statement, env);
+                value.checkRef(env, self.level);
                 return value;
             },
             .ReturnExpression => |return_expression| {
-                const value = try self.eval(return_expression, env, level + 1);
+                const value = try self.eval(return_expression, env);
                 const value_owned = try self.gpa.create(Object);
                 value_owned.* = value;
                 return Object{ .ReturnValue = value_owned };
@@ -213,7 +209,7 @@ pub const Evaluator = struct {
             .BlockExpression => |block| {
                 var result: Object = Object.Null;
                 for (block.expressions.items) |item| {
-                    result = try self.eval(item, env, level + 1);
+                    result = try self.eval(item, env);
                     switch (result) {
                         .ReturnValue => {
                             return result;
@@ -231,22 +227,16 @@ pub const Evaluator = struct {
             .FloatLiteral => |float| return Object{ .Float = float },
             .BooleanLiteral => |boolean| return Object{ .Boolean = boolean },
             .StringLiteral => |string| {
-                return Object{ .String = String{ .data = string, .ref_count = 1, .static_lifetime = true } };
+                return Object{ .String = String{ .data = string, .ref_count = 0, .static_lifetime = true } };
             },
             .InfixExpression => |infix| {
-                var left = try self.eval(infix.left, env, level + 1);
-                var right = try self.eval(infix.right, env, level + 1);
+                var left = try self.eval(infix.left, env);
+                var right = try self.eval(infix.right, env);
                 const evaluated = self.evalInfixExpression(&left, &right, infix.operator);
-                if (infix.left.* == .StringLiteral) {
-                    left.decRef(env);
-                }
-                if (infix.right.* == .StringLiteral) {
-                    right.decRef(env);
-                }
                 return evaluated;
             },
             .PrefixExpression => |prefix| {
-                const right = try self.eval(prefix.expression, env, level + 1);
+                const right = try self.eval(prefix.expression, env);
                 return self.evalPrefixExpression(right, prefix.operator);
             },
             .FunctionLiteral => |function| {
@@ -254,7 +244,7 @@ pub const Evaluator = struct {
                 return object;
             },
             .CallExpression => |call_expression| {
-                const evaluated_function = try self.eval(call_expression.function, env, level + 1);
+                const evaluated_function = try self.eval(call_expression.function, env);
                 if (evaluated_function != .Function) return error.CalledNonFunction;
 
                 const function = evaluated_function.Function;
@@ -263,6 +253,8 @@ pub const Evaluator = struct {
 
                 // TODO: this means allocating heap memory for each function call,
                 // can we make this more efficient?
+                // -> for example we could allocate once during parsing for each
+                // function literal
                 var resolved_identifiers: std.ArrayList([]const u8) = .{};
                 defer resolved_identifiers.deinit(self.gpa);
 
@@ -312,13 +304,15 @@ pub const Evaluator = struct {
                     try resolved_args.append(self.gpa, param.AssignmentExpression.expression);
                 }
 
-                const extended_env = try Environment.initEnclosed(self.gpa, function.env);
+                const extended_env = try Environment.initEnclosed(self.gpa, function.env, self.debug, self.level);
+                defer extended_env.checkRef(self.level);
+
                 for (resolved_identifiers.items, 0..) |name, i| {
-                    const arg = try self.eval(resolved_args.items[i], env, level + 1);
+                    const arg = try self.eval(resolved_args.items[i], env);
                     try extended_env.set(name, arg);
                 }
 
-                const result = try self.eval(function.body, extended_env, level + 1);
+                const result = try self.eval(function.body, extended_env);
 
                 switch (result) {
                     .ReturnValue => |obj| {
@@ -334,14 +328,14 @@ pub const Evaluator = struct {
                 return result;
             },
             .IfExpression => |if_expression| {
-                const condition = try self.eval(if_expression.condition, env, level + 1);
+                const condition = try self.eval(if_expression.condition, env);
                 switch (condition) {
                     .Boolean => |val| {
                         if (val) {
-                            return try self.eval(&Expression{ .BlockExpression = if_expression.body }, env, level + 1);
+                            return try self.eval(&Expression{ .BlockExpression = if_expression.body }, env);
                         }
                         if (if_expression.alternative) |alternative| {
-                            return try self.eval(&Expression{ .BlockExpression = alternative }, env, level + 1);
+                            return try self.eval(&Expression{ .BlockExpression = alternative }, env);
                         }
                         return Object.Null;
                     },
@@ -352,7 +346,7 @@ pub const Evaluator = struct {
                 }
             },
             .ForExpression => |for_expression| {
-                const lower = try self.eval(for_expression.range.left, env, level + 1);
+                const lower = try self.eval(for_expression.range.left, env);
                 if (lower != .Integer) {
                     self.printError("found non-Integer value in range expression: {s}\n", .{@tagName(lower)});
                     return EvaluatorError.RuntimeError;
@@ -362,7 +356,7 @@ pub const Evaluator = struct {
                     return EvaluatorError.RuntimeError;
                 }
 
-                const upper = try self.eval(for_expression.range.right, env, level + 1);
+                const upper = try self.eval(for_expression.range.right, env);
                 if (upper != .Integer) {
                     self.printError("found non-Integer value in range expression: {s}\n", .{@tagName(lower)});
                     return EvaluatorError.RuntimeError;
@@ -374,45 +368,48 @@ pub const Evaluator = struct {
 
                 for (@intCast(lower.Integer)..@intCast(upper.Integer)) |i| {
                     try env.set(for_expression.variable, Object{ .Integer = @intCast(i) });
-                    _ = try self.eval(&Expression{ .BlockExpression = for_expression.body }, env, level + 1);
+                    _ = try self.eval(&Expression{ .BlockExpression = for_expression.body }, env);
                 }
 
                 return Object.Null;
             },
             .AssignmentExpression => |assignment| {
-                var val = try self.eval(assignment.expression, env, level + 1);
+                var val = try self.eval(assignment.expression, env);
+                val.incRef(env, self.level);
                 switch (assignment.left.*) {
                     .Identifier => |identifier| {
                         try env.set(identifier, val);
                     },
                     .IndexExpression => |index_expression| {
-                        const left = try self.eval(index_expression.left, env, level + 1);
+                        var left = try self.eval(index_expression.left, env);
                         switch (left) {
                             .Array => |array| {
-                                const index = try self.eval(index_expression.index_expression, env, level + 1);
+                                const index = try self.eval(index_expression.index_expression, env);
+                                if (index != .Integer) return self.runtimeError("invalid index type in array index expression: {s}\n", .{index.getType()});
                                 array.data.items[@intCast(index.Integer)] = val;
+                                left.checkRef(env, self.level);
                             },
                             .Table => |table| {
-                                var index = try self.eval(index_expression.index_expression, env, level + 1);
-                                defer index.decRef(env);
+                                const index = try self.eval(index_expression.index_expression, env);
                                 try table.data.put(self.gpa, index.String.data, val);
+                                left.checkRef(env, self.level);
                             },
                             else => return self.runtimeError("invalid left side for index expression: {s}\n", .{left.getType()}),
                         }
                     },
                     else => return self.runtimeError("invalid left side for assignment expression: {s}\n", .{assignment.left.getType()}),
                 }
-                val.incRef(env);
                 return val;
             },
             .ArrayLiteral => |array| {
                 var data: std.ArrayList(Object) = .{};
                 for (array.items) |item| {
-                    const evaluated = try self.eval(item, env, level + 1);
+                    var evaluated = try self.eval(item, env);
+                    evaluated.incRef(env, self.level);
                     try data.append(self.gpa, evaluated);
                 }
                 const array_owned = try self.gpa.create(Array);
-                array_owned.* = Array{ .data = data, .ref_count = 1 };
+                array_owned.* = Array{ .data = data, .ref_count = 0 };
                 return Object{ .Array = array_owned };
             },
             .TableLiteral => |table| {
@@ -421,24 +418,25 @@ pub const Evaluator = struct {
                     // we know that every expression is of type Assignment
                     const key = item.AssignmentExpression.left.Identifier;
                     const value = item.AssignmentExpression.expression;
-                    const evaluated = try self.eval(value, env, level + 1);
+                    var evaluated = try self.eval(value, env);
+                    evaluated.incRef(env, self.level);
                     try data.put(self.gpa, key, evaluated);
                 }
                 const table_owned = try self.gpa.create(Table);
-                table_owned.* = Table{ .data = data, .ref_count = 1 };
+                table_owned.* = Table{ .data = data, .ref_count = 0 };
                 return Object{ .Table = table_owned };
             },
             .IndexExpression => |index_expression| {
-                var evaluated = try self.eval(index_expression.left, env, level + 1);
+                var evaluated = try self.eval(index_expression.left, env);
 
                 switch (evaluated) {
                     .Array => |array| {
-                        const index = try self.eval(index_expression.index_expression, env, level + 1);
+                        const index = try self.eval(index_expression.index_expression, env);
                         switch (index) {
                             .Integer => |integer| {
                                 const val = array.data.items[@intCast(integer)];
                                 if (index_expression.left.* == .ArrayLiteral) {
-                                    defer evaluated.decRef(env);
+                                    defer evaluated.checkRef(env, self.level);
                                 }
                                 return val;
                             },
@@ -449,17 +447,12 @@ pub const Evaluator = struct {
                         }
                     },
                     .Table => |table| {
-                        // we need to differentiate between a BracketIndexExpression and a DotIndexExpression,
-                        // because identifiers in the latter case must not be evaluated but treated as strings
-                        var index = try self.eval(index_expression.index_expression, env, level + 1);
+                        var index = try self.eval(index_expression.index_expression, env);
                         switch (index) {
                             .String => |string| {
                                 const val = table.data.get(string.data);
                                 if (index_expression.left.* == .TableLiteral) {
-                                    defer evaluated.decRef(env);
-                                }
-                                if (index_expression.index_expression.* == .StringLiteral) {
-                                    defer index.decRef(env);
+                                    defer evaluated.checkRef(env, self.level);
                                 }
                                 return val orelse .Null;
                             },
@@ -496,7 +489,7 @@ pub const Evaluator = struct {
     fn evalProgram(self: *Evaluator, expressions: std.ArrayList(*const Expression), env: *Environment) anyerror!Object {
         var result: Object = Object.Null;
         for (expressions.items) |expression| {
-            result = try self.eval(expression, env, 0);
+            result = try self.eval(expression, env);
             switch (result) {
                 .ReturnValue => |obj| {
                     const retVal = obj.*;
@@ -606,7 +599,7 @@ pub const Evaluator = struct {
                 const data = try self.gpa.alloc(u8, left.data.len + right.data.len);
                 @memcpy(data[0..left.data.len], left.data);
                 @memcpy(data[left.data.len..], right.data);
-                return Object{ .String = String{ .data = data, .ref_count = 1 } };
+                return Object{ .String = String{ .data = data, .ref_count = 0 } };
             },
             .Eq => {
                 return Object{ .Boolean = std.mem.eql(u8, left.data, right.data) };
@@ -685,67 +678,70 @@ pub const Evaluator = struct {
 };
 
 pub const Environment = struct {
-    id: usize = 1,
     gpa: std.mem.Allocator,
     store: std.StringHashMapUnmanaged(Object),
-    children: std.AutoArrayHashMapUnmanaged(usize, *Environment),
-    child_id_counter: usize,
     outer: ?*Environment,
-    debug: bool = false,
+    debug: bool,
+    ref_count: usize,
+    level: usize,
+    is_global: bool,
 
     pub fn init(options: struct {
         gpa: std.mem.Allocator,
-        id: usize = 1,
         outer: ?*Environment = null,
         debug: bool = false,
+        level: usize = 0,
+        is_global: bool = true,
     }) !*Environment {
         const env = try options.gpa.create(Environment);
         env.* = Environment{
             .outer = options.outer,
             .gpa = options.gpa,
-            .id = options.id,
             .store = .{},
-            .children = .{},
-            .child_id_counter = 1,
             .debug = options.debug,
+            .level = options.level,
+            .is_global = options.is_global,
+            .ref_count = 0,
         };
         return env;
     }
 
-    pub fn deinit(self: *Environment) void {
-        printDebug("deinit env {d}\n", .{self.id}, self.debug, 0);
-
-        // if (self.outer) |outer| {
-        //     const result = outer.children.swapRemove(self.id);
-        //     _ = result;
-        // }
-
-        var child_iterator = self.children.iterator();
-        while (child_iterator.next()) |child| {
-            child.value_ptr.*.deinit();
-        }
+    pub fn drop(self: *Environment, log_indent: usize) void {
+        printDebug("drop env on level {d}\n", .{self.level}, self.debug, log_indent);
 
         var object_iterator = self.store.valueIterator();
         while (object_iterator.next()) |object| {
-            object.deinit(self);
+            object.decRef(self, log_indent);
+        }
+
+        if (self.outer) |outer| {
+            outer.decRef();
         }
 
         self.store.deinit(self.gpa);
-        self.children.deinit(self.gpa);
         self.gpa.destroy(self);
     }
 
-    pub fn initEnclosed(gpa: std.mem.Allocator, environment: *Environment) !*Environment {
+    pub fn decRef(self: *Environment) void {
+        if (self.is_global) return;
+        self.ref_count -= 1;
+    }
+
+    pub fn checkRef(self: *Environment, log_indent: usize) void {
+        if (self.is_global) return;
+        if (self.ref_count == 0) self.drop(log_indent);
+    }
+
+    pub fn initEnclosed(gpa: std.mem.Allocator, environment: *Environment, debug: bool, log_level: usize) !*Environment {
         const child_env = try Environment.init(.{
             .gpa = gpa,
             .outer = environment,
-            .id = environment.child_id_counter,
             .debug = environment.debug,
+            .level = environment.level + 1,
+            .is_global = false,
         });
-
-        try environment.children.put(gpa, child_env.id, child_env);
-        environment.child_id_counter += 1;
-
+        printDebug("initialized enclosed env on level {d}\n", .{child_env.level}, debug, log_level);
+        environment.ref_count += 1;
         return child_env;
     }
 

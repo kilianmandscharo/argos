@@ -19,6 +19,7 @@ pub const LogOptions = struct {
     messageLevel: LogLevel = .Debug,
     color: LogColor = .None,
     indent: usize = 0,
+    module: ?[]const u8 = null,
 };
 
 pub fn log(comptime fmt: []const u8, args: anytype, options: LogOptions) void {
@@ -41,6 +42,11 @@ pub fn log(comptime fmt: []const u8, args: anytype, options: LogOptions) void {
         std.debug.print("┗━━━", .{});
     }
     std.debug.print("[{s}] ", .{@tagName(options.messageLevel)});
+
+    if (options.module) |module| {
+        std.debug.print("({s}) ", .{module});
+    }
+
     std.debug.print(fmt, args);
     std.debug.print("\x1b[0m", .{});
 }

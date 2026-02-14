@@ -2229,6 +2229,27 @@ test "assignment expression" {
                 },
             },
         },
+        .{
+            .description = "function call in assignment",
+            .input =
+            \\a = foo()
+            ,
+            .expected_expression = Expression{
+                .AssignmentExpression = AssignmentExpression{
+                    .left = &Expression{
+                        .Identifier = "a",
+                    },
+                    .expression = &Expression{
+                        .CallExpression = CallExpression{
+                            .function = &Expression{
+                                .Identifier = "foo",
+                            },
+                            .args = .{},
+                        },
+                    },
+                },
+            },
+        },
     };
 
     try runTests(ExpressionTestCase, "parse assignment expression", &test_cases, runExpressionTest);
@@ -2608,7 +2629,7 @@ test "index expression" {
                         .Identifier = "table",
                     },
                     .index_expression = &Expression{
-                        .Identifier = "foo",
+                        .StringLiteral = "foo",
                     },
                 },
             },
@@ -2635,7 +2656,7 @@ test "index expression" {
                         }),
                     },
                     .index_expression = &Expression{
-                        .Identifier = "a",
+                        .StringLiteral = "a",
                     },
                 },
             },
@@ -2661,6 +2682,25 @@ test "index expression" {
             },
         },
         .{
+            .description = "index bracket precedence in assignment",
+            .input =
+            \\table["foo"] = 5
+            ,
+            .expected_expression = Expression{
+                .AssignmentExpression = AssignmentExpression{
+                    .left = &Expression{
+                        .IndexExpression = IndexExpression{
+                            .left = &Expression{ .Identifier = "table" },
+                            .index_expression = &Expression{ .StringLiteral = "foo" },
+                        },
+                    },
+                    .expression = &Expression{
+                        .IntegerLiteral = 5,
+                    },
+                },
+            },
+        },
+        .{
             .description = "dot precedence",
             .input =
             \\table.foo == 5
@@ -2670,11 +2710,30 @@ test "index expression" {
                     .left = &Expression{
                         .IndexExpression = IndexExpression{
                             .left = &Expression{ .Identifier = "table" },
-                            .index_expression = &Expression{ .Identifier = "foo" },
+                            .index_expression = &Expression{ .StringLiteral = "foo" },
                         },
                     },
                     .operator = .Eq,
                     .right = &Expression{
+                        .IntegerLiteral = 5,
+                    },
+                },
+            },
+        },
+        .{
+            .description = "index dot precedence in assignment",
+            .input =
+            \\table.foo = 5
+            ,
+            .expected_expression = Expression{
+                .AssignmentExpression = AssignmentExpression{
+                    .left = &Expression{
+                        .IndexExpression = IndexExpression{
+                            .left = &Expression{ .Identifier = "table" },
+                            .index_expression = &Expression{ .StringLiteral = "foo" },
+                        },
+                    },
+                    .expression = &Expression{
                         .IntegerLiteral = 5,
                     },
                 },
@@ -2697,6 +2756,63 @@ test "parse program" {
     defer arena.deinit();
 
     const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "small program",
+            .input =
+            \\foo = () -> {
+            \\    10 * 10
+            \\}
+            \\a = foo()
+            ,
+            .expected_expression = Expression{
+                .Program = try list(*const Expression, arena.allocator(), &.{
+                    &Expression{
+                        .Statement = &Expression{
+                            .AssignmentExpression = AssignmentExpression{
+                                .left = &Expression{ .Identifier = "foo" },
+                                .expression = &Expression{
+                                    .FunctionLiteral = FunctionLiteral{
+                                        .body = &Expression{
+                                            .BlockExpression = BlockExpression{
+                                                .expressions = try list(*const Expression, arena.allocator(), &.{
+                                                    &Expression{
+                                                        .Statement = &Expression{
+                                                            .InfixExpression = InfixExpression{
+                                                                .left = &Expression{
+                                                                    .IntegerLiteral = 10,
+                                                                },
+                                                                .operator = .Asterisk,
+                                                                .right = &Expression{
+                                                                    .IntegerLiteral = 10,
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                }),
+                                            },
+                                        },
+                                        .params = .{},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    &Expression{
+                        .Statement = &Expression{
+                            .AssignmentExpression = AssignmentExpression{
+                                .left = &Expression{ .Identifier = "a" },
+                                .expression = &Expression{
+                                    .CallExpression = CallExpression{
+                                        .function = &Expression{ .Identifier = "foo" },
+                                        .args = .{},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                }),
+            },
+        },
         .{
             .description = "fibonacci",
             .input =

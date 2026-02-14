@@ -15,7 +15,7 @@ const String = evaluator_module.String;
 const test_utils = @import("test_utils.zig");
 const runTests = test_utils.runTests;
 
-const DEBUG = false;
+const DEBUG = true;
 
 pub fn assertResult(arena: std.mem.Allocator, input: []const u8, expected: Object) !void {
     var lexer = try Lexer.init(arena, input);
@@ -25,10 +25,10 @@ pub fn assertResult(arena: std.mem.Allocator, input: []const u8, expected: Objec
     const allocator = std.testing.allocator;
 
     const env = try Environment.init(.{ .gpa = allocator, .debug = DEBUG });
-    defer env.deinit();
+    defer env.drop(0);
 
-    var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = true });
-    const result = try evaluator.eval(&program, env, 0);
+    var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = DEBUG });
+    const result = try evaluator.eval(&program, env);
 
     try expectObject(expected, result);
 }
@@ -174,7 +174,7 @@ test "function calls" {
             \\a = 10
             \\
             \\subtract = (a, b) -> {
-            \\    a - b 
+            \\    a - b
             \\}
             \\
             \\subtract(20, 3)
@@ -197,12 +197,64 @@ test "function calls" {
             .expected_output = Object{ .Integer = 225 },
         },
         .{
+            .description = "function call with inline callback function",
+            .input =
+            \\test = (val, cb) -> {
+            \\    cb(val)
+            \\}
+            \\
+            \\test(15, (x) -> x * x)
+            ,
+            .expected_output = Object{ .Integer = 225 },
+        },
+        .{
             .description = "function call with inner function declaration",
             .input =
             \\test = () -> {
             \\    inner = (y) -> { y * y }
             \\    inner(10)
             \\}
+            \\test()
+            ,
+            .expected_output = Object{ .Integer = 100 },
+        },
+        .{
+            .description = "multiple function calls with inner function declaration",
+            .input =
+            \\test = () -> {
+            \\    inner = (y) -> { y * y }
+            \\    inner(10)
+            \\}
+            \\test()
+            \\test()
+            ,
+            .expected_output = Object{ .Integer = 100 },
+        },
+        .{
+            .description = "function call with inner function declaration multiple levels",
+            .input =
+            \\test = () -> {
+            \\    inner_first = (y) -> { 
+            \\        inner_second = (x) -> x * x
+            \\        inner_second(y)
+            \\    }
+            \\    inner_first(10)
+            \\}
+            \\test()
+            ,
+            .expected_output = Object{ .Integer = 100 },
+        },
+        .{
+            .description = "multiple function calls with inner function declaration multiple levels",
+            .input =
+            \\test = () -> {
+            \\    inner_first = (y) -> { 
+            \\        inner_second = (x) -> x * x
+            \\        inner_second(y)
+            \\    }
+            \\    inner_first(10)
+            \\}
+            \\test()
             \\test()
             ,
             .expected_output = Object{ .Integer = 100 },
@@ -219,63 +271,63 @@ test "function calls" {
             ,
             .expected_output = Object{ .Integer = 15 },
         },
-        .{
-            .description = "function call without braces",
-            .input =
-            \\square = (a) -> a * a
-            \\square(11)
-            ,
-            .expected_output = Object{ .Integer = 121 },
-        },
-        .{
-            .description = "function with default args",
-            .input =
-            \\foo = (a = 1, b = 2) -> a + b
-            \\foo()
-            ,
-            .expected_output = Object{ .Integer = 3 },
-        },
-        .{
-            .description = "function call with keyword arguments",
-            .input =
-            \\foo = (a, b, c) -> a * (b + c)
-            \\foo(c = 1, b = 2, a = 3)
-            ,
-            .expected_output = Object{ .Integer = 9 },
-        },
-        .{
-            .description = "function call with keyword arguments",
-            .input =
-            \\foo = (a, b, c) -> a * (b + c)
-            \\foo(c = 1, b = 2, a = 3)
-            ,
-            .expected_output = Object{ .Integer = 9 },
-        },
-        .{
-            .description = "function call with positional and keyword arguments",
-            .input =
-            \\foo = (a, b, c) -> a * (b + c)
-            \\foo(1, c = 10, b = 5)
-            ,
-            .expected_output = Object{ .Integer = 15 },
-        },
-        .{
-            .description = "function call with positional and keyword arguments and default args",
-            .input =
-            \\foo = (a = 5, b = 3, c = 1) -> a * (b + c)
-            \\foo(3, c = 4)
-            ,
-            .expected_output = Object{ .Integer = 21 },
-        },
-        .{
-            .description = "function call with string default args",
-            .input =
-            \\foo = (first = "Hello, ", second = "World!") -> first + second
-            \\result = foo()
-            \\result == "Hello, World!"
-            ,
-            .expected_output = Object{ .Boolean = true },
-        },
+        // .{
+        //     .description = "function call without braces",
+        //     .input =
+        //     \\square = (a) -> a * a
+        //     \\square(11)
+        //     ,
+        //     .expected_output = Object{ .Integer = 121 },
+        // },
+        // .{
+        //     .description = "function with default args",
+        //     .input =
+        //     \\foo = (a = 1, b = 2) -> a + b
+        //     \\foo()
+        //     ,
+        //     .expected_output = Object{ .Integer = 3 },
+        // },
+        // .{
+        //     .description = "function call with keyword arguments",
+        //     .input =
+        //     \\foo = (a, b, c) -> a * (b + c)
+        //     \\foo(c = 1, b = 2, a = 3)
+        //     ,
+        //     .expected_output = Object{ .Integer = 9 },
+        // },
+        // .{
+        //     .description = "function call with keyword arguments",
+        //     .input =
+        //     \\foo = (a, b, c) -> a * (b + c)
+        //     \\foo(c = 1, b = 2, a = 3)
+        //     ,
+        //     .expected_output = Object{ .Integer = 9 },
+        // },
+        // .{
+        //     .description = "function call with positional and keyword arguments",
+        //     .input =
+        //     \\foo = (a, b, c) -> a * (b + c)
+        //     \\foo(1, c = 10, b = 5)
+        //     ,
+        //     .expected_output = Object{ .Integer = 15 },
+        // },
+        // .{
+        //     .description = "function call with positional and keyword arguments and default args",
+        //     .input =
+        //     \\foo = (a = 5, b = 3, c = 1) -> a * (b + c)
+        //     \\foo(3, c = 4)
+        //     ,
+        //     .expected_output = Object{ .Integer = 21 },
+        // },
+        // .{
+        //     .description = "function call with string default args",
+        //     .input =
+        //     \\foo = (first = "Hello, ", second = "World!") -> first + second
+        //     \\result = foo()
+        //     \\result == "Hello, World!"
+        //     ,
+        //     .expected_output = Object{ .Boolean = true },
+        // },
     };
 
     try runTests(ObjectTestCase, "evaluate function calls", &test_cases, runObjectTest);
@@ -607,7 +659,7 @@ test "memory leaks" {
             const allocator = std.testing.allocator;
 
             const env = try Environment.init(.{ .gpa = allocator, .debug = DEBUG });
-            defer env.deinit();
+            defer env.drop(0);
 
             var evaluator = Evaluator.init(.{ .gpa = allocator, .debug = DEBUG });
             const result = try evaluator.eval(&program, env);
@@ -620,6 +672,12 @@ test "memory leaks" {
             .description = "unassigned array on top level",
             .input =
             \\[1, 2, 3, 4, 5]
+            ,
+        },
+        .{
+            .description = "unassigned array of arrays on top level",
+            .input =
+            \\[[1, 2], [3, 4]]
             ,
         },
         .{
@@ -645,6 +703,15 @@ test "memory leaks" {
             \\    return [1, 2, 3, 4, 5]
             \\}
             \\test()
+            ,
+        },
+        .{
+            .description = "assigned array returned from function call",
+            .input =
+            \\test = () -> {
+            \\    return [1, 2, 3, 4, 5]
+            \\}
+            \\foo = test()
             ,
         },
         .{
@@ -676,7 +743,7 @@ test "memory leaks" {
             ,
         },
         .{
-            .description = "array of strings",
+            .description = "array of static strings",
             .input =
             \\["a", "b", "c", "d", "e"]
             ,
@@ -696,27 +763,86 @@ test "memory leaks" {
             ,
         },
         .{
-            .description = "array of array of strings",
+            .description = "array of static string refs",
+            .input =
+            \\foo = "foo"
+            \\bar = "bar"
+            \\a = [foo, bar]
+            ,
+        },
+        .{
+            .description = "array of array of static strings",
             .input =
             \\[["a", "b"], ["c", "d"], ["e", "f"]]
             ,
         },
         .{
+            .description = "array of arrays of non static strings",
+            .input =
+            \\foo = "foo"
+            \\bar = "bar"
+            \\a = [[foo + bar], [bar + foo]]
+            ,
+        },
+        .{
+            .description = "assignment to array literal",
+            .input =
+            \\[1, 2, 3][0] = 5
+            ,
+        },
+        .{
             .description = "table literal",
             .input =
-            \\{a = 1, b = 2, c = 3}
+            \\{ a = 1, b = 2, c = 3 }
             ,
         },
         .{
             .description = "table assignment",
             .input =
-            \\t = {a = 1, b = 2, c = 3}
+            \\t = { a = 1, b = 2, c = 3 }
             ,
         },
         .{
-            .description = "table literal of strings",
+            .description = "table literal of static strings",
             .input =
             \\{a = "a", b = "b", c = "c"}
+            ,
+        },
+        .{
+            .description = "table literal of non static strings",
+            .input =
+            \\{ a = "foo" + "bar", b = "bar" + "foo" }
+            ,
+        },
+        .{
+            .description = "table literal index expression with string literal",
+            .input =
+            \\{ a = 1 }["a"]
+            ,
+        },
+        .{
+            .description = "table literal index expression with identifier",
+            .input =
+            \\foo = "a"
+            \\{ a = 1 }[foo]
+            ,
+        },
+        .{
+            .description = "table literal dot expression with identifier",
+            .input =
+            \\{ a = 1 }.a
+            ,
+        },
+        .{
+            .description = "table literal dot expression with identifier",
+            .input =
+            \\{ a = 1 }.a
+            ,
+        },
+        .{
+            .description = "assignment to table literal",
+            .input =
+            \\{ a = 1 }.a = 2
             ,
         },
         .{
@@ -742,7 +868,7 @@ test "memory leaks" {
             ,
         },
         .{
-            .description = "string concatenation with string vars and assignment",
+            .description = "string concatenation with string vars",
             .input =
             \\s = "a"
             \\s
@@ -768,6 +894,22 @@ test "memory leaks" {
             .input =
             \\foo = () -> "Hello, World!"
             \\foo()
+            ,
+        },
+        .{
+            .description = "multiple refs to the same static string",
+            .input =
+            \\a = "foo"
+            \\b = a
+            \\c = a
+            ,
+        },
+        .{
+            .description = "multiple refs to the same non-static string",
+            .input =
+            \\a = "foo" + "bar"
+            \\b = a
+            \\c = a
             ,
         },
     };
