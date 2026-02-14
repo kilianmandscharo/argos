@@ -49,7 +49,7 @@ pub fn main() !void {
     const env = try Environment.init(.{
         .gpa = gpaAllocator,
     });
-    defer env.deinit();
+    defer env.drop(0);
 
     var evaluator = Evaluator.init(.{ .gpa = gpaAllocator, .debug = false });
     const result = try evaluator.eval(&program, env);

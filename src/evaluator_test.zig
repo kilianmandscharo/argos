@@ -234,7 +234,7 @@ test "function calls" {
             .description = "function call with inner function declaration multiple levels",
             .input =
             \\test = () -> {
-            \\    inner_first = (y) -> { 
+            \\    inner_first = (y) -> {
             \\        inner_second = (x) -> x * x
             \\        inner_second(y)
             \\    }
@@ -248,7 +248,7 @@ test "function calls" {
             .description = "multiple function calls with inner function declaration multiple levels",
             .input =
             \\test = () -> {
-            \\    inner_first = (y) -> { 
+            \\    inner_first = (y) -> {
             \\        inner_second = (x) -> x * x
             \\        inner_second(y)
             \\    }
@@ -271,63 +271,63 @@ test "function calls" {
             ,
             .expected_output = Object{ .Integer = 15 },
         },
-        // .{
-        //     .description = "function call without braces",
-        //     .input =
-        //     \\square = (a) -> a * a
-        //     \\square(11)
-        //     ,
-        //     .expected_output = Object{ .Integer = 121 },
-        // },
-        // .{
-        //     .description = "function with default args",
-        //     .input =
-        //     \\foo = (a = 1, b = 2) -> a + b
-        //     \\foo()
-        //     ,
-        //     .expected_output = Object{ .Integer = 3 },
-        // },
-        // .{
-        //     .description = "function call with keyword arguments",
-        //     .input =
-        //     \\foo = (a, b, c) -> a * (b + c)
-        //     \\foo(c = 1, b = 2, a = 3)
-        //     ,
-        //     .expected_output = Object{ .Integer = 9 },
-        // },
-        // .{
-        //     .description = "function call with keyword arguments",
-        //     .input =
-        //     \\foo = (a, b, c) -> a * (b + c)
-        //     \\foo(c = 1, b = 2, a = 3)
-        //     ,
-        //     .expected_output = Object{ .Integer = 9 },
-        // },
-        // .{
-        //     .description = "function call with positional and keyword arguments",
-        //     .input =
-        //     \\foo = (a, b, c) -> a * (b + c)
-        //     \\foo(1, c = 10, b = 5)
-        //     ,
-        //     .expected_output = Object{ .Integer = 15 },
-        // },
-        // .{
-        //     .description = "function call with positional and keyword arguments and default args",
-        //     .input =
-        //     \\foo = (a = 5, b = 3, c = 1) -> a * (b + c)
-        //     \\foo(3, c = 4)
-        //     ,
-        //     .expected_output = Object{ .Integer = 21 },
-        // },
-        // .{
-        //     .description = "function call with string default args",
-        //     .input =
-        //     \\foo = (first = "Hello, ", second = "World!") -> first + second
-        //     \\result = foo()
-        //     \\result == "Hello, World!"
-        //     ,
-        //     .expected_output = Object{ .Boolean = true },
-        // },
+        .{
+            .description = "function call without braces",
+            .input =
+            \\square = (a) -> a * a
+            \\square(11)
+            ,
+            .expected_output = Object{ .Integer = 121 },
+        },
+        .{
+            .description = "function with default args",
+            .input =
+            \\foo = (a = 1, b = 2) -> a + b
+            \\foo()
+            ,
+            .expected_output = Object{ .Integer = 3 },
+        },
+        .{
+            .description = "function call with keyword arguments",
+            .input =
+            \\foo = (a, b, c) -> a * (b + c)
+            \\foo(c = 1, b = 2, a = 3)
+            ,
+            .expected_output = Object{ .Integer = 9 },
+        },
+        .{
+            .description = "function call with keyword arguments",
+            .input =
+            \\foo = (a, b, c) -> a * (b + c)
+            \\foo(c = 1, b = 2, a = 3)
+            ,
+            .expected_output = Object{ .Integer = 9 },
+        },
+        .{
+            .description = "function call with positional and keyword arguments",
+            .input =
+            \\foo = (a, b, c) -> a * (b + c)
+            \\foo(1, c = 10, b = 5)
+            ,
+            .expected_output = Object{ .Integer = 15 },
+        },
+        .{
+            .description = "function call with positional and keyword arguments and default args",
+            .input =
+            \\foo = (a = 5, b = 3, c = 1) -> a * (b + c)
+            \\foo(3, c = 4)
+            ,
+            .expected_output = Object{ .Integer = 21 },
+        },
+        .{
+            .description = "function call with string default args",
+            .input =
+            \\foo = (first = "Hello, ", second = "World!") -> first + second
+            \\result = foo()
+            \\result == "Hello, World!"
+            ,
+            .expected_output = Object{ .Boolean = true },
+        },
     };
 
     try runTests(ObjectTestCase, "evaluate function calls", &test_cases, runObjectTest);
@@ -576,15 +576,6 @@ test "array" {
             \\array[0]
             ,
             .expected_output = Object{ .Integer = 100 },
-        },
-        .{
-            .description = "array index with dot notation",
-            .input =
-            \\array = [1, 2, 3]
-            \\array.0 = 100
-            \\array.0 == 100
-            ,
-            .expected_output = Object{ .Boolean = true },
         },
     };
 

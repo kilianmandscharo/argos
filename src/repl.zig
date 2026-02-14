@@ -21,7 +21,7 @@ pub fn start() !void {
     }
 
     var env = try Environment.init(.{ .gpa = gpaAllocator, .debug = false });
-    defer env.deinit();
+    defer env.drop(0);
 
     var stdin_buf: [1024]u8 = undefined;
     var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);

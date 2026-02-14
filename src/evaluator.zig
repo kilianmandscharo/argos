@@ -30,7 +30,7 @@ pub const Object = union(enum) {
     String: String,
     Boolean: bool,
     ReturnValue: *Object,
-    Function: Function,
+    Function: *Function,
     Array: *Array,
     Table: *Table,
     Null,
@@ -53,7 +53,6 @@ pub const Object = union(enum) {
         printDebug("deinit object {s}\n", .{self.getType()}, env.debug, level);
         return switch (self.*) {
             .String => |*string| {
-                printDebug("ref count: {d}\n", .{string.ref_count}, env.debug, level);
                 if (string.static_lifetime) return;
                 env.gpa.free(string.data);
             },
@@ -72,6 +71,10 @@ pub const Object = union(enum) {
                 table.data.deinit(env.gpa);
                 env.gpa.destroy(table);
             },
+            .Function => |function| {
+                if (function.inner_env) |inner_env| inner_env.drop(level);
+                env.gpa.destroy(function);
+            },
             else => {},
         };
     }
@@ -87,6 +90,9 @@ pub const Object = union(enum) {
             },
             .Table => |table| {
                 if (table.ref_count == 0) self.deinit(env, level);
+            },
+            .Function => |function| {
+                if (function.ref_count == 0) self.deinit(env, level);
             },
             else => {},
         };
@@ -110,6 +116,11 @@ pub const Object = union(enum) {
                 printDebug("dec table refCount, new count: {d}\n", .{table.ref_count}, env.debug, level);
                 self.checkRef(env, level);
             },
+            .Function => |function| {
+                function.ref_count -= 1;
+                printDebug("dec function refCount, new count: {d}\n", .{function.ref_count}, env.debug, level);
+                self.checkRef(env, level);
+            },
             else => {},
         };
     }
@@ -128,6 +139,10 @@ pub const Object = union(enum) {
             .Table => |table| {
                 printDebug("inc table refCount, new count: {d}\n", .{table.ref_count + 1}, env.debug, level);
                 table.ref_count += 1;
+            },
+            .Function => |function| {
+                printDebug("inc function refCount, new count: {d}\n", .{function.ref_count + 1}, env.debug, level);
+                function.ref_count += 1;
             },
             else => {},
         };
@@ -154,7 +169,9 @@ pub const Object = union(enum) {
 const Function = struct {
     params: std.ArrayList(FunctionParam),
     body: *const Expression,
-    env: *Environment,
+    outer_env: *Environment,
+    inner_env: ?*Environment,
+    ref_count: usize,
 };
 
 pub const Array = struct {
@@ -240,14 +257,21 @@ pub const Evaluator = struct {
                 return self.evalPrefixExpression(right, prefix.operator);
             },
             .FunctionLiteral => |function| {
-                const object = Object{ .Function = .{ .params = function.params, .body = function.body, .env = env } };
-                return object;
+                const function_owned = try self.gpa.create(Function);
+                function_owned.* = Function{
+                    .params = function.params,
+                    .body = function.body,
+                    .outer_env = env,
+                    .inner_env = null,
+                    .ref_count = 0,
+                };
+                return Object{ .Function = function_owned };
             },
             .CallExpression => |call_expression| {
                 const evaluated_function = try self.eval(call_expression.function, env);
                 if (evaluated_function != .Function) return error.CalledNonFunction;
 
-                const function = evaluated_function.Function;
+                var function = evaluated_function.Function;
                 var params = function.params.items;
                 const args = call_expression.args.items;
 
@@ -304,12 +328,21 @@ pub const Evaluator = struct {
                     try resolved_args.append(self.gpa, param.AssignmentExpression.expression);
                 }
 
-                const extended_env = try Environment.initEnclosed(self.gpa, function.env, self.debug, self.level);
-                defer extended_env.checkRef(self.level);
+                var extended_env: *Environment = undefined;
+
+                if (function.inner_env) |inner_env| {
+                    inner_env.clear(self.level);
+                    extended_env = inner_env;
+                } else {
+                    extended_env = try Environment.initEnclosed(self.gpa, function.outer_env, self.debug, self.level);
+                    function.inner_env = extended_env;
+                }
 
                 for (resolved_identifiers.items, 0..) |name, i| {
-                    const arg = try self.eval(resolved_args.items[i], env);
+                    var arg = try self.eval(resolved_args.items[i], env);
                     try extended_env.set(name, arg);
+                    // do not increment for self to avoid circular dependency
+                    if (!std.mem.eql(u8, name, "self")) arg.incRef(env, self.level);
                 }
 
                 const result = try self.eval(function.body, extended_env);
@@ -322,8 +355,6 @@ pub const Evaluator = struct {
                     },
                     else => {},
                 }
-
-                // TODO: clean up extended_env at this point
 
                 return result;
             },
@@ -706,30 +737,28 @@ pub const Environment = struct {
         return env;
     }
 
-    pub fn drop(self: *Environment, log_indent: usize) void {
-        printDebug("drop env on level {d}\n", .{self.level}, self.debug, log_indent);
+    pub fn clear(self: *Environment, log_indent: usize) void {
+        printDebug("clear env on level {d}\n", .{self.level}, self.debug, log_indent);
 
         var object_iterator = self.store.valueIterator();
         while (object_iterator.next()) |object| {
             object.decRef(self, log_indent);
         }
 
-        if (self.outer) |outer| {
-            outer.decRef();
+        self.store.clearRetainingCapacity();
+    }
+
+    pub fn drop(self: *Environment, log_indent: usize) void {
+        printDebug("drop env on level {d}\n", .{self.level}, self.debug, log_indent);
+
+        var entry_iterator = self.store.iterator();
+        while (entry_iterator.next()) |entry| {
+            if (std.mem.eql(u8, entry.key_ptr.*, "self")) continue; // break circular dependeny
+            entry.value_ptr.decRef(self, log_indent);
         }
 
         self.store.deinit(self.gpa);
         self.gpa.destroy(self);
-    }
-
-    pub fn decRef(self: *Environment) void {
-        if (self.is_global) return;
-        self.ref_count -= 1;
-    }
-
-    pub fn checkRef(self: *Environment, log_indent: usize) void {
-        if (self.is_global) return;
-        if (self.ref_count == 0) self.drop(log_indent);
     }
 
     pub fn initEnclosed(gpa: std.mem.Allocator, environment: *Environment, debug: bool, log_level: usize) !*Environment {
