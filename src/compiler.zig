@@ -158,8 +158,13 @@ pub const VirtualMachine = struct {
         return self.stack[self.stack_top];
     }
 
-    pub fn interpret(self: *VirtualMachine, chunk: *Chunk) InterpretResult {
-        self.chunk = chunk;
+    pub fn compile(self: *VirtualMachine, source: []const u8) void {
+        _ = self;
+        _ = source;
+    }
+
+    pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretResult {
+        compile(source);
         return self.run();
     }
 
