@@ -62,12 +62,15 @@ pub const Token = struct {
     length: usize,
     line: usize,
 
+    pub fn toString(self: *Token) []const u8 {
+        return self.source[self.start .. self.start + self.length];
+    }
+
     pub fn format(
         self: @This(),
         writer: anytype,
     ) !void {
-        _ = self;
-        _ = writer;
+        try writer.print("{s} {s}", .{ @tagName(self.type), self.source[self.start .. self.start + self.length] });
     }
 };
 
@@ -217,32 +220,36 @@ pub const Scanner = struct {
         while (Scanner.isAlpha(self.peek()) or std.ascii.isDigit(self.peek())) {
             _ = self.advance();
         }
+        return self.makeToken(self.identifierType());
     }
 
     fn identifierType(self: *Scanner) TokenType {
         switch (self.source[self.start]) {
-            'a' => return checkKeyword(1, "nd", .And),
-            'o' => return checkKeyword(1, "r", .Or),
-            'e' => return checkKeyword(1, "lse", .Else),
-            'n' => return checkKeyword(1, "ull", .Null),
-            'r' => return checkKeyword(1, "eturn", .Return),
-            't' => return checkKeyword(1, "rue", .True),
+            'a' => return self.checkKeyword(1, "nd", .And),
+            'o' => return self.checkKeyword(1, "r", .Or),
+            'e' => return self.checkKeyword(1, "lse", .Else),
+            'n' => return self.checkKeyword(1, "ull", .Null),
+            'r' => return self.checkKeyword(1, "eturn", .Return),
+            't' => return self.checkKeyword(1, "rue", .True),
             'f' => {
                 if (self.current - self.start > 1) {
                     switch (self.source[self.start + 1]) {
-                        'o' => return checkKeyword(2, "r", .For),
-                        'a' => return checkKeyword(2, "lse", .False),
+                        'o' => return self.checkKeyword(2, "r", .For),
+                        'a' => return self.checkKeyword(2, "lse", .False),
+                        else => return .Identifier,
                     }
                 }
             },
             'i' => {
                 if (self.current - self.start > 1) {
                     switch (self.source[self.start + 1]) {
-                        'f' => return checkKeyword(2, "", .If),
-                        'n' => return checkKeyword(2, "", .In),
+                        'f' => return self.checkKeyword(2, "", .If),
+                        'n' => return self.checkKeyword(2, "", .In),
+                        else => return .Identifier,
                     }
                 }
             },
+            else => return .Identifier,
         }
         return .Identifier;
     }
