@@ -31,8 +31,7 @@ const Precedence = enum(u8) {
 
 fn binary(compiler: *Compiler) !void {
     const operator_type = compiler.parser.previous.type;
-    const precedence_value = getRulePrecedenceValue(operator_type);
-    try compiler.parsePrecedence(@as(Precedence, @enumFromInt(precedence_value + 1)));
+    try compiler.parsePrecedence(getRulePrecedence(operator_type));
 
     switch (operator_type) {
         .Plus => try compiler.emitOpCode(.Add),
@@ -135,10 +134,14 @@ fn getRule(token_type: TokenType) *const ParseRule {
 }
 
 fn getRulePrecedenceValue(token_type: TokenType) usize {
+    return @intFromEnum(getRulePrecedence(token_type));
+}
+
+fn getRulePrecedence(token_type: TokenType) Precedence {
     if (getRule(token_type).precedence) |precedence| {
-        return @intFromEnum(precedence);
+        return precedence;
     }
-    return @intFromEnum(Precedence.Lowest);
+    return Precedence.Lowest;
 }
 
 pub const Parser = struct {
