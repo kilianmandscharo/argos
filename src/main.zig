@@ -1,7 +1,7 @@
 const std = @import("std");
-const compiler = @import("compiler.zig");
-const VirtualMachine = compiler.VirtualMachine;
-const Scanner = @import("scanner.zig");
+const vm_module = @import("vm.zig");
+
+const VirtualMachine = vm_module.VirtualMachine;
 
 fn repl(_: std.mem.Allocator) !void {
     var stdin_buf: [1024]u8 = undefined;
@@ -43,17 +43,9 @@ pub fn main() !void {
 
     const source = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
 
-    var scanner = Scanner.Scanner.init(source);
-
-    while (true) {
-        const token = scanner.next();
-        std.debug.print("{f}\n", .{token});
-        if (token.type == .Eof) break;
-    }
-
-    // const allocator = arena.allocator();
-
-    // var vm = VirtualMachine.init();
+    var vm = VirtualMachine.init(allocator, source);
+    const result = try vm.interpret();
+    std.debug.print("{}\n", .{result});
 
     // if (std.os.argv.len == 1) {
     //     try repl(allocator);

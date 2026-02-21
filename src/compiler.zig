@@ -1,230 +1,14 @@
 const std = @import("std");
 const scanner = @import("scanner.zig");
+const chunk_module = @import("chunk.zig");
 
+const Value = chunk_module.Value;
+const Chunk = chunk_module.Chunk;
+const OpCode = chunk_module.OpCode;
+const OpByte = chunk_module.OpByte;
 const Token = scanner.Token;
 const TokenType = scanner.TokenType;
 const Scanner = scanner.Scanner;
-
-pub const OpCode = enum(u8) {
-    Return,
-    Constant,
-    Constant_Long,
-    Negate,
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-};
-
-pub const OpByte = union(enum) {
-    Byte: u8,
-    Op: OpCode,
-};
-
-pub const Value = f64;
-
-pub const Chunk = struct {
-    code: std.ArrayList(u8),
-    constants: std.ArrayList(Value),
-    lines: std.ArrayList(usize),
-
-    pub fn init() Chunk {
-        return Chunk{
-            .code = .{},
-            .constants = .{},
-            .lines = .{},
-        };
-    }
-
-    pub fn write(self: *Chunk, allocator: std.mem.Allocator, op_byte: OpByte, line: usize) !void {
-        switch (op_byte) {
-            .Byte => |byte| {
-                try self.code.append(allocator, byte);
-            },
-            .Op => |op| {
-                try self.code.append(allocator, @intFromEnum(op));
-            },
-        }
-        try self.lines.append(allocator, line);
-    }
-
-    pub fn writeConstant(self: *Chunk, allocator: std.mem.Allocator, value: Value, line: usize) !void {
-        const constant = try self.addConstant(allocator, value);
-        try self.write(allocator, OpByte{ .Op = .Constant }, line);
-        try self.write(allocator, OpByte{ .Byte = @intCast(constant) }, line);
-    }
-
-    pub fn writeConstantLong(self: *Chunk, allocator: std.mem.Allocator, value: Value, line: usize) !void {
-        const constant = try self.addConstant(allocator, value);
-        try self.write(allocator, OpByte{ .Op = .Constant_Long }, line);
-        try self.write(allocator, OpByte{ .Byte = @intCast((constant >> 16) & 0xFF) }, line);
-        try self.write(allocator, OpByte{ .Byte = @intCast((constant >> 8) & 0xFF) }, line);
-        try self.write(allocator, OpByte{ .Byte = @intCast((constant & 0xFF)) }, line);
-    }
-
-    pub fn addConstant(self: *Chunk, allocator: std.mem.Allocator, value: Value) !usize {
-        try self.constants.append(allocator, value);
-        return self.constants.items.len - 1;
-    }
-
-    pub fn disassemble(self: *Chunk) void {
-        var offset: usize = 0;
-        while (offset < self.code.items.len) {
-            offset = self.disassembleInstruction(offset);
-        }
-        std.debug.print("\n", .{});
-    }
-
-    fn simpleInstruction(name: []const u8, offset: usize) usize {
-        std.debug.print("{s}\n", .{name});
-        return offset + 1;
-    }
-
-    pub fn disassembleInstruction(self: *Chunk, offset: usize) usize {
-        std.debug.print("{d:0>4} ", .{offset});
-        if (offset > 0 and self.lines.items[offset] == self.lines.items[offset - 1]) {
-            std.debug.print("   | ", .{});
-        } else {
-            std.debug.print("{d:4} ", .{self.lines.items[offset]});
-        }
-        switch (@as(OpCode, @enumFromInt(self.code.items[offset]))) {
-            .Return => {
-                return Chunk.simpleInstruction("OP_RETURN", offset);
-            },
-            .Constant => {
-                const constant = self.code.items[offset + 1];
-                const value = self.constants.items[constant];
-                std.debug.print("OP_CONSTANT {d:4} '{d}'\n", .{ constant, value });
-                return offset + 2;
-            },
-            .Constant_Long => {
-                const b1 = self.code.items[offset + 1];
-                const b2 = self.code.items[offset + 2];
-                const b3 = self.code.items[offset + 3];
-                const constant: usize = (@as(usize, @intCast(b1)) << 16) | (@as(usize, @intCast(b2)) << 8) | @as(usize, @intCast(b3));
-                const value = self.constants.items[constant];
-                std.debug.print("OP_CONSTANT_LONG {d:4} '{d}'\n", .{ constant, value });
-                return offset + 4;
-            },
-            .Add => {
-                return Chunk.simpleInstruction("OP_ADD", offset);
-            },
-            .Subtract => {
-                return Chunk.simpleInstruction("OP_SUBTRACT", offset);
-            },
-            .Multiply => {
-                return Chunk.simpleInstruction("OP_MULTIPLY", offset);
-            },
-            .Divide => {
-                return Chunk.simpleInstruction("OP_DIVIDE", offset);
-            },
-            .Negate => {
-                return Chunk.simpleInstruction("OP_NEGATE", offset);
-            },
-        }
-    }
-};
-
-const DEBUG_TRACE_EXECUTION = true;
-const STACK_MAX = 256;
-
-const InterpretResult = enum {
-    Ok,
-    CompileError,
-    RuntimeError,
-};
-
-pub const VirtualMachine = struct {
-    chunk: *Chunk,
-    ip: usize,
-    stack: [STACK_MAX]Value,
-    stack_top: usize,
-
-    pub fn init() VirtualMachine {
-        return VirtualMachine{
-            .chunk = undefined,
-            .ip = 0,
-            .stack = undefined,
-            .stack_top = 0,
-        };
-    }
-
-    fn resetStack(self: *VirtualMachine) void {
-        self.stack_top = 0;
-    }
-
-    fn push(self: *VirtualMachine, value: Value) void {
-        self.stack[self.stack_top] = value;
-        self.stack_top += 1;
-    }
-
-    fn pop(self: *VirtualMachine) Value {
-        self.stack_top -= 1;
-        return self.stack[self.stack_top];
-    }
-
-    pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
-        const chunk = try self.compile(source);
-        self.chunk = chunk;
-        const result = self.run();
-        return result;
-    }
-
-    pub inline fn readByte(self: *VirtualMachine) u8 {
-        const instruction = self.chunk.code.items[self.ip];
-        self.ip += 1;
-        return instruction;
-    }
-
-    pub fn run(self: *VirtualMachine) InterpretResult {
-        while (true) {
-            if (comptime DEBUG_TRACE_EXECUTION) {
-                std.debug.print("          ", .{});
-                for (0..self.stack_top) |index| {
-                    std.debug.print("[ {d} ]", .{self.stack[index]});
-                }
-                std.debug.print("\n", .{});
-                _ = self.chunk.disassembleInstruction(self.ip);
-            }
-            const instruction = self.readByte();
-            switch (@as(OpCode, @enumFromInt(instruction))) {
-                .Constant => {
-                    const constant = self.chunk.constants.items[self.readByte()];
-                    self.push(constant);
-                },
-                .Add => {
-                    const b = self.pop();
-                    const a = self.pop();
-                    self.push(a + b);
-                },
-                .Subtract => {
-                    const b = self.pop();
-                    const a = self.pop();
-                    self.push(a - b);
-                },
-                .Multiply => {
-                    const b = self.pop();
-                    const a = self.pop();
-                    self.push(a * b);
-                },
-                .Divide => {
-                    const b = self.pop();
-                    const a = self.pop();
-                    self.push(a / b);
-                },
-                .Negate => {
-                    self.push(-self.pop());
-                },
-                .Return => {
-                    const value = self.pop();
-                    std.debug.print("{d}\n", .{value});
-                    return .Ok;
-                },
-                else => return .RuntimeError,
-            }
-        }
-    }
-};
 
 const Precedence = enum(u8) {
     Lowest = 1,
@@ -245,7 +29,44 @@ const Precedence = enum(u8) {
     Index,
 };
 
-const ParseRule = struct {};
+fn binary(compiler: *Compiler) !void {
+    const operator_type = compiler.parser.previous.type;
+    const precedence_value = getRulePrecedenceValue(operator_type);
+    try compiler.parsePrecedence(@as(Precedence, @enumFromInt(precedence_value + 1)));
+
+    switch (operator_type) {
+        .Plus => try compiler.emitOpCode(.Add),
+        .Minus => try compiler.emitOpCode(.Subtract),
+        .Asterisk => try compiler.emitOpCode(.Multiply),
+        .Slash => try compiler.emitOpCode(.Divide),
+        else => unreachable,
+    }
+}
+
+fn grouping(compiler: *Compiler) !void {
+    try compiler.expression();
+    compiler.consume(.RParen, "Expect ')' after expression");
+}
+
+fn unary(compiler: *Compiler) !void {
+    const operator_type = compiler.parser.previous.type;
+    try compiler.parsePrecedence(.Prefix);
+    switch (operator_type) {
+        .Minus => try compiler.emitOpCode(.Negate),
+        else => unreachable,
+    }
+}
+
+fn number(compiler: *Compiler) !void {
+    const value = try std.fmt.parseFloat(f64, compiler.parser.previous.toString());
+    try compiler.emitConstant(value);
+}
+
+const ParseRule = struct {
+    prefix: ?*const fn (compiler: *Compiler) anyerror!void,
+    infix: ?*const fn (compiler: *Compiler) anyerror!void,
+    precedence: ?Precedence,
+};
 
 const token_count = @typeInfo(TokenType).@"enum".fields.len;
 
@@ -258,11 +79,66 @@ fn initRules() [token_count]ParseRule {
         const index = field.value;
         const tag = @as(TokenType, @enumFromInt(index));
         table[index] = switch (tag) {
-            .LParen => .{},
+            .LParen => .{ .prefix = grouping, .infix = null, .precedence = .Call },
+            .RParen => .{ .prefix = null, .infix = null, .precedence = null },
+            .LBracket => .{ .prefix = null, .infix = null, .precedence = .Index },
+            .RBracket => .{ .prefix = null, .infix = null, .precedence = null },
+            .LBrace => .{ .prefix = null, .infix = null, .precedence = null },
+            .RBrace => .{ .prefix = null, .infix = null, .precedence = null },
+            .Assign => .{ .prefix = null, .infix = null, .precedence = .Assign },
+            .Comma => .{ .prefix = null, .infix = null, .precedence = null },
+            .String => .{ .prefix = null, .infix = null, .precedence = null },
+            .Number => .{ .prefix = number, .infix = null, .precedence = null },
+            .True => .{ .prefix = null, .infix = null, .precedence = null },
+            .False => .{ .prefix = null, .infix = null, .precedence = null },
+            .Null => .{ .prefix = null, .infix = null, .precedence = null },
+            .Identifier => .{ .prefix = null, .infix = null, .precedence = null },
+            .Bang => .{ .prefix = null, .infix = null, .precedence = null },
+            .Lt => .{ .prefix = null, .infix = null, .precedence = .LessGreater },
+            .LtOrEq => .{ .prefix = null, .infix = null, .precedence = .LessGreater },
+            .Gt => .{ .prefix = null, .infix = null, .precedence = .LessGreater },
+            .GtOrEq => .{ .prefix = null, .infix = null, .precedence = .LessGreater },
+            .Eq => .{ .prefix = null, .infix = null, .precedence = .Equals },
+            .NotEq => .{ .prefix = null, .infix = null, .precedence = .Equals },
+            .Plus => .{ .prefix = null, .infix = binary, .precedence = .Sum },
+            .Minus => .{ .prefix = unary, .infix = binary, .precedence = .Sum },
+            .Slash => .{ .prefix = null, .infix = binary, .precedence = .Product },
+            .Asterisk => .{ .prefix = null, .infix = binary, .precedence = .Product },
+            .Percent => .{ .prefix = null, .infix = null, .precedence = .Product },
+            .Return => .{ .prefix = null, .infix = null, .precedence = null },
+            .If => .{ .prefix = null, .infix = null, .precedence = null },
+            .Else => .{ .prefix = null, .infix = null, .precedence = null },
+            .For => .{ .prefix = null, .infix = null, .precedence = null },
+            .In => .{ .prefix = null, .infix = null, .precedence = null },
+            .Dot => .{ .prefix = null, .infix = null, .precedence = .Index },
+            .DotDot => .{ .prefix = null, .infix = null, .precedence = .Range },
+            .Arrow => .{ .prefix = null, .infix = null, .precedence = null },
+            .NewLine => .{ .prefix = null, .infix = null, .precedence = null },
+            .Eof => .{ .prefix = null, .infix = null, .precedence = null },
+            .And => .{ .prefix = null, .infix = null, .precedence = .LogicalAnd },
+            .Or => .{ .prefix = null, .infix = null, .precedence = .LogicalOr },
+            .Pipe => .{ .prefix = null, .infix = null, .precedence = .BitwiseOr },
+            .Ampersand => .{ .prefix = null, .infix = null, .precedence = .BitwiseAnd },
+            .Caret => .{ .prefix = null, .infix = null, .precedence = .BitwiseXor },
+            .Tilde => .{ .prefix = null, .infix = null, .precedence = .Prefix },
+            .LeftShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
+            .RightShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
+            .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
     }
 
     return table;
+}
+
+fn getRule(token_type: TokenType) *const ParseRule {
+    return &rules[@intFromEnum(token_type)];
+}
+
+fn getRulePrecedenceValue(token_type: TokenType) usize {
+    if (getRule(token_type).precedence) |precedence| {
+        return @intFromEnum(precedence);
+    }
+    return @intFromEnum(Precedence.Lowest);
 }
 
 pub const Parser = struct {
@@ -275,7 +151,7 @@ pub const Parser = struct {
 pub const Compiler = struct {
     parser: Parser,
     scanner: Scanner,
-    compiling_chunk: Chunk,
+    compiling_chunk: *Chunk,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8) Compiler {
@@ -292,64 +168,49 @@ pub const Compiler = struct {
         };
     }
 
-    pub fn compile(self: *Compiler) !Chunk {
-        const chunk = Chunk{};
+    pub fn compile(self: *Compiler, chunk: *Chunk) !void {
         self.compiling_chunk = chunk;
-        return if (self.parser.had_error) error.CompilationError else chunk;
+        self.advance();
+        try self.expression();
+        try self.emitOpCode(.Return);
     }
 
     fn endCompiler(self: *Compiler) void {
         self.emitOpCode(.Return);
     }
 
-    // fn parsePrecedence(self: *Compiler, precedence: Precedence) void {}
+    fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
+        self.advance();
 
-    fn expression(self: *Compiler) void {
-        self.parsePrecedence(.Lowest);
-    }
+        if (getRule(self.parser.previous.type).prefix) |prefixFn| {
+            try prefixFn(self);
+        } else {
+            self.errorAtPrevious("Expect expression.");
+            return;
+        }
 
-    fn binary(self: *Compiler) void {
-        const operator_type = self.parser.previous.type;
-        const rule = self.getRule(operator_type);
-        self.parsePrecedence(rule.precedence + 1);
-
-        switch (operator_type) {
-            .Plus => self.emitOpCode(.Add),
-            .Minus => self.emitOpCode(.Subtract),
-            .Asterisk => self.emitOpCode(.Multiply),
-            .Slash => self.emitOpCode(.Divide),
-            else => unreachable,
+        while (@intFromEnum(precedence) < getRulePrecedenceValue(self.parser.current.type)) {
+            self.advance();
+            if (self.parser.current.type == .Eof) return;
+            if (getRule(self.parser.previous.type).infix) |infixFn| {
+                try infixFn(self);
+            }
         }
     }
 
-    fn grouping(self: *Compiler) void {
-        self.expression();
-        self.consume(.RParen, "Expect ')' after expression");
-    }
-
-    fn unary(self: *Compiler) void {
-        const operator_type = self.parser.previous.type;
-        self.expression(.Prefix);
-        switch (operator_type) {
-            .Minus => self.emitOpCode(.Negate),
-            else => unreachable,
-        }
-    }
-
-    fn number(self: *Compiler) !void {
-        const value = try std.fmt.parseFloat(f64, self.parser.previous.toString());
-        try self.makeConstant(value);
+    fn expression(self: *Compiler) !void {
+        try self.parsePrecedence(.Lowest);
     }
 
     fn emitConstant(self: *Compiler, value: Value) !void {
-        self.emitBytes(.Constant, try self.makeConstant(value));
+        try self.currentChunk().writeConstant(self.allocator, value, self.parser.previous.line);
     }
 
     fn makeConstant(self: *Compiler, value: Value) !usize {
         const constant = try self.currentChunk().addConstant(self.allocator, value);
         if (constant > std.math.maxInt(u8)) {
             self.errorAtPrevious("Too many constants in one chunk");
-            return;
+            return error.TooManyConstants;
         }
         return constant;
     }
@@ -371,8 +232,8 @@ pub const Compiler = struct {
         self.currentChunk().write(self.allocator, OpByte{ .Byte = byte }, self.parser.previous.line);
     }
 
-    fn emitOpCode(self: *Compiler, op_code: OpCode) void {
-        self.currentChunk().write(self.allocator, OpByte{ .Op = op_code }, self.parser.previous.line);
+    fn emitOpCode(self: *Compiler, op_code: OpCode) !void {
+        try self.currentChunk().write(self.allocator, OpByte{ .Op = op_code }, self.parser.previous.line);
     }
 
     fn advance(self: *Compiler) void {

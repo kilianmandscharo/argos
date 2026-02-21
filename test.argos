@@ -1,12 +1,1 @@
-fnc fib(n) {
-    a = 0
-    b = 1
-    for i in 0..n {
-        tmp = b
-        b = a + b
-        a = tmp
-    }
-    a
-}
-
-fib(80)
+2 * (3 + 4)
