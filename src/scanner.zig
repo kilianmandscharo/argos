@@ -11,7 +11,8 @@ pub const TokenType = enum {
     Comma,
 
     String,
-    Number,
+    Float,
+    Int,
     True,
     False,
     Null,
@@ -207,13 +208,14 @@ pub const Scanner = struct {
         while (std.ascii.isDigit(self.peek())) {
             _ = self.advance();
         }
-        if (self.peek() == '.' and std.ascii.isDigit(self.peekNext())) {
+        if (self.peek() != '.') return self.makeToken(.Int);
+        if (std.ascii.isDigit(self.peekNext())) {
             _ = self.advance();
             while (std.ascii.isDigit(self.peek())) {
                 _ = self.advance();
             }
         }
-        return self.makeToken(.Number);
+        return self.makeToken(.Float);
     }
 
     fn makeIdentifier(self: *Scanner) Token {

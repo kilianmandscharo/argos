@@ -9,6 +9,13 @@ pub const OpCode = enum(u8) {
     Subtract,
     Multiply,
     Divide,
+    Null,
+    True,
+    False,
+    Not,
+    Equal,
+    Greater,
+    Less,
 };
 
 pub const OpByte = union(enum) {
@@ -16,7 +23,49 @@ pub const OpByte = union(enum) {
     Op: OpCode,
 };
 
-pub const Value = f64;
+pub const Value = union(enum) {
+    Float: f64,
+    Int: i64,
+    Bool: bool,
+    Null,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        switch (self) {
+            .Float => |val| try writer.print("{d}", .{val}),
+            .Int => |val| try writer.print("{d}", .{val}),
+            .Bool => |val| try writer.print("{}", .{val}),
+            .Null => try writer.print("null", .{}),
+        }
+    }
+
+    pub fn getType(self: @This()) []const u8 {
+        return switch (self) {
+            .Float => "Float",
+            .Int => "Int",
+            .Bool => "Bool",
+            .Null => "Null",
+        };
+    }
+};
+
+pub inline fn wrapInt(val: i64) Value {
+    return Value{ .Int = val };
+}
+
+pub inline fn wrapFloat(val: f64) Value {
+    return Value{ .Float = val };
+}
+
+pub inline fn wrapBool(val: bool) Value {
+    return Value{ .Bool = val };
+}
+
+pub inline fn valueNull() Value {
+    return .Null;
+}
 
 pub const Chunk = struct {
     code: std.ArrayList(u8),
@@ -70,11 +119,6 @@ pub const Chunk = struct {
         std.debug.print("\n", .{});
     }
 
-    fn simpleInstruction(name: []const u8, offset: usize) usize {
-        std.debug.print("{s}\n", .{name});
-        return offset + 1;
-    }
-
     pub fn disassembleInstruction(self: *Chunk, offset: usize) usize {
         std.debug.print("{d:0>4} ", .{offset});
         if (offset > 0 and self.lines.items[offset] == self.lines.items[offset - 1]) {
@@ -84,12 +128,12 @@ pub const Chunk = struct {
         }
         switch (@as(OpCode, @enumFromInt(self.code.items[offset]))) {
             .Return => {
-                return Chunk.simpleInstruction("OP_RETURN", offset);
+                return simpleInstruction("OP_RETURN", offset);
             },
             .Constant => {
                 const constant = self.code.items[offset + 1];
                 const value = self.constants.items[constant];
-                std.debug.print("OP_CONSTANT {d:4} '{d}'\n", .{ constant, value });
+                std.debug.print("OP_CONSTANT {d:4} '{f}'\n", .{ constant, value });
                 return offset + 2;
             },
             .Constant_Long => {
@@ -98,24 +142,26 @@ pub const Chunk = struct {
                 const b3 = self.code.items[offset + 3];
                 const constant: usize = (@as(usize, @intCast(b1)) << 16) | (@as(usize, @intCast(b2)) << 8) | @as(usize, @intCast(b3));
                 const value = self.constants.items[constant];
-                std.debug.print("OP_CONSTANT_LONG {d:4} '{d}'\n", .{ constant, value });
+                std.debug.print("OP_CONSTANT_LONG {d:4} '{f}'\n", .{ constant, value });
                 return offset + 4;
             },
-            .Add => {
-                return Chunk.simpleInstruction("OP_ADD", offset);
-            },
-            .Subtract => {
-                return Chunk.simpleInstruction("OP_SUBTRACT", offset);
-            },
-            .Multiply => {
-                return Chunk.simpleInstruction("OP_MULTIPLY", offset);
-            },
-            .Divide => {
-                return Chunk.simpleInstruction("OP_DIVIDE", offset);
-            },
-            .Negate => {
-                return Chunk.simpleInstruction("OP_NEGATE", offset);
-            },
+            .Add => return simpleInstruction("OP_ADD", offset),
+            .Subtract => return simpleInstruction("OP_SUBTRACT", offset),
+            .Multiply => return simpleInstruction("OP_MULTIPLY", offset),
+            .Divide => return simpleInstruction("OP_DIVIDE", offset),
+            .Negate => return simpleInstruction("OP_NEGATE", offset),
+            .True => return simpleInstruction("OP_TRUE", offset),
+            .False => return simpleInstruction("OP_FALSE", offset),
+            .Null => return simpleInstruction("OP_NULL", offset),
+            .Not => return simpleInstruction("OP_NOT", offset),
+            .Greater => return simpleInstruction("OP_GREATER", offset),
+            .Less => return simpleInstruction("OP_LESS", offset),
+            .Equal => return simpleInstruction("OP_EQUAL", offset),
         }
     }
 };
+
+fn simpleInstruction(name: []const u8, offset: usize) usize {
+    std.debug.print("{s}\n", .{name});
+    return offset + 1;
+}

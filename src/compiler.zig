@@ -6,6 +6,10 @@ const Value = chunk_module.Value;
 const Chunk = chunk_module.Chunk;
 const OpCode = chunk_module.OpCode;
 const OpByte = chunk_module.OpByte;
+const wrapInt = chunk_module.wrapInt;
+const wrapFloat = chunk_module.wrapFloat;
+const wrapBool = chunk_module.wrapBool;
+
 const Token = scanner.Token;
 const TokenType = scanner.TokenType;
 const Scanner = scanner.Scanner;
@@ -38,6 +42,12 @@ fn binary(compiler: *Compiler) !void {
         .Minus => try compiler.emitOpCode(.Subtract),
         .Asterisk => try compiler.emitOpCode(.Multiply),
         .Slash => try compiler.emitOpCode(.Divide),
+        .Eq => try compiler.emitOpCode(.Equal),
+        .NotEq => try compiler.emitOpCodes(.Equal, .Not),
+        .Gt => try compiler.emitOpCode(.Greater),
+        .GtOrEq => try compiler.emitOpCodes(.Less, .Not),
+        .Lt => try compiler.emitOpCode(.Less),
+        .LtOrEq => try compiler.emitOpCodes(.Greater, .Not),
         else => unreachable,
     }
 }
@@ -52,13 +62,28 @@ fn unary(compiler: *Compiler) !void {
     try compiler.parsePrecedence(.Prefix);
     switch (operator_type) {
         .Minus => try compiler.emitOpCode(.Negate),
+        .Bang => try compiler.emitOpCode(.Not),
         else => unreachable,
     }
 }
 
-fn number(compiler: *Compiler) !void {
+fn float(compiler: *Compiler) !void {
     const value = try std.fmt.parseFloat(f64, compiler.parser.previous.toString());
-    try compiler.emitConstant(value);
+    try compiler.emitConstant(wrapFloat(value));
+}
+
+fn integer(compiler: *Compiler) !void {
+    const value = try std.fmt.parseInt(i64, compiler.parser.previous.toString(), 10);
+    try compiler.emitConstant(wrapInt(value));
+}
+
+fn literal(compiler: *Compiler) !void {
+    switch (compiler.parser.previous.type) {
+        .False => try compiler.emitOpCode(.False),
+        .Null => try compiler.emitOpCode(.Null),
+        .True => try compiler.emitOpCode(.True),
+        else => unreachable,
+    }
 }
 
 const ParseRule = struct {
@@ -87,18 +112,19 @@ fn initRules() [token_count]ParseRule {
             .Assign => .{ .prefix = null, .infix = null, .precedence = .Assign },
             .Comma => .{ .prefix = null, .infix = null, .precedence = null },
             .String => .{ .prefix = null, .infix = null, .precedence = null },
-            .Number => .{ .prefix = number, .infix = null, .precedence = null },
-            .True => .{ .prefix = null, .infix = null, .precedence = null },
-            .False => .{ .prefix = null, .infix = null, .precedence = null },
-            .Null => .{ .prefix = null, .infix = null, .precedence = null },
+            .Float => .{ .prefix = float, .infix = null, .precedence = null },
+            .Int => .{ .prefix = integer, .infix = null, .precedence = null },
+            .True => .{ .prefix = literal, .infix = null, .precedence = null },
+            .False => .{ .prefix = literal, .infix = null, .precedence = null },
+            .Null => .{ .prefix = literal, .infix = null, .precedence = null },
             .Identifier => .{ .prefix = null, .infix = null, .precedence = null },
-            .Bang => .{ .prefix = null, .infix = null, .precedence = null },
-            .Lt => .{ .prefix = null, .infix = null, .precedence = .LessGreater },
-            .LtOrEq => .{ .prefix = null, .infix = null, .precedence = .LessGreater },
-            .Gt => .{ .prefix = null, .infix = null, .precedence = .LessGreater },
-            .GtOrEq => .{ .prefix = null, .infix = null, .precedence = .LessGreater },
-            .Eq => .{ .prefix = null, .infix = null, .precedence = .Equals },
-            .NotEq => .{ .prefix = null, .infix = null, .precedence = .Equals },
+            .Bang => .{ .prefix = unary, .infix = null, .precedence = null },
+            .Lt => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
+            .LtOrEq => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
+            .Gt => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
+            .GtOrEq => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
+            .Eq => .{ .prefix = null, .infix = binary, .precedence = .Equals },
+            .NotEq => .{ .prefix = null, .infix = binary, .precedence = .Equals },
             .Plus => .{ .prefix = null, .infix = binary, .precedence = .Sum },
             .Minus => .{ .prefix = unary, .infix = binary, .precedence = .Sum },
             .Slash => .{ .prefix = null, .infix = binary, .precedence = .Product },
@@ -237,6 +263,11 @@ pub const Compiler = struct {
 
     fn emitOpCode(self: *Compiler, op_code: OpCode) !void {
         try self.currentChunk().write(self.allocator, OpByte{ .Op = op_code }, self.parser.previous.line);
+    }
+
+    fn emitOpCodes(self: *Compiler, a: OpCode, b: OpCode) !void {
+        try self.currentChunk().write(self.allocator, OpByte{ .Op = a }, self.parser.previous.line);
+        try self.currentChunk().write(self.allocator, OpByte{ .Op = b }, self.parser.previous.line);
     }
 
     fn advance(self: *Compiler) void {
