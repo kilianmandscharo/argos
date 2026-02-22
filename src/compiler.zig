@@ -6,9 +6,12 @@ const Value = chunk_module.Value;
 const Chunk = chunk_module.Chunk;
 const OpCode = chunk_module.OpCode;
 const OpByte = chunk_module.OpByte;
+const ObjString = chunk_module.ObjString;
+const Obj = chunk_module.Obj;
 const wrapInt = chunk_module.wrapInt;
 const wrapFloat = chunk_module.wrapFloat;
 const wrapBool = chunk_module.wrapBool;
+const wrapString = chunk_module.wrapObj;
 
 const Token = scanner.Token;
 const TokenType = scanner.TokenType;
@@ -86,6 +89,28 @@ fn literal(compiler: *Compiler) !void {
     }
 }
 
+fn string(compiler: *Compiler) !void {
+    const start = compiler.parser.previous.start + 1;
+    const end = start + compiler.parser.previous.length - 2;
+    const slice = compiler.parser.previous.source[start..end];
+
+    const chars = try compiler.gpa.dupe(u8, slice);
+    errdefer compiler.gpa.free(chars);
+
+    const string_obj = try compiler.gpa.create(ObjString);
+    errdefer compiler.gpa.destroy(string_obj);
+
+    string_obj.* = ObjString{
+        .obj = Obj{
+            .type = .String,
+            .next = null,
+        },
+        .chars = chars,
+    };
+
+    try compiler.emitConstant(wrapString(&string_obj.obj));
+}
+
 const ParseRule = struct {
     prefix: ?*const fn (compiler: *Compiler) anyerror!void,
     infix: ?*const fn (compiler: *Compiler) anyerror!void,
@@ -111,7 +136,7 @@ fn initRules() [token_count]ParseRule {
             .RBrace => .{ .prefix = null, .infix = null, .precedence = null },
             .Assign => .{ .prefix = null, .infix = null, .precedence = .Assign },
             .Comma => .{ .prefix = null, .infix = null, .precedence = null },
-            .String => .{ .prefix = null, .infix = null, .precedence = null },
+            .String => .{ .prefix = string, .infix = null, .precedence = null },
             .Float => .{ .prefix = float, .infix = null, .precedence = null },
             .Int => .{ .prefix = integer, .infix = null, .precedence = null },
             .True => .{ .prefix = literal, .infix = null, .precedence = null },
@@ -181,9 +206,10 @@ pub const Compiler = struct {
     parser: Parser,
     scanner: Scanner,
     compiling_chunk: *Chunk,
-    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    gpa: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator, source: []const u8) Compiler {
+    pub fn init(arena: std.mem.Allocator, gpa: std.mem.Allocator, source: []const u8) Compiler {
         return Compiler{
             .parser = Parser{
                 .current = undefined,
@@ -192,7 +218,8 @@ pub const Compiler = struct {
                 .panic_mode = false,
             },
             .scanner = Scanner.init(source),
-            .allocator = allocator,
+            .arena = arena,
+            .gpa = gpa,
             .compiling_chunk = undefined,
         };
     }
@@ -232,11 +259,11 @@ pub const Compiler = struct {
     }
 
     fn emitConstant(self: *Compiler, value: Value) !void {
-        try self.currentChunk().writeConstant(self.allocator, value, self.parser.previous.line);
+        try self.currentChunk().writeConstant(self.arena, value, self.parser.previous.line);
     }
 
     fn makeConstant(self: *Compiler, value: Value) !usize {
-        const constant = try self.currentChunk().addConstant(self.allocator, value);
+        const constant = try self.currentChunk().addConstant(self.arena, value);
         if (constant > std.math.maxInt(u8)) {
             self.errorAtPrevious("Too many constants in one chunk");
             return error.TooManyConstants;
@@ -254,20 +281,20 @@ pub const Compiler = struct {
     }
 
     fn emitOpByte(self: *Compiler, op_byte: OpByte) void {
-        self.currentChunk().write(self.allocator, op_byte, self.parser.previous.line);
+        self.currentChunk().write(self.arena, op_byte, self.parser.previous.line);
     }
 
     fn emitByte(self: *Compiler, byte: u8) void {
-        self.currentChunk().write(self.allocator, OpByte{ .Byte = byte }, self.parser.previous.line);
+        self.currentChunk().write(self.arena, OpByte{ .Byte = byte }, self.parser.previous.line);
     }
 
     fn emitOpCode(self: *Compiler, op_code: OpCode) !void {
-        try self.currentChunk().write(self.allocator, OpByte{ .Op = op_code }, self.parser.previous.line);
+        try self.currentChunk().write(self.arena, OpByte{ .Op = op_code }, self.parser.previous.line);
     }
 
     fn emitOpCodes(self: *Compiler, a: OpCode, b: OpCode) !void {
-        try self.currentChunk().write(self.allocator, OpByte{ .Op = a }, self.parser.previous.line);
-        try self.currentChunk().write(self.allocator, OpByte{ .Op = b }, self.parser.previous.line);
+        try self.currentChunk().write(self.arena, OpByte{ .Op = a }, self.parser.previous.line);
+        try self.currentChunk().write(self.arena, OpByte{ .Op = b }, self.parser.previous.line);
     }
 
     fn advance(self: *Compiler) void {

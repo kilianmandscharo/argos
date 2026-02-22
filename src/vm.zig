@@ -5,9 +5,12 @@ const compiler_module = @import("compiler.zig");
 const OpCode = chunk_module.OpCode;
 const Chunk = chunk_module.Chunk;
 const Value = chunk_module.Value;
+const ObjString = chunk_module.ObjString;
+const Obj = chunk_module.Obj;
 const wrapFloat = chunk_module.wrapFloat;
 const wrapInt = chunk_module.wrapInt;
 const wrapBool = chunk_module.wrapBool;
+const wrapObj = chunk_module.wrapObj;
 const valueNull = chunk_module.valueNull;
 
 const Compiler = compiler_module.Compiler;
@@ -28,14 +31,18 @@ pub const VirtualMachine = struct {
     stack: [STACK_MAX]Value,
     stack_top: usize,
     compiler: Compiler,
+    gpa: std.mem.Allocator,
+    objects: ?*Obj,
 
-    pub fn init(allocator: std.mem.Allocator, source: []const u8) VirtualMachine {
+    pub fn init(arena: std.mem.Allocator, gpa: std.mem.Allocator, source: []const u8) VirtualMachine {
         return VirtualMachine{
             .chunk = undefined,
             .ip = 0,
             .stack = undefined,
             .stack_top = 0,
-            .compiler = Compiler.init(allocator, source),
+            .compiler = Compiler.init(arena, gpa, source),
+            .gpa = gpa,
+            .objects = null,
         };
     }
 
@@ -67,6 +74,19 @@ pub const VirtualMachine = struct {
         self.chunk = chunk;
         if (comptime DEBUG_PRINT_CODE) chunk.disassemble();
         return try self.run();
+    }
+
+    fn allocateString(self: *VirtualMachine, chars: []const u8) !*Obj {
+        const string = try self.gpa.create(ObjString);
+        string.* = ObjString{
+            .chars = chars,
+            .obj = Obj{
+                .type = .String,
+                .next = self.objects,
+            },
+        };
+        self.objects = &string.obj;
+        return &string.obj;
     }
 
     pub inline fn readByte(self: *VirtualMachine) u8 {
@@ -232,6 +252,24 @@ fn add(vm: *VirtualMachine, a: Value, b: Value) !Value {
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
+        .Obj => |left| {
+            switch (b) {
+                .Obj => |right| {
+                    if (!left.isString() or !right.isString()) {
+                        return vm.runtimeError("Both operands must be strings", .{});
+                    }
+                    const left_string = left.asString().chars;
+                    const right_string = right.asString().chars;
+
+                    const data: [2][]const u8 = .{ left_string, right_string };
+                    const chars = try std.mem.concat(vm.gpa, u8, &data);
+                    errdefer vm.gpa.free(chars);
+
+                    return wrapObj(try vm.allocateString(chars));
+                },
+                else => return vm.runtimeError("Right operand must be an Obj.", .{}),
+            }
+        },
         else => return vm.runtimeError("Operand must be a number", .{}),
     }
 }
@@ -297,5 +335,11 @@ fn isEqual(vm: *VirtualMachine, a: Value, b: Value) !bool {
         .Float => return a.Float == b.Float,
         .Bool => return a.Bool == b.Bool,
         .Null => return true,
+        .Obj => |obj| {
+            if (obj.type != b.Obj.type) return false;
+            const a_string = obj.asString();
+            const b_string = b.Obj.asString();
+            return std.mem.eql(u8, a_string.chars, b_string.chars);
+        },
     }
 }

@@ -33,17 +33,25 @@ fn runFile(allocator: std.mem.Allocator, vm: *VirtualMachine) !void {
 }
 
 pub fn main() !void {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    const gpa_allocator = gpa.allocator();
+
+    defer {
+        const deinit_status = gpa.deinit();
+        if (deinit_status == .leak) std.testing.expect(false) catch @panic("TEST FAIL");
+    }
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const allocator = arena.allocator();
+    const arena_allocator = arena.allocator();
 
     const file = try std.fs.cwd().openFile("test.argos", .{});
     defer file.close();
 
-    const source = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    const source = try file.readToEndAlloc(arena_allocator, std.math.maxInt(usize));
 
-    var vm = VirtualMachine.init(allocator, source);
+    var vm = VirtualMachine.init(arena_allocator, gpa_allocator, source);
     const result = try vm.interpret();
     std.debug.print("{}\n", .{result});
 

@@ -23,11 +23,57 @@ pub const OpByte = union(enum) {
     Op: OpCode,
 };
 
+pub const ObjString = struct {
+    obj: Obj,
+    chars: []const u8,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        try writer.print("\"{s}\"", .{self.chars});
+    }
+};
+
+pub inline fn isObjType(value: Value, expected_type: ObjType) bool {
+    return value == .Obj and value.Obj.type == expected_type;
+}
+
+pub const ObjType = enum {
+    String,
+};
+
+pub const Obj = struct {
+    type: ObjType,
+    next: ?*Obj,
+
+    pub fn format(
+        self: *@This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        switch (self.type) {
+            .String => {
+                const string = self.asString();
+                try string.format(writer);
+            },
+        }
+    }
+
+    pub fn asString(self: *@This()) *ObjString {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    pub fn isString(self: *@This()) bool {
+        return self.type == .String;
+    }
+};
+
 pub const Value = union(enum) {
     Float: f64,
     Int: i64,
     Bool: bool,
     Null,
+    Obj: *Obj,
 
     pub fn format(
         self: @This(),
@@ -38,6 +84,7 @@ pub const Value = union(enum) {
             .Int => |val| try writer.print("{d}", .{val}),
             .Bool => |val| try writer.print("{}", .{val}),
             .Null => try writer.print("null", .{}),
+            .Obj => |val| try val.format(writer),
         }
     }
 
@@ -47,9 +94,14 @@ pub const Value = union(enum) {
             .Int => "Int",
             .Bool => "Bool",
             .Null => "Null",
+            .Obj => "Object",
         };
     }
 };
+
+pub inline fn wrapObj(val: *Obj) Value {
+    return Value{ .Obj = val };
+}
 
 pub inline fn wrapInt(val: i64) Value {
     return Value{ .Int = val };
