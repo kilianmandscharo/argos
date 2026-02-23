@@ -30,6 +30,13 @@ pub fn allocateString(vm: *VirtualMachine, chars: []const u8) !*Obj {
     return &object.obj;
 }
 
+pub fn allocateStaticString(vm: *VirtualMachine, chars: []const u8) !*Obj {
+    const object = try allocateObject(vm, ObjString);
+    object.chars = chars;
+    object.static_lifetime = true;
+    return &object.obj;
+}
+
 pub const Obj = struct {
     type: ObjType,
     next: ?*Obj,
@@ -50,7 +57,9 @@ pub const Obj = struct {
         switch (self.type) {
             .String => {
                 const string_obj = self.asString();
-                gpa.free(string_obj.chars);
+                if (!string_obj.static_lifetime) {
+                    gpa.free(string_obj.chars);
+                }
                 gpa.destroy(string_obj);
             },
         }
@@ -70,6 +79,7 @@ pub const ObjString = struct {
 
     obj: Obj,
     chars: []const u8,
+    static_lifetime: bool = false,
 
     pub fn format(
         self: @This(),

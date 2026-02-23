@@ -9,7 +9,7 @@ const VirtualMachine = vm_module.VirtualMachine;
 
 const Obj = object_module.Obj;
 const ObjString = object_module.ObjString;
-const allocateString = object_module.allocateString;
+const allocateStaticString = object_module.allocateStaticString;
 
 const Value = value_module.Value;
 const wrapInt = value_module.wrapInt;
@@ -243,10 +243,7 @@ fn string(compiler: *Compiler) !void {
     const end = start + compiler.parser.previous.length - 2;
     const slice = compiler.parser.previous.source[start..end];
 
-    const chars = try compiler.gpa.dupe(u8, slice);
-    errdefer compiler.gpa.free(chars);
-
-    const obj = try allocateString(compiler.vm, chars);
+    const obj = try allocateStaticString(compiler.vm, slice);
 
     try compiler.emitConstant(wrapString(obj));
 }
