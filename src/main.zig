@@ -1,7 +1,9 @@
 const std = @import("std");
 const vm_module = @import("vm.zig");
+const chunck_module = @import("chunk.zig");
 
 const VirtualMachine = vm_module.VirtualMachine;
+const Chunk = chunck_module.Chunk;
 
 fn repl(_: std.mem.Allocator) !void {
     var stdin_buf: [1024]u8 = undefined;
@@ -34,25 +36,26 @@ fn runFile(allocator: std.mem.Allocator, vm: *VirtualMachine) !void {
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
-    const gpa_allocator = gpa.allocator();
+    const allocator = gpa.allocator();
 
     defer {
         const deinit_status = gpa.deinit();
         if (deinit_status == .leak) std.testing.expect(false) catch @panic("TEST FAIL");
     }
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const arena_allocator = arena.allocator();
-
     const file = try std.fs.cwd().openFile("test.argos", .{});
     defer file.close();
 
-    const source = try file.readToEndAlloc(arena_allocator, std.math.maxInt(usize));
+    const source = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(source);
 
-    var vm = VirtualMachine.init(arena_allocator, gpa_allocator, source);
-    const result = try vm.interpret();
+    var vm = VirtualMachine.init(allocator);
+    defer vm.deinit();
+
+    var chunk = Chunk.init();
+    defer chunk.deinit(allocator);
+
+    const result = try vm.interpret(&chunk, source);
     std.debug.print("{}\n", .{result});
 
     // if (std.os.argv.len == 1) {

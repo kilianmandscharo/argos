@@ -1,17 +1,25 @@
 const std = @import("std");
 const scanner = @import("scanner.zig");
 const chunk_module = @import("chunk.zig");
+const value_module = @import("value.zig");
+const object_module = @import("object.zig");
+const vm_module = @import("vm.zig");
 
-const Value = chunk_module.Value;
+const VirtualMachine = vm_module.VirtualMachine;
+
+const Obj = object_module.Obj;
+const ObjString = object_module.ObjString;
+const allocateString = object_module.allocateString;
+
+const Value = value_module.Value;
+const wrapInt = value_module.wrapInt;
+const wrapFloat = value_module.wrapFloat;
+const wrapBool = value_module.wrapBool;
+const wrapString = value_module.wrapObj;
+
 const Chunk = chunk_module.Chunk;
 const OpCode = chunk_module.OpCode;
 const OpByte = chunk_module.OpByte;
-const ObjString = chunk_module.ObjString;
-const Obj = chunk_module.Obj;
-const wrapInt = chunk_module.wrapInt;
-const wrapFloat = chunk_module.wrapFloat;
-const wrapBool = chunk_module.wrapBool;
-const wrapString = chunk_module.wrapObj;
 
 const Token = scanner.Token;
 const TokenType = scanner.TokenType;
@@ -34,6 +42,147 @@ const Precedence = enum(u8) {
     Prefix,
     Call,
     Index,
+};
+
+pub const Compiler = struct {
+    parser: Parser,
+    scanner: Scanner,
+    compiling_chunk: *Chunk,
+    gpa: std.mem.Allocator,
+    vm: *VirtualMachine,
+
+    const Parser = struct {
+        current: Token,
+        previous: Token,
+        had_error: bool,
+        panic_mode: bool,
+    };
+
+    pub fn init(vm: *VirtualMachine, gpa: std.mem.Allocator) Compiler {
+        return Compiler{
+            .parser = Parser{
+                .current = undefined,
+                .previous = undefined,
+                .had_error = false,
+                .panic_mode = false,
+            },
+            .scanner = undefined,
+            .gpa = gpa,
+            .compiling_chunk = undefined,
+            .vm = vm,
+        };
+    }
+
+    pub fn compile(self: *Compiler, chunk: *Chunk, source: []const u8) !void {
+        self.scanner = Scanner.init(source);
+        self.compiling_chunk = chunk;
+        self.advance();
+        try self.expression();
+        try self.emitOpCode(.Return);
+    }
+
+    fn endCompiler(self: *Compiler) void {
+        self.emitOpCode(.Return);
+    }
+
+    fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
+        self.advance();
+
+        if (getRule(self.parser.previous.type).prefix) |prefixFn| {
+            try prefixFn(self);
+        } else {
+            self.errorAtPrevious("Expect expression.");
+            return;
+        }
+
+        while (@intFromEnum(precedence) < getRulePrecedenceValue(self.parser.current.type)) {
+            self.advance();
+            if (self.parser.current.type == .Eof) return;
+            if (getRule(self.parser.previous.type).infix) |infixFn| {
+                try infixFn(self);
+            }
+        }
+    }
+
+    fn expression(self: *Compiler) !void {
+        try self.parsePrecedence(.Lowest);
+    }
+
+    fn emitConstant(self: *Compiler, value: Value) !void {
+        try self.currentChunk().writeConstant(self.gpa, value, self.parser.previous.line);
+    }
+
+    fn makeConstant(self: *Compiler, value: Value) !usize {
+        const constant = try self.currentChunk().addConstant(self.gpa, value);
+        if (constant > std.math.maxInt(u8)) {
+            self.errorAtPrevious("Too many constants in one chunk");
+            return error.TooManyConstants;
+        }
+        return constant;
+    }
+
+    fn currentChunk(self: *Compiler) *Chunk {
+        return self.compiling_chunk;
+    }
+
+    fn emitBytes(self: *Compiler, first: OpCode, second: u8) void {
+        self.emitOpCode(first);
+        self.emitByte(second);
+    }
+
+    fn emitOpByte(self: *Compiler, op_byte: OpByte) void {
+        self.currentChunk().write(self.gpa, op_byte, self.parser.previous.line);
+    }
+
+    fn emitByte(self: *Compiler, byte: u8) void {
+        self.currentChunk().write(self.gpa, OpByte{ .Byte = byte }, self.parser.previous.line);
+    }
+
+    fn emitOpCode(self: *Compiler, op_code: OpCode) !void {
+        try self.currentChunk().write(self.gpa, OpByte{ .Op = op_code }, self.parser.previous.line);
+    }
+
+    fn emitOpCodes(self: *Compiler, a: OpCode, b: OpCode) !void {
+        try self.currentChunk().write(self.gpa, OpByte{ .Op = a }, self.parser.previous.line);
+        try self.currentChunk().write(self.gpa, OpByte{ .Op = b }, self.parser.previous.line);
+    }
+
+    fn advance(self: *Compiler) void {
+        self.parser.previous = self.parser.current;
+        while (true) {
+            self.parser.current = self.scanner.next();
+            if (self.parser.current.type != .Error) break;
+            self.errorAtCurrent(self.parser.current.toString());
+        }
+    }
+
+    fn consume(self: *Compiler, expected: TokenType, message: []const u8) void {
+        if (self.parser.current.type == expected) {
+            self.advance();
+            return;
+        }
+        self.errorAtCurrent(message);
+    }
+
+    fn errorAtCurrent(self: *Compiler, message: []const u8) void {
+        self.errorAt(&self.parser.current, message);
+    }
+
+    fn errorAtPrevious(self: *Compiler, message: []const u8) void {
+        self.errorAt(&self.parser.previous, message);
+    }
+
+    fn errorAt(self: *Compiler, token: *Token, message: []const u8) void {
+        if (self.parser.panic_mode) return;
+        self.parser.panic_mode = true;
+        std.debug.print("[line {d}] Error", .{token.line});
+        switch (token.type) {
+            .Eof => std.debug.print(" at end", .{}),
+            .Error => {},
+            else => std.debug.print(" at '{s}'", .{token.source[token.start .. token.start + token.length]}),
+        }
+        std.debug.print(": {s}\n", .{message});
+    }
 };
 
 fn binary(compiler: *Compiler) !void {
@@ -97,18 +246,9 @@ fn string(compiler: *Compiler) !void {
     const chars = try compiler.gpa.dupe(u8, slice);
     errdefer compiler.gpa.free(chars);
 
-    const string_obj = try compiler.gpa.create(ObjString);
-    errdefer compiler.gpa.destroy(string_obj);
+    const obj = try allocateString(compiler.vm, chars);
 
-    string_obj.* = ObjString{
-        .obj = Obj{
-            .type = .String,
-            .next = null,
-        },
-        .chars = chars,
-    };
-
-    try compiler.emitConstant(wrapString(&string_obj.obj));
+    try compiler.emitConstant(wrapString(obj));
 }
 
 const ParseRule = struct {
@@ -194,143 +334,3 @@ fn getRulePrecedence(token_type: TokenType) Precedence {
     }
     return Precedence.Lowest;
 }
-
-pub const Parser = struct {
-    current: Token,
-    previous: Token,
-    had_error: bool,
-    panic_mode: bool,
-};
-
-pub const Compiler = struct {
-    parser: Parser,
-    scanner: Scanner,
-    compiling_chunk: *Chunk,
-    arena: std.mem.Allocator,
-    gpa: std.mem.Allocator,
-
-    pub fn init(arena: std.mem.Allocator, gpa: std.mem.Allocator, source: []const u8) Compiler {
-        return Compiler{
-            .parser = Parser{
-                .current = undefined,
-                .previous = undefined,
-                .had_error = false,
-                .panic_mode = false,
-            },
-            .scanner = Scanner.init(source),
-            .arena = arena,
-            .gpa = gpa,
-            .compiling_chunk = undefined,
-        };
-    }
-
-    pub fn compile(self: *Compiler, chunk: *Chunk) !void {
-        self.compiling_chunk = chunk;
-        self.advance();
-        try self.expression();
-        try self.emitOpCode(.Return);
-    }
-
-    fn endCompiler(self: *Compiler) void {
-        self.emitOpCode(.Return);
-    }
-
-    fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
-        self.advance();
-
-        if (getRule(self.parser.previous.type).prefix) |prefixFn| {
-            try prefixFn(self);
-        } else {
-            self.errorAtPrevious("Expect expression.");
-            return;
-        }
-
-        while (@intFromEnum(precedence) < getRulePrecedenceValue(self.parser.current.type)) {
-            self.advance();
-            if (self.parser.current.type == .Eof) return;
-            if (getRule(self.parser.previous.type).infix) |infixFn| {
-                try infixFn(self);
-            }
-        }
-    }
-
-    fn expression(self: *Compiler) !void {
-        try self.parsePrecedence(.Lowest);
-    }
-
-    fn emitConstant(self: *Compiler, value: Value) !void {
-        try self.currentChunk().writeConstant(self.arena, value, self.parser.previous.line);
-    }
-
-    fn makeConstant(self: *Compiler, value: Value) !usize {
-        const constant = try self.currentChunk().addConstant(self.arena, value);
-        if (constant > std.math.maxInt(u8)) {
-            self.errorAtPrevious("Too many constants in one chunk");
-            return error.TooManyConstants;
-        }
-        return constant;
-    }
-
-    fn currentChunk(self: *Compiler) *Chunk {
-        return self.compiling_chunk;
-    }
-
-    fn emitBytes(self: *Compiler, first: OpCode, second: u8) void {
-        self.emitOpCode(first);
-        self.emitByte(second);
-    }
-
-    fn emitOpByte(self: *Compiler, op_byte: OpByte) void {
-        self.currentChunk().write(self.arena, op_byte, self.parser.previous.line);
-    }
-
-    fn emitByte(self: *Compiler, byte: u8) void {
-        self.currentChunk().write(self.arena, OpByte{ .Byte = byte }, self.parser.previous.line);
-    }
-
-    fn emitOpCode(self: *Compiler, op_code: OpCode) !void {
-        try self.currentChunk().write(self.arena, OpByte{ .Op = op_code }, self.parser.previous.line);
-    }
-
-    fn emitOpCodes(self: *Compiler, a: OpCode, b: OpCode) !void {
-        try self.currentChunk().write(self.arena, OpByte{ .Op = a }, self.parser.previous.line);
-        try self.currentChunk().write(self.arena, OpByte{ .Op = b }, self.parser.previous.line);
-    }
-
-    fn advance(self: *Compiler) void {
-        self.parser.previous = self.parser.current;
-        while (true) {
-            self.parser.current = self.scanner.next();
-            if (self.parser.current.type != .Error) break;
-            self.errorAtCurrent(self.parser.current.toString());
-        }
-    }
-
-    fn consume(self: *Compiler, expected: TokenType, message: []const u8) void {
-        if (self.parser.current.type == expected) {
-            self.advance();
-            return;
-        }
-        self.errorAtCurrent(message);
-    }
-
-    fn errorAtCurrent(self: *Compiler, message: []const u8) void {
-        self.errorAt(&self.parser.current, message);
-    }
-
-    fn errorAtPrevious(self: *Compiler, message: []const u8) void {
-        self.errorAt(&self.parser.previous, message);
-    }
-
-    fn errorAt(self: *Compiler, token: *Token, message: []const u8) void {
-        if (self.parser.panic_mode) return;
-        self.parser.panic_mode = true;
-        std.debug.print("[line {d}] Error", .{token.line});
-        switch (token.type) {
-            .Eof => std.debug.print(" at end", .{}),
-            .Error => {},
-            else => std.debug.print(" at '{s}'", .{token.source[token.start .. token.start + token.length]}),
-        }
-        std.debug.print(": {s}\n", .{message});
-    }
-};

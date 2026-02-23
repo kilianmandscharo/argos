@@ -1,17 +1,22 @@
 const std = @import("std");
 const chunk_module = @import("chunk.zig");
+const value_module = @import("value.zig");
+const object_module = @import("object.zig");
 const compiler_module = @import("compiler.zig");
+
+const ObjString = object_module.ObjString;
+const Obj = object_module.Obj;
+const allocateString = object_module.allocateString;
+
+const Value = value_module.Value;
+const wrapFloat = value_module.wrapFloat;
+const wrapInt = value_module.wrapInt;
+const wrapBool = value_module.wrapBool;
+const wrapObj = value_module.wrapObj;
+const valueNull = value_module.valueNull;
 
 const OpCode = chunk_module.OpCode;
 const Chunk = chunk_module.Chunk;
-const Value = chunk_module.Value;
-const ObjString = chunk_module.ObjString;
-const Obj = chunk_module.Obj;
-const wrapFloat = chunk_module.wrapFloat;
-const wrapInt = chunk_module.wrapInt;
-const wrapBool = chunk_module.wrapBool;
-const wrapObj = chunk_module.wrapObj;
-const valueNull = chunk_module.valueNull;
 
 const Compiler = compiler_module.Compiler;
 
@@ -26,24 +31,31 @@ const DEBUG_TRACE_EXECUTION = true;
 const STACK_MAX = 256;
 
 pub const VirtualMachine = struct {
-    chunk: Chunk,
+    chunk: *Chunk,
     ip: usize,
     stack: [STACK_MAX]Value,
     stack_top: usize,
-    compiler: Compiler,
     gpa: std.mem.Allocator,
     objects: ?*Obj,
 
-    pub fn init(arena: std.mem.Allocator, gpa: std.mem.Allocator, source: []const u8) VirtualMachine {
+    pub fn init(gpa: std.mem.Allocator) VirtualMachine {
         return VirtualMachine{
             .chunk = undefined,
             .ip = 0,
             .stack = undefined,
             .stack_top = 0,
-            .compiler = Compiler.init(arena, gpa, source),
             .gpa = gpa,
             .objects = null,
         };
+    }
+
+    pub fn deinit(self: *VirtualMachine) void {
+        var obj = self.objects;
+        while (obj) |object| {
+            const next = object.next;
+            object.deinit(self.gpa);
+            obj = next;
+        }
     }
 
     fn resetStack(self: *VirtualMachine) void {
@@ -68,25 +80,12 @@ pub const VirtualMachine = struct {
         self.stack[self.stack_top - 1 - distance] = value;
     }
 
-    pub fn interpret(self: *VirtualMachine) !InterpretResult {
-        var chunk = Chunk.init();
-        try self.compiler.compile(&chunk);
+    pub fn interpret(self: *VirtualMachine, chunk: *Chunk, source: []const u8) !InterpretResult {
+        var compiler = Compiler.init(self, self.gpa);
+        try compiler.compile(chunk, source);
         self.chunk = chunk;
         if (comptime DEBUG_PRINT_CODE) chunk.disassemble();
         return try self.run();
-    }
-
-    fn allocateString(self: *VirtualMachine, chars: []const u8) !*Obj {
-        const string = try self.gpa.create(ObjString);
-        string.* = ObjString{
-            .chars = chars,
-            .obj = Obj{
-                .type = .String,
-                .next = self.objects,
-            },
-        };
-        self.objects = &string.obj;
-        return &string.obj;
     }
 
     pub inline fn readByte(self: *VirtualMachine) u8 {
@@ -265,7 +264,7 @@ fn add(vm: *VirtualMachine, a: Value, b: Value) !Value {
                     const chars = try std.mem.concat(vm.gpa, u8, &data);
                     errdefer vm.gpa.free(chars);
 
-                    return wrapObj(try vm.allocateString(chars));
+                    return wrapObj(try allocateString(vm, chars));
                 },
                 else => return vm.runtimeError("Right operand must be an Obj.", .{}),
             }

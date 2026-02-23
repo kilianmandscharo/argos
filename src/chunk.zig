@@ -1,4 +1,7 @@
 const std = @import("std");
+const value_module = @import("value.zig");
+
+const Value = value_module.Value;
 
 pub const OpCode = enum(u8) {
     Return,
@@ -23,102 +26,6 @@ pub const OpByte = union(enum) {
     Op: OpCode,
 };
 
-pub const ObjString = struct {
-    obj: Obj,
-    chars: []const u8,
-
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
-        try writer.print("\"{s}\"", .{self.chars});
-    }
-};
-
-pub inline fn isObjType(value: Value, expected_type: ObjType) bool {
-    return value == .Obj and value.Obj.type == expected_type;
-}
-
-pub const ObjType = enum {
-    String,
-};
-
-pub const Obj = struct {
-    type: ObjType,
-    next: ?*Obj,
-
-    pub fn format(
-        self: *@This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
-        switch (self.type) {
-            .String => {
-                const string = self.asString();
-                try string.format(writer);
-            },
-        }
-    }
-
-    pub fn asString(self: *@This()) *ObjString {
-        return @alignCast(@fieldParentPtr("obj", self));
-    }
-
-    pub fn isString(self: *@This()) bool {
-        return self.type == .String;
-    }
-};
-
-pub const Value = union(enum) {
-    Float: f64,
-    Int: i64,
-    Bool: bool,
-    Null,
-    Obj: *Obj,
-
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
-        switch (self) {
-            .Float => |val| try writer.print("{d}", .{val}),
-            .Int => |val| try writer.print("{d}", .{val}),
-            .Bool => |val| try writer.print("{}", .{val}),
-            .Null => try writer.print("null", .{}),
-            .Obj => |val| try val.format(writer),
-        }
-    }
-
-    pub fn getType(self: @This()) []const u8 {
-        return switch (self) {
-            .Float => "Float",
-            .Int => "Int",
-            .Bool => "Bool",
-            .Null => "Null",
-            .Obj => "Object",
-        };
-    }
-};
-
-pub inline fn wrapObj(val: *Obj) Value {
-    return Value{ .Obj = val };
-}
-
-pub inline fn wrapInt(val: i64) Value {
-    return Value{ .Int = val };
-}
-
-pub inline fn wrapFloat(val: f64) Value {
-    return Value{ .Float = val };
-}
-
-pub inline fn wrapBool(val: bool) Value {
-    return Value{ .Bool = val };
-}
-
-pub inline fn valueNull() Value {
-    return .Null;
-}
-
 pub const Chunk = struct {
     code: std.ArrayList(u8),
     constants: std.ArrayList(Value),
@@ -132,34 +39,40 @@ pub const Chunk = struct {
         };
     }
 
-    pub fn write(self: *Chunk, allocator: std.mem.Allocator, op_byte: OpByte, line: usize) !void {
+    pub fn deinit(self: *Chunk, gpa: std.mem.Allocator) void {
+        self.code.deinit(gpa);
+        self.constants.deinit(gpa);
+        self.lines.deinit(gpa);
+    }
+
+    pub fn write(self: *Chunk, gpa: std.mem.Allocator, op_byte: OpByte, line: usize) !void {
         switch (op_byte) {
             .Byte => |byte| {
-                try self.code.append(allocator, byte);
+                try self.code.append(gpa, byte);
             },
             .Op => |op| {
-                try self.code.append(allocator, @intFromEnum(op));
+                try self.code.append(gpa, @intFromEnum(op));
             },
         }
-        try self.lines.append(allocator, line);
+        try self.lines.append(gpa, line);
     }
 
-    pub fn writeConstant(self: *Chunk, allocator: std.mem.Allocator, value: Value, line: usize) !void {
-        const constant = try self.addConstant(allocator, value);
-        try self.write(allocator, OpByte{ .Op = .Constant }, line);
-        try self.write(allocator, OpByte{ .Byte = @intCast(constant) }, line);
+    pub fn writeConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value, line: usize) !void {
+        const constant = try self.addConstant(gpa, value);
+        try self.write(gpa, OpByte{ .Op = .Constant }, line);
+        try self.write(gpa, OpByte{ .Byte = @intCast(constant) }, line);
     }
 
-    pub fn writeConstantLong(self: *Chunk, allocator: std.mem.Allocator, value: Value, line: usize) !void {
-        const constant = try self.addConstant(allocator, value);
-        try self.write(allocator, OpByte{ .Op = .Constant_Long }, line);
-        try self.write(allocator, OpByte{ .Byte = @intCast((constant >> 16) & 0xFF) }, line);
-        try self.write(allocator, OpByte{ .Byte = @intCast((constant >> 8) & 0xFF) }, line);
-        try self.write(allocator, OpByte{ .Byte = @intCast((constant & 0xFF)) }, line);
+    pub fn writeConstantLong(self: *Chunk, gpa: std.mem.Allocator, value: Value, line: usize) !void {
+        const constant = try self.addConstant(gpa, value);
+        try self.write(gpa, OpByte{ .Op = .Constant_Long }, line);
+        try self.write(gpa, OpByte{ .Byte = @intCast((constant >> 16) & 0xFF) }, line);
+        try self.write(gpa, OpByte{ .Byte = @intCast((constant >> 8) & 0xFF) }, line);
+        try self.write(gpa, OpByte{ .Byte = @intCast((constant & 0xFF)) }, line);
     }
 
-    pub fn addConstant(self: *Chunk, allocator: std.mem.Allocator, value: Value) !usize {
-        try self.constants.append(allocator, value);
+    pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value) !usize {
+        try self.constants.append(gpa, value);
         return self.constants.items.len - 1;
     }
 
