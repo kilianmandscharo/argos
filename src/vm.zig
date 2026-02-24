@@ -30,6 +30,16 @@ const DEBUG_PRINT_CODE = true;
 const DEBUG_TRACE_EXECUTION = true;
 const STACK_MAX = 256;
 
+const StringContext = struct {
+    pub fn hash(_: @This(), key: *ObjString) u64 {
+        return key.hash;
+    }
+
+    pub fn eql(_: @This(), a: *ObjString, b: *ObjString) bool {
+        return std.mem.eql(u8, a.chars, b.chars);
+    }
+};
+
 pub const VirtualMachine = struct {
     chunk: *Chunk,
     ip: usize,
@@ -37,6 +47,7 @@ pub const VirtualMachine = struct {
     stack_top: usize,
     gpa: std.mem.Allocator,
     objects: ?*Obj,
+    strings: std.HashMapUnmanaged(*ObjString, void, StringContext, 80),
 
     pub fn init(gpa: std.mem.Allocator) VirtualMachine {
         return VirtualMachine{
@@ -46,6 +57,7 @@ pub const VirtualMachine = struct {
             .stack_top = 0,
             .gpa = gpa,
             .objects = null,
+            .strings = .{},
         };
     }
 
@@ -56,6 +68,18 @@ pub const VirtualMachine = struct {
             object.deinit(self.gpa);
             obj = next;
         }
+        self.strings.deinit(self.gpa);
+    }
+
+    pub fn findString(self: *VirtualMachine, chars: []const u8, hash: u64) ?*Obj {
+        var tmp = ObjString{
+            .chars = chars,
+            .hash = hash,
+        };
+        if (self.strings.getKey(&tmp)) |string_object| {
+            return &string_object.obj;
+        }
+        return null;
     }
 
     fn resetStack(self: *VirtualMachine) void {
@@ -257,14 +281,7 @@ fn add(vm: *VirtualMachine, a: Value, b: Value) !Value {
                     if (!left.isString() or !right.isString()) {
                         return vm.runtimeError("Both operands must be strings", .{});
                     }
-                    const left_string = left.asString().chars;
-                    const right_string = right.asString().chars;
-
-                    const data: [2][]const u8 = .{ left_string, right_string };
-                    const chars = try std.mem.concat(vm.gpa, u8, &data);
-                    errdefer vm.gpa.free(chars);
-
-                    return wrapObj(try allocateString(vm, chars));
+                    return try concatenateStrings(vm, left, right);
                 },
                 else => return vm.runtimeError("Right operand must be an Obj.", .{}),
             }
@@ -338,7 +355,26 @@ fn isEqual(vm: *VirtualMachine, a: Value, b: Value) !bool {
             if (obj.type != b.Obj.type) return false;
             const a_string = obj.asString();
             const b_string = b.Obj.asString();
-            return std.mem.eql(u8, a_string.chars, b_string.chars);
+            return a_string == b_string;
         },
     }
+}
+
+fn concatenateStrings(vm: *VirtualMachine, left: *Obj, right: *Obj) !Value {
+    const left_string = left.asString().chars;
+    const right_string = right.asString().chars;
+
+    const data: [2][]const u8 = .{ left_string, right_string };
+    const chars = try std.mem.concat(vm.gpa, u8, &data);
+    errdefer vm.gpa.free(chars);
+
+    const hash = std.hash.Wyhash.hash(0, chars);
+    const interned = vm.findString(chars, hash);
+
+    if (interned) |string_object| {
+        vm.gpa.free(chars);
+        return wrapObj(string_object);
+    }
+
+    return wrapObj(try allocateString(vm, chars, hash));
 }

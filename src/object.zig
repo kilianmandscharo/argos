@@ -24,16 +24,20 @@ pub fn allocateObject(vm: *VirtualMachine, T: type) !*T {
     return object;
 }
 
-pub fn allocateString(vm: *VirtualMachine, chars: []const u8) !*Obj {
-    const object = try allocateObject(vm, ObjString);
-    object.chars = chars;
-    return &object.obj;
+pub fn allocateString(vm: *VirtualMachine, chars: []const u8, hash: u64) !*Obj {
+    return allocateStringInternal(vm, chars, hash, false);
 }
 
-pub fn allocateStaticString(vm: *VirtualMachine, chars: []const u8) !*Obj {
+pub fn allocateStaticString(vm: *VirtualMachine, chars: []const u8, hash: u64) !*Obj {
+    return allocateStringInternal(vm, chars, hash, true);
+}
+
+fn allocateStringInternal(vm: *VirtualMachine, chars: []const u8, hash: u64, static_lifetime: bool) !*Obj {
     const object = try allocateObject(vm, ObjString);
     object.chars = chars;
-    object.static_lifetime = true;
+    object.hash = hash;
+    object.static_lifetime = static_lifetime;
+    try vm.strings.put(vm.gpa, object, undefined);
     return &object.obj;
 }
 
@@ -77,9 +81,10 @@ pub const Obj = struct {
 pub const ObjString = struct {
     pub const KIND = ObjType.String;
 
-    obj: Obj,
+    obj: Obj = undefined,
     chars: []const u8,
     static_lifetime: bool = false,
+    hash: u64,
 
     pub fn format(
         self: @This(),

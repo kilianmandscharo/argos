@@ -242,8 +242,11 @@ fn string(compiler: *Compiler) !void {
     const start = compiler.parser.previous.start + 1;
     const end = start + compiler.parser.previous.length - 2;
     const slice = compiler.parser.previous.source[start..end];
+    const hash = std.hash.Wyhash.hash(0, slice);
 
-    const obj = try allocateStaticString(compiler.vm, slice);
+    const interned = compiler.vm.findString(slice, hash);
+
+    const obj = interned orelse try allocateStaticString(compiler.vm, slice, hash);
 
     try compiler.emitConstant(wrapString(obj));
 }
