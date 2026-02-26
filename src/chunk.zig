@@ -19,6 +19,8 @@ pub const OpCode = enum(u8) {
     Equal,
     Greater,
     Less,
+    Print,
+    Pop,
 };
 
 pub const OpByte = union(enum) {
@@ -122,6 +124,8 @@ pub const Chunk = struct {
             .Greater => return simpleInstruction("OP_GREATER", offset),
             .Less => return simpleInstruction("OP_LESS", offset),
             .Equal => return simpleInstruction("OP_EQUAL", offset),
+            .Print => return simpleInstruction("OP_PRINT", offset),
+            .Pop => return simpleInstruction("OP_POP", offset),
         }
     }
 };

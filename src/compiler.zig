@@ -55,7 +55,6 @@ pub const Compiler = struct {
         current: Token,
         previous: Token,
         had_error: bool,
-        panic_mode: bool,
     };
 
     pub fn init(vm: *VirtualMachine, gpa: std.mem.Allocator) Compiler {
@@ -64,7 +63,6 @@ pub const Compiler = struct {
                 .current = undefined,
                 .previous = undefined,
                 .had_error = false,
-                .panic_mode = false,
             },
             .scanner = undefined,
             .gpa = gpa,
@@ -76,32 +74,58 @@ pub const Compiler = struct {
     pub fn compile(self: *Compiler, chunk: *Chunk, source: []const u8) !void {
         self.scanner = Scanner.init(source);
         self.compiling_chunk = chunk;
-        self.advance();
-        try self.expression();
+        try self.advance();
+        while (!try self.match(.Eof)) self.declaration();
+        try self.endCompiler();
+    }
+
+    fn endCompiler(self: *Compiler) !void {
         try self.emitOpCode(.Return);
     }
 
-    fn endCompiler(self: *Compiler) void {
-        self.emitOpCode(.Return);
-    }
-
     fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
-        self.advance();
+        try self.advance();
 
         if (getRule(self.parser.previous.type).prefix) |prefixFn| {
             try prefixFn(self);
         } else {
-            self.errorAtPrevious("Expect expression.");
-            return;
+            return self.errorAtPrevious("Expect expression.");
         }
 
         while (@intFromEnum(precedence) < getRulePrecedenceValue(self.parser.current.type)) {
-            self.advance();
+            try self.advance();
             if (self.parser.current.type == .Eof) return;
             if (getRule(self.parser.previous.type).infix) |infixFn| {
                 try infixFn(self);
             }
         }
+    }
+
+    fn expectLineEnd(self: *Compiler) !void {
+        const token_type = self.parser.current.type;
+        if (token_type == .NewLine or token_type == .Eof) {
+            try self.advance();
+            return;
+        }
+        return self.errorAtCurrent("Expected new line.");
+    }
+
+    fn declaration(self: *Compiler) void {
+        self.statement() catch {};
+    }
+
+    fn statement(self: *Compiler) !void {
+        if (try self.match(.Print)) {
+            try printStatement(self);
+        } else {
+            try self.expressionStatement();
+        }
+    }
+
+    fn expressionStatement(self: *Compiler) !void {
+        try self.expression();
+        try self.expectLineEnd();
+        try self.emitOpCode(.Pop);
     }
 
     fn expression(self: *Compiler) !void {
@@ -115,8 +139,7 @@ pub const Compiler = struct {
     fn makeConstant(self: *Compiler, value: Value) !usize {
         const constant = try self.currentChunk().addConstant(self.gpa, value);
         if (constant > std.math.maxInt(u8)) {
-            self.errorAtPrevious("Too many constants in one chunk");
-            return error.TooManyConstants;
+            return self.errorAtPrevious("Too many constants in one chunk");
         }
         return constant;
     }
@@ -147,34 +170,42 @@ pub const Compiler = struct {
         try self.currentChunk().write(self.gpa, OpByte{ .Op = b }, self.parser.previous.line);
     }
 
-    fn advance(self: *Compiler) void {
+    fn advance(self: *Compiler) !void {
         self.parser.previous = self.parser.current;
         while (true) {
             self.parser.current = self.scanner.next();
             if (self.parser.current.type != .Error) break;
-            self.errorAtCurrent(self.parser.current.toString());
+            return self.errorAtCurrent(self.parser.current.toString());
         }
     }
 
-    fn consume(self: *Compiler, expected: TokenType, message: []const u8) void {
+    fn consume(self: *Compiler, expected: TokenType, message: []const u8) !void {
         if (self.parser.current.type == expected) {
-            self.advance();
+            try self.advance();
             return;
         }
-        self.errorAtCurrent(message);
+        return self.errorAtCurrent(message);
     }
 
-    fn errorAtCurrent(self: *Compiler, message: []const u8) void {
-        self.errorAt(&self.parser.current, message);
+    fn match(self: *Compiler, token_type: TokenType) !bool {
+        if (!self.check(token_type)) return false;
+        try self.advance();
+        return true;
     }
 
-    fn errorAtPrevious(self: *Compiler, message: []const u8) void {
-        self.errorAt(&self.parser.previous, message);
+    fn check(self: *Compiler, token_type: TokenType) bool {
+        return self.parser.current.type == token_type;
     }
 
-    fn errorAt(self: *Compiler, token: *Token, message: []const u8) void {
-        if (self.parser.panic_mode) return;
-        self.parser.panic_mode = true;
+    fn errorAtCurrent(self: *Compiler, message: []const u8) anyerror {
+        return Compiler.errorAt(&self.parser.current, message);
+    }
+
+    fn errorAtPrevious(self: *Compiler, message: []const u8) anyerror {
+        return Compiler.errorAt(&self.parser.previous, message);
+    }
+
+    fn errorAt(token: *Token, message: []const u8) anyerror {
         std.debug.print("[line {d}] Error", .{token.line});
         switch (token.type) {
             .Eof => std.debug.print(" at end", .{}),
@@ -182,6 +213,7 @@ pub const Compiler = struct {
             else => std.debug.print(" at '{s}'", .{token.source[token.start .. token.start + token.length]}),
         }
         std.debug.print(": {s}\n", .{message});
+        return error.CompileError;
     }
 };
 
@@ -206,7 +238,7 @@ fn binary(compiler: *Compiler) !void {
 
 fn grouping(compiler: *Compiler) !void {
     try compiler.expression();
-    compiler.consume(.RParen, "Expect ')' after expression");
+    try compiler.consume(.RParen, "Expect ')' after expression");
 }
 
 fn unary(compiler: *Compiler) !void {
@@ -249,6 +281,12 @@ fn string(compiler: *Compiler) !void {
     const obj = interned orelse try allocateStaticString(compiler.vm, slice, hash);
 
     try compiler.emitConstant(wrapString(obj));
+}
+
+fn printStatement(compiler: *Compiler) !void {
+    try compiler.expression();
+    try compiler.expectLineEnd();
+    try compiler.emitOpCode(.Print);
 }
 
 const ParseRule = struct {
@@ -313,6 +351,7 @@ fn initRules() [token_count]ParseRule {
             .Tilde => .{ .prefix = null, .infix = null, .precedence = .Prefix },
             .LeftShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
             .RightShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
+            .Print => .{ .prefix = null, .infix = null, .precedence = null },
             .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
     }

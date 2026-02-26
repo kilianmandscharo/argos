@@ -188,9 +188,14 @@ pub const VirtualMachine = struct {
                     const a = self.peek(0);
                     self.swapInPlace(try less(self, a, b), 0);
                 },
-                .Return => {
+                .Print => {
                     const value = self.pop();
-                    std.debug.print("\n{f}\n", .{value});
+                    std.debug.print("{f}\n", .{value});
+                },
+                .Pop => {
+                    _ = self.pop();
+                },
+                .Return => {
                     return .Ok;
                 },
                 else => return .RuntimeError,
