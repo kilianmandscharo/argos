@@ -17,6 +17,7 @@ const valueNull = value_module.valueNull;
 
 const OpCode = chunk_module.OpCode;
 const Chunk = chunk_module.Chunk;
+const bytesToIndex = chunk_module.bytesToIndex;
 
 const Compiler = compiler_module.Compiler;
 
@@ -48,6 +49,7 @@ pub const VirtualMachine = struct {
     gpa: std.mem.Allocator,
     objects: ?*Obj,
     strings: std.HashMapUnmanaged(*ObjString, void, StringContext, 80),
+    globals: std.HashMapUnmanaged(*ObjString, Value, StringContext, 80),
 
     pub fn init(gpa: std.mem.Allocator) VirtualMachine {
         return VirtualMachine{
@@ -58,6 +60,7 @@ pub const VirtualMachine = struct {
             .gpa = gpa,
             .objects = null,
             .strings = .{},
+            .globals = .{},
         };
     }
 
@@ -69,6 +72,7 @@ pub const VirtualMachine = struct {
             obj = next;
         }
         self.strings.deinit(self.gpa);
+        self.globals.deinit(self.gpa);
     }
 
     pub fn findString(self: *VirtualMachine, chars: []const u8, hash: u64) ?*Obj {
@@ -126,6 +130,16 @@ pub const VirtualMachine = struct {
         return error.RuntimeError;
     }
 
+    fn readConstant(self: *VirtualMachine) Value {
+        const index = bytesToIndex(self.readByte(), self.readByte(), self.readByte());
+        return self.chunk.constants.items[index];
+    }
+
+    fn readString(self: *VirtualMachine) *ObjString {
+        const constant = self.readConstant();
+        return constant.Obj.asString();
+    }
+
     pub fn run(self: *VirtualMachine) !InterpretResult {
         while (true) {
             if (comptime DEBUG_TRACE_EXECUTION) {
@@ -138,10 +152,7 @@ pub const VirtualMachine = struct {
             }
             const instruction = self.readByte();
             switch (@as(OpCode, @enumFromInt(instruction))) {
-                .Constant => {
-                    const constant = self.chunk.constants.items[self.readByte()];
-                    self.push(constant);
-                },
+                .Constant => self.push(self.readConstant()),
                 .Null => self.push(valueNull()),
                 .True => self.push(wrapBool(true)),
                 .False => self.push(wrapBool(false)),
@@ -195,10 +206,22 @@ pub const VirtualMachine = struct {
                 .Pop => {
                     _ = self.pop();
                 },
+                .DefineGlobal => {
+                    const name = self.readString();
+                    try self.globals.put(self.gpa, name, self.peek(0));
+                    _ = self.pop();
+                },
+                .GetGlobal => {
+                    const name = self.readString();
+                    if (self.globals.get(name)) |value| {
+                        self.push(value);
+                    } else {
+                        return self.runtimeError("Undefined variable '{s}'", .{name.chars});
+                    }
+                },
                 .Return => {
                     return .Ok;
                 },
-                else => return .RuntimeError,
             }
         }
     }

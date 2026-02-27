@@ -6,7 +6,6 @@ const Value = value_module.Value;
 pub const OpCode = enum(u8) {
     Return,
     Constant,
-    Constant_Long,
     Negate,
     Add,
     Subtract,
@@ -21,6 +20,8 @@ pub const OpCode = enum(u8) {
     Less,
     Print,
     Pop,
+    DefineGlobal,
+    GetGlobal,
 };
 
 pub const OpByte = union(enum) {
@@ -60,22 +61,16 @@ pub const Chunk = struct {
     }
 
     pub fn writeConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value, line: usize) !void {
-        const constant = try self.addConstant(gpa, value);
+        const bytes = try self.addConstant(gpa, value);
         try self.write(gpa, OpByte{ .Op = .Constant }, line);
-        try self.write(gpa, OpByte{ .Byte = @intCast(constant) }, line);
+        try self.write(gpa, OpByte{ .Byte = bytes[0] }, line);
+        try self.write(gpa, OpByte{ .Byte = bytes[1] }, line);
+        try self.write(gpa, OpByte{ .Byte = bytes[2] }, line);
     }
 
-    pub fn writeConstantLong(self: *Chunk, gpa: std.mem.Allocator, value: Value, line: usize) !void {
-        const constant = try self.addConstant(gpa, value);
-        try self.write(gpa, OpByte{ .Op = .Constant_Long }, line);
-        try self.write(gpa, OpByte{ .Byte = @intCast((constant >> 16) & 0xFF) }, line);
-        try self.write(gpa, OpByte{ .Byte = @intCast((constant >> 8) & 0xFF) }, line);
-        try self.write(gpa, OpByte{ .Byte = @intCast((constant & 0xFF)) }, line);
-    }
-
-    pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value) !usize {
+    pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value) ![3]u8 {
         try self.constants.append(gpa, value);
-        return self.constants.items.len - 1;
+        return indexToBytes(self.constants.items.len - 1);
     }
 
     pub fn disassemble(self: *Chunk) void {
@@ -98,18 +93,13 @@ pub const Chunk = struct {
                 return simpleInstruction("OP_RETURN", offset);
             },
             .Constant => {
-                const constant = self.code.items[offset + 1];
+                const constant = bytesToIndex(
+                    self.code.items[offset + 1],
+                    self.code.items[offset + 2],
+                    self.code.items[offset + 3],
+                );
                 const value = self.constants.items[constant];
-                std.debug.print("OP_CONSTANT {d:4} '{f}'\n", .{ constant, value });
-                return offset + 2;
-            },
-            .Constant_Long => {
-                const b1 = self.code.items[offset + 1];
-                const b2 = self.code.items[offset + 2];
-                const b3 = self.code.items[offset + 3];
-                const constant: usize = (@as(usize, @intCast(b1)) << 16) | (@as(usize, @intCast(b2)) << 8) | @as(usize, @intCast(b3));
-                const value = self.constants.items[constant];
-                std.debug.print("OP_CONSTANT_LONG {d:4} '{f}'\n", .{ constant, value });
+                std.debug.print("OP_CONSTANT{d:4} '{f}'\n", .{ constant, value });
                 return offset + 4;
             },
             .Add => return simpleInstruction("OP_ADD", offset),
@@ -126,9 +116,41 @@ pub const Chunk = struct {
             .Equal => return simpleInstruction("OP_EQUAL", offset),
             .Print => return simpleInstruction("OP_PRINT", offset),
             .Pop => return simpleInstruction("OP_POP", offset),
+            .DefineGlobal => {
+                const constant = bytesToIndex(
+                    self.code.items[offset + 1],
+                    self.code.items[offset + 2],
+                    self.code.items[offset + 3],
+                );
+                const value = self.constants.items[constant];
+                std.debug.print("OP_DEFINE_GLOBAL{d:4} '{f}'\n", .{ constant, value });
+                return offset + 4;
+            },
+            .GetGlobal => {
+                const constant = bytesToIndex(
+                    self.code.items[offset + 1],
+                    self.code.items[offset + 2],
+                    self.code.items[offset + 3],
+                );
+                const value = self.constants.items[constant];
+                std.debug.print("OP_GET_GLOBAL{d:4} '{f}'\n", .{ constant, value });
+                return offset + 4;
+            },
         }
     }
 };
+
+pub inline fn indexToBytes(index: usize) [3]u8 {
+    return .{
+        @intCast((index >> 16) & 0xFF),
+        @intCast((index >> 8) & 0xFF),
+        @intCast((index & 0xFF)),
+    };
+}
+
+pub inline fn bytesToIndex(first: u8, second: u8, third: u8) usize {
+    return (@as(usize, @intCast(first)) << 16) | (@as(usize, @intCast(second)) << 8) | (@as(usize, @intCast(third)));
+}
 
 fn simpleInstruction(name: []const u8, offset: usize) usize {
     std.debug.print("{s}\n", .{name});

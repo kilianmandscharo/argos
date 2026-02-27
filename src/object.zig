@@ -32,6 +32,13 @@ pub fn allocateStaticString(vm: *VirtualMachine, chars: []const u8, hash: u64) !
     return allocateStringInternal(vm, chars, hash, true);
 }
 
+pub fn copyStaticString(vm: *VirtualMachine, chars: []const u8) !*Obj {
+    const hash = std.hash.Wyhash.hash(0, chars);
+    const interned = vm.findString(chars, hash);
+    const obj = interned orelse try allocateStaticString(vm, chars, hash);
+    return obj;
+}
+
 fn allocateStringInternal(vm: *VirtualMachine, chars: []const u8, hash: u64, static_lifetime: bool) !*Obj {
     const object = try allocateObject(vm, ObjString);
     object.chars = chars;

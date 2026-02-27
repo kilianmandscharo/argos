@@ -10,6 +10,7 @@ const VirtualMachine = vm_module.VirtualMachine;
 const Obj = object_module.Obj;
 const ObjString = object_module.ObjString;
 const allocateStaticString = object_module.allocateStaticString;
+const copyStaticString = object_module.copyStaticString;
 
 const Value = value_module.Value;
 const wrapInt = value_module.wrapInt;
@@ -75,7 +76,9 @@ pub const Compiler = struct {
         self.scanner = Scanner.init(source);
         self.compiling_chunk = chunk;
         try self.advance();
-        while (!try self.match(.Eof)) self.declaration();
+        while (!try self.match(.Eof)) {
+            self.declaration() catch {};
+        }
         try self.endCompiler();
     }
 
@@ -110,8 +113,43 @@ pub const Compiler = struct {
         return self.errorAtCurrent("Expected new line.");
     }
 
-    fn declaration(self: *Compiler) void {
-        self.statement() catch {};
+    fn declaration(self: *Compiler) !void {
+        if (try self.match(.Let)) {
+            try self.varDeclaration();
+        } else {
+            try self.statement();
+        }
+    }
+
+    fn varDeclaration(self: *Compiler) !void {
+        const global = try self.parseVariable("Expect variable name.");
+        if (try self.match(.Assign)) {
+            try self.expression();
+        } else {
+            try self.emitOpCode(.Null);
+        }
+        try self.expectLineEnd();
+        try self.defineVariable(global);
+    }
+
+    fn defineVariable(self: *Compiler, global: [3]u8) !void {
+        try self.emitOpCode(.DefineGlobal);
+        try self.emitByte(global[0]);
+        try self.emitByte(global[1]);
+        try self.emitByte(global[2]);
+    }
+
+    fn parseVariable(self: *Compiler, message: []const u8) ![3]u8 {
+        try self.consume(.Identifier, message);
+        return try self.identifierConstant(&self.parser.previous);
+    }
+
+    fn identifierConstant(self: *Compiler, name: *Token) ![3]u8 {
+        const start = name.start;
+        const end = name.start + name.length;
+        const slice = name.source[start..end];
+        const obj = try copyStaticString(self.vm, slice);
+        return try self.makeConstant(wrapString(obj));
     }
 
     fn statement(self: *Compiler) !void {
@@ -120,6 +158,12 @@ pub const Compiler = struct {
         } else {
             try self.expressionStatement();
         }
+    }
+
+    fn printStatement(self: *Compiler) !void {
+        try self.expression();
+        try self.expectLineEnd();
+        try self.emitOpCode(.Print);
     }
 
     fn expressionStatement(self: *Compiler) !void {
@@ -136,29 +180,25 @@ pub const Compiler = struct {
         try self.currentChunk().writeConstant(self.gpa, value, self.parser.previous.line);
     }
 
-    fn makeConstant(self: *Compiler, value: Value) !usize {
-        const constant = try self.currentChunk().addConstant(self.gpa, value);
-        if (constant > std.math.maxInt(u8)) {
-            return self.errorAtPrevious("Too many constants in one chunk");
-        }
-        return constant;
+    fn makeConstant(self: *Compiler, value: Value) ![3]u8 {
+        return try self.currentChunk().addConstant(self.gpa, value);
     }
 
     fn currentChunk(self: *Compiler) *Chunk {
         return self.compiling_chunk;
     }
 
-    fn emitBytes(self: *Compiler, first: OpCode, second: u8) void {
-        self.emitOpCode(first);
-        self.emitByte(second);
+    fn emitBytes(self: *Compiler, first: OpCode, second: u8) !void {
+        try self.emitOpCode(first);
+        try self.emitByte(second);
     }
 
-    fn emitOpByte(self: *Compiler, op_byte: OpByte) void {
-        self.currentChunk().write(self.gpa, op_byte, self.parser.previous.line);
+    fn emitOpByte(self: *Compiler, op_byte: OpByte) !void {
+        try self.currentChunk().write(self.gpa, op_byte, self.parser.previous.line);
     }
 
-    fn emitByte(self: *Compiler, byte: u8) void {
-        self.currentChunk().write(self.gpa, OpByte{ .Byte = byte }, self.parser.previous.line);
+    fn emitByte(self: *Compiler, byte: u8) !void {
+        try self.currentChunk().write(self.gpa, OpByte{ .Byte = byte }, self.parser.previous.line);
     }
 
     fn emitOpCode(self: *Compiler, op_code: OpCode) !void {
@@ -274,19 +314,19 @@ fn string(compiler: *Compiler) !void {
     const start = compiler.parser.previous.start + 1;
     const end = start + compiler.parser.previous.length - 2;
     const slice = compiler.parser.previous.source[start..end];
-    const hash = std.hash.Wyhash.hash(0, slice);
-
-    const interned = compiler.vm.findString(slice, hash);
-
-    const obj = interned orelse try allocateStaticString(compiler.vm, slice, hash);
-
-    try compiler.emitConstant(wrapString(obj));
+    try compiler.emitConstant(wrapString(try copyStaticString(compiler.vm, slice)));
 }
 
-fn printStatement(compiler: *Compiler) !void {
-    try compiler.expression();
-    try compiler.expectLineEnd();
-    try compiler.emitOpCode(.Print);
+fn variable(compiler: *Compiler) !void {
+    try namedVariable(compiler);
+}
+
+fn namedVariable(compiler: *Compiler) !void {
+    const arg = try compiler.identifierConstant(&compiler.parser.previous);
+    try compiler.emitOpCode(.GetGlobal);
+    try compiler.emitByte(arg[0]);
+    try compiler.emitByte(arg[1]);
+    try compiler.emitByte(arg[2]);
 }
 
 const ParseRule = struct {
@@ -320,7 +360,7 @@ fn initRules() [token_count]ParseRule {
             .True => .{ .prefix = literal, .infix = null, .precedence = null },
             .False => .{ .prefix = literal, .infix = null, .precedence = null },
             .Null => .{ .prefix = literal, .infix = null, .precedence = null },
-            .Identifier => .{ .prefix = null, .infix = null, .precedence = null },
+            .Identifier => .{ .prefix = variable, .infix = null, .precedence = null },
             .Bang => .{ .prefix = unary, .infix = null, .precedence = null },
             .Lt => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
             .LtOrEq => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
@@ -352,6 +392,7 @@ fn initRules() [token_count]ParseRule {
             .LeftShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
             .RightShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
             .Print => .{ .prefix = null, .infix = null, .precedence = null },
+            .Let => .{ .prefix = null, .infix = null, .precedence = null },
             .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
     }
