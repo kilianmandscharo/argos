@@ -22,6 +22,7 @@ pub const OpCode = enum(u8) {
     Pop,
     DefineGlobal,
     GetGlobal,
+    SetGlobal,
 };
 
 pub const OpByte = union(enum) {
@@ -89,19 +90,7 @@ pub const Chunk = struct {
             std.debug.print("{d:4} ", .{self.lines.items[offset]});
         }
         switch (@as(OpCode, @enumFromInt(self.code.items[offset]))) {
-            .Return => {
-                return simpleInstruction("OP_RETURN", offset);
-            },
-            .Constant => {
-                const constant = bytesToIndex(
-                    self.code.items[offset + 1],
-                    self.code.items[offset + 2],
-                    self.code.items[offset + 3],
-                );
-                const value = self.constants.items[constant];
-                std.debug.print("OP_CONSTANT{d:4} '{f}'\n", .{ constant, value });
-                return offset + 4;
-            },
+            .Return => return simpleInstruction("OP_RETURN", offset),
             .Add => return simpleInstruction("OP_ADD", offset),
             .Subtract => return simpleInstruction("OP_SUBTRACT", offset),
             .Multiply => return simpleInstruction("OP_MULTIPLY", offset),
@@ -116,26 +105,10 @@ pub const Chunk = struct {
             .Equal => return simpleInstruction("OP_EQUAL", offset),
             .Print => return simpleInstruction("OP_PRINT", offset),
             .Pop => return simpleInstruction("OP_POP", offset),
-            .DefineGlobal => {
-                const constant = bytesToIndex(
-                    self.code.items[offset + 1],
-                    self.code.items[offset + 2],
-                    self.code.items[offset + 3],
-                );
-                const value = self.constants.items[constant];
-                std.debug.print("OP_DEFINE_GLOBAL{d:4} '{f}'\n", .{ constant, value });
-                return offset + 4;
-            },
-            .GetGlobal => {
-                const constant = bytesToIndex(
-                    self.code.items[offset + 1],
-                    self.code.items[offset + 2],
-                    self.code.items[offset + 3],
-                );
-                const value = self.constants.items[constant];
-                std.debug.print("OP_GET_GLOBAL{d:4} '{f}'\n", .{ constant, value });
-                return offset + 4;
-            },
+            .DefineGlobal => return indexInstruction(self, "OP_DEFINE_GLOBAL", offset),
+            .Constant => return indexInstruction(self, "OP_CONSTANT", offset),
+            .GetGlobal => return indexInstruction(self, "OP_GET_GLOBAL", offset),
+            .SetGlobal => return indexInstruction(self, "OP_SET_GLOBAL", offset),
         }
     }
 };
@@ -155,4 +128,15 @@ pub inline fn bytesToIndex(first: u8, second: u8, third: u8) usize {
 fn simpleInstruction(name: []const u8, offset: usize) usize {
     std.debug.print("{s}\n", .{name});
     return offset + 1;
+}
+
+fn indexInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
+    const constant = bytesToIndex(
+        chunk.code.items[offset + 1],
+        chunk.code.items[offset + 2],
+        chunk.code.items[offset + 3],
+    );
+    const value = chunk.constants.items[constant];
+    std.debug.print("{s:<18}{d:4} '{f}'\n", .{ name, constant, value });
+    return offset + 4;
 }

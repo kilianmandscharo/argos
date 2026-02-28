@@ -76,9 +76,13 @@ pub const Compiler = struct {
         self.scanner = Scanner.init(source);
         self.compiling_chunk = chunk;
         try self.advance();
+        var has_errors = false;
         while (!try self.match(.Eof)) {
-            self.declaration() catch {};
+            self.declaration() catch {
+                has_errors = true;
+            };
         }
+        if (has_errors) return error.CompileError;
         try self.endCompiler();
     }
 
@@ -90,17 +94,22 @@ pub const Compiler = struct {
         try self.advance();
 
         if (getRule(self.parser.previous.type).prefix) |prefixFn| {
-            try prefixFn(self);
+            const can_assign = @intFromEnum(precedence) < @intFromEnum(Precedence.Assign);
+            try prefixFn(self, can_assign);
+
+            while (@intFromEnum(precedence) < getRulePrecedenceValue(self.parser.current.type)) {
+                try self.advance();
+                if (self.parser.current.type == .Eof) return;
+                if (getRule(self.parser.previous.type).infix) |infixFn| {
+                    try infixFn(self);
+                }
+            }
+
+            if (!can_assign and try self.match(.Assign)) {
+                return self.errorAtPrevious("Invalid assignment target.");
+            }
         } else {
             return self.errorAtPrevious("Expect expression.");
-        }
-
-        while (@intFromEnum(precedence) < getRulePrecedenceValue(self.parser.current.type)) {
-            try self.advance();
-            if (self.parser.current.type == .Eof) return;
-            if (getRule(self.parser.previous.type).infix) |infixFn| {
-                try infixFn(self);
-            }
         }
     }
 
@@ -134,9 +143,7 @@ pub const Compiler = struct {
 
     fn defineVariable(self: *Compiler, global: [3]u8) !void {
         try self.emitOpCode(.DefineGlobal);
-        try self.emitByte(global[0]);
-        try self.emitByte(global[1]);
-        try self.emitByte(global[2]);
+        try self.emitIndex(global);
     }
 
     fn parseVariable(self: *Compiler, message: []const u8) ![3]u8 {
@@ -199,6 +206,12 @@ pub const Compiler = struct {
 
     fn emitByte(self: *Compiler, byte: u8) !void {
         try self.currentChunk().write(self.gpa, OpByte{ .Byte = byte }, self.parser.previous.line);
+    }
+
+    fn emitIndex(self: *Compiler, bytes: [3]u8) !void {
+        try self.emitByte(bytes[0]);
+        try self.emitByte(bytes[1]);
+        try self.emitByte(bytes[2]);
     }
 
     fn emitOpCode(self: *Compiler, op_code: OpCode) !void {
@@ -276,12 +289,14 @@ fn binary(compiler: *Compiler) !void {
     }
 }
 
-fn grouping(compiler: *Compiler) !void {
+fn grouping(compiler: *Compiler, can_assign: bool) !void {
+    _ = can_assign;
     try compiler.expression();
     try compiler.consume(.RParen, "Expect ')' after expression");
 }
 
-fn unary(compiler: *Compiler) !void {
+fn unary(compiler: *Compiler, can_assign: bool) !void {
+    _ = can_assign;
     const operator_type = compiler.parser.previous.type;
     try compiler.parsePrecedence(.Prefix);
     switch (operator_type) {
@@ -291,17 +306,20 @@ fn unary(compiler: *Compiler) !void {
     }
 }
 
-fn float(compiler: *Compiler) !void {
+fn float(compiler: *Compiler, can_assign: bool) !void {
+    _ = can_assign;
     const value = try std.fmt.parseFloat(f64, compiler.parser.previous.toString());
     try compiler.emitConstant(wrapFloat(value));
 }
 
-fn integer(compiler: *Compiler) !void {
+fn integer(compiler: *Compiler, can_assign: bool) !void {
+    _ = can_assign;
     const value = try std.fmt.parseInt(i64, compiler.parser.previous.toString(), 10);
     try compiler.emitConstant(wrapInt(value));
 }
 
-fn literal(compiler: *Compiler) !void {
+fn literal(compiler: *Compiler, can_assign: bool) !void {
+    _ = can_assign;
     switch (compiler.parser.previous.type) {
         .False => try compiler.emitOpCode(.False),
         .Null => try compiler.emitOpCode(.Null),
@@ -310,27 +328,32 @@ fn literal(compiler: *Compiler) !void {
     }
 }
 
-fn string(compiler: *Compiler) !void {
+fn string(compiler: *Compiler, can_assign: bool) !void {
+    _ = can_assign;
     const start = compiler.parser.previous.start + 1;
     const end = start + compiler.parser.previous.length - 2;
     const slice = compiler.parser.previous.source[start..end];
     try compiler.emitConstant(wrapString(try copyStaticString(compiler.vm, slice)));
 }
 
-fn variable(compiler: *Compiler) !void {
-    try namedVariable(compiler);
+fn variable(compiler: *Compiler, can_assign: bool) !void {
+    try namedVariable(compiler, can_assign);
 }
 
-fn namedVariable(compiler: *Compiler) !void {
+fn namedVariable(compiler: *Compiler, can_assign: bool) !void {
     const arg = try compiler.identifierConstant(&compiler.parser.previous);
-    try compiler.emitOpCode(.GetGlobal);
-    try compiler.emitByte(arg[0]);
-    try compiler.emitByte(arg[1]);
-    try compiler.emitByte(arg[2]);
+    if (can_assign and try compiler.match(.Assign)) {
+        try compiler.expression();
+        try compiler.emitOpCode(.SetGlobal);
+        try compiler.emitIndex(arg);
+    } else {
+        try compiler.emitOpCode(.GetGlobal);
+        try compiler.emitIndex(arg);
+    }
 }
 
 const ParseRule = struct {
-    prefix: ?*const fn (compiler: *Compiler) anyerror!void,
+    prefix: ?*const fn (compiler: *Compiler, can_assign: bool) anyerror!void,
     infix: ?*const fn (compiler: *Compiler) anyerror!void,
     precedence: ?Precedence,
 };

@@ -31,6 +31,16 @@ const DEBUG_PRINT_CODE = true;
 const DEBUG_TRACE_EXECUTION = true;
 const STACK_MAX = 256;
 
+const GlobalContext = struct {
+    pub fn hash(_: @This(), key: *ObjString) u64 {
+        return key.hash;
+    }
+
+    pub fn eql(_: @This(), a: *ObjString, b: *ObjString) bool {
+        return a == b;
+    }
+};
+
 const StringContext = struct {
     pub fn hash(_: @This(), key: *ObjString) u64 {
         return key.hash;
@@ -215,6 +225,14 @@ pub const VirtualMachine = struct {
                     const name = self.readString();
                     if (self.globals.get(name)) |value| {
                         self.push(value);
+                    } else {
+                        return self.runtimeError("Undefined variable '{s}'", .{name.chars});
+                    }
+                },
+                .SetGlobal => {
+                    const name = self.readString();
+                    if (self.globals.getPtr(name)) |val_ptr| {
+                        val_ptr.* = self.peek(0);
                     } else {
                         return self.runtimeError("Undefined variable '{s}'", .{name.chars});
                     }
