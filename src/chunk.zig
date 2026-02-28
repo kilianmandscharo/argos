@@ -23,6 +23,8 @@ pub const OpCode = enum(u8) {
     DefineGlobal,
     GetGlobal,
     SetGlobal,
+    GetLocal,
+    SetLocal,
 };
 
 pub const OpByte = union(enum) {
@@ -62,16 +64,17 @@ pub const Chunk = struct {
     }
 
     pub fn writeConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value, line: usize) !void {
-        const bytes = try self.addConstant(gpa, value);
+        const constant = try self.addConstant(gpa, value);
+        const bytes = indexToBytes(constant);
         try self.write(gpa, OpByte{ .Op = .Constant }, line);
         try self.write(gpa, OpByte{ .Byte = bytes[0] }, line);
         try self.write(gpa, OpByte{ .Byte = bytes[1] }, line);
         try self.write(gpa, OpByte{ .Byte = bytes[2] }, line);
     }
 
-    pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value) ![3]u8 {
+    pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value) !usize {
         try self.constants.append(gpa, value);
-        return indexToBytes(self.constants.items.len - 1);
+        return self.constants.items.len - 1;
     }
 
     pub fn disassemble(self: *Chunk) void {
@@ -105,10 +108,12 @@ pub const Chunk = struct {
             .Equal => return simpleInstruction("OP_EQUAL", offset),
             .Print => return simpleInstruction("OP_PRINT", offset),
             .Pop => return simpleInstruction("OP_POP", offset),
-            .DefineGlobal => return indexInstruction(self, "OP_DEFINE_GLOBAL", offset),
-            .Constant => return indexInstruction(self, "OP_CONSTANT", offset),
-            .GetGlobal => return indexInstruction(self, "OP_GET_GLOBAL", offset),
-            .SetGlobal => return indexInstruction(self, "OP_SET_GLOBAL", offset),
+            .DefineGlobal => return constantInstruction(self, "OP_DEFINE_GLOBAL", offset),
+            .Constant => return constantInstruction(self, "OP_CONSTANT", offset),
+            .GetGlobal => return constantInstruction(self, "OP_GET_GLOBAL", offset),
+            .SetGlobal => return constantInstruction(self, "OP_SET_GLOBAL", offset),
+            .GetLocal => return localInstruction(self, "OP_GET_LOCAL", offset),
+            .SetLocal => return localInstruction(self, "OP_SET_LOCAL", offset),
         }
     }
 };
@@ -130,7 +135,7 @@ fn simpleInstruction(name: []const u8, offset: usize) usize {
     return offset + 1;
 }
 
-fn indexInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
+fn constantInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
     const constant = bytesToIndex(
         chunk.code.items[offset + 1],
         chunk.code.items[offset + 2],
@@ -138,5 +143,15 @@ fn indexInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
     );
     const value = chunk.constants.items[constant];
     std.debug.print("{s:<18}{d:4} '{f}'\n", .{ name, constant, value });
+    return offset + 4;
+}
+
+fn localInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
+    const index = bytesToIndex(
+        chunk.code.items[offset + 1],
+        chunk.code.items[offset + 2],
+        chunk.code.items[offset + 3],
+    );
+    std.debug.print("{s:<18}{d:4}\n", .{ name, index });
     return offset + 4;
 }

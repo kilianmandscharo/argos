@@ -21,6 +21,7 @@ const wrapString = value_module.wrapObj;
 const Chunk = chunk_module.Chunk;
 const OpCode = chunk_module.OpCode;
 const OpByte = chunk_module.OpByte;
+const indexToBytes = chunk_module.indexToBytes;
 
 const Token = scanner.Token;
 const TokenType = scanner.TokenType;
@@ -51,6 +52,14 @@ pub const Compiler = struct {
     compiling_chunk: *Chunk,
     gpa: std.mem.Allocator,
     vm: *VirtualMachine,
+    locals: [std.math.maxInt(u8) + 1]Local,
+    local_count: u32,
+    scope_depth: u32,
+
+    const Local = struct {
+        name: Token,
+        depth: ?u32,
+    };
 
     const Parser = struct {
         current: Token,
@@ -69,6 +78,9 @@ pub const Compiler = struct {
             .gpa = gpa,
             .compiling_chunk = undefined,
             .vm = vm,
+            .locals = undefined,
+            .scope_depth = 0,
+            .local_count = 0,
         };
     }
 
@@ -76,13 +88,11 @@ pub const Compiler = struct {
         self.scanner = Scanner.init(source);
         self.compiling_chunk = chunk;
         try self.advance();
-        var has_errors = false;
+        // var has_errors = false;
         while (!try self.match(.Eof)) {
-            self.declaration() catch {
-                has_errors = true;
-            };
+            try self.declaration();
         }
-        if (has_errors) return error.CompileError;
+        // if (has_errors) return error.CompileError;
         try self.endCompiler();
     }
 
@@ -141,17 +151,59 @@ pub const Compiler = struct {
         try self.defineVariable(global);
     }
 
-    fn defineVariable(self: *Compiler, global: [3]u8) !void {
+    fn defineVariable(self: *Compiler, global: usize) !void {
+        if (self.scope_depth > 0) {
+            self.markInitialized();
+            return;
+        }
         try self.emitOpCode(.DefineGlobal);
         try self.emitIndex(global);
     }
 
-    fn parseVariable(self: *Compiler, message: []const u8) ![3]u8 {
+    fn markInitialized(self: *Compiler) void {
+        self.locals[self.local_count - 1].depth = self.scope_depth;
+    }
+
+    fn parseVariable(self: *Compiler, message: []const u8) !usize {
         try self.consume(.Identifier, message);
+
+        try self.declareVariable();
+        if (self.scope_depth > 0) return 0;
+
         return try self.identifierConstant(&self.parser.previous);
     }
 
-    fn identifierConstant(self: *Compiler, name: *Token) ![3]u8 {
+    fn declareVariable(self: *Compiler) !void {
+        if (self.scope_depth == 0) return;
+        var name = self.parser.previous;
+
+        if (self.local_count > 0) {
+            var i = self.local_count;
+            while (i > 0) : (i -= 1) {
+                var local = self.locals[i - 1];
+                if (local.depth != null and local.depth.? < self.scope_depth) {
+                    return;
+                }
+                if (Compiler.identifiersEqual(&name, &local.name)) {
+                    return self.errorAtPrevious("Already a variable with this name in this scope.");
+                }
+            }
+        }
+
+        try self.addLocal(name);
+    }
+
+    fn addLocal(self: *Compiler, name: Token) !void {
+        if (self.local_count == std.math.maxInt(u8) + 1) {
+            return self.errorAtPrevious("Too many local variables in block.");
+        }
+        const local = &self.locals[self.local_count];
+        self.local_count += 1;
+        local.name = name;
+        local.depth = null;
+    }
+
+    fn identifierConstant(self: *Compiler, name: *Token) !usize {
         const start = name.start;
         const end = name.start + name.length;
         const slice = name.source[start..end];
@@ -162,9 +214,64 @@ pub const Compiler = struct {
     fn statement(self: *Compiler) !void {
         if (try self.match(.Print)) {
             try printStatement(self);
+        } else if (try self.match(.LBrace)) {
+            self.beginScope();
+            try self.block();
+            try self.endScope();
         } else {
             try self.expressionStatement();
         }
+    }
+
+    fn chopNewlines(self: *Compiler) !void {
+        while (self.check(.NewLine)) {
+            try self.advance();
+        }
+    }
+
+    fn block(self: *Compiler) anyerror!void {
+        try self.chopNewlines();
+        while (!self.check(.RBrace) and !self.check(.Eof)) {
+            try self.declaration();
+        }
+        try self.consume(.RBrace, "Expect '}' after block.");
+    }
+
+    fn beginScope(self: *Compiler) void {
+        self.scope_depth += 1;
+    }
+
+    fn endScope(self: *Compiler) !void {
+        self.scope_depth -= 1;
+        while (self.local_count > 0 and
+            self.locals[self.local_count - 1].depth != null and
+            self.locals[self.local_count - 1].depth.? > self.scope_depth)
+        {
+            try self.emitOpCode(.Pop);
+            self.local_count -= 1;
+        }
+    }
+
+    fn resolveLocal(self: *Compiler, name: *Token) !?usize {
+        if (self.local_count == 0) return null;
+        var i = self.local_count;
+        while (i > 0) : (i -= 1) {
+            const local = &self.locals[i - 1];
+            if (Compiler.identifiersEqual(name, &local.name)) {
+                if (local.depth == null) {
+                    return self.errorAtPrevious("Can't read local variable in its own initializer.");
+                }
+                return i - 1;
+            }
+        }
+        return null;
+    }
+
+    fn identifiersEqual(a: *Token, b: *Token) bool {
+        const a_string = a.toString();
+        const b_string = b.toString();
+        if (a_string.len != b_string.len) return false;
+        return std.mem.eql(u8, a_string, b_string);
     }
 
     fn printStatement(self: *Compiler) !void {
@@ -187,7 +294,7 @@ pub const Compiler = struct {
         try self.currentChunk().writeConstant(self.gpa, value, self.parser.previous.line);
     }
 
-    fn makeConstant(self: *Compiler, value: Value) ![3]u8 {
+    fn makeConstant(self: *Compiler, value: Value) !usize {
         return try self.currentChunk().addConstant(self.gpa, value);
     }
 
@@ -208,7 +315,8 @@ pub const Compiler = struct {
         try self.currentChunk().write(self.gpa, OpByte{ .Byte = byte }, self.parser.previous.line);
     }
 
-    fn emitIndex(self: *Compiler, bytes: [3]u8) !void {
+    fn emitIndex(self: *Compiler, index: usize) !void {
+        const bytes = indexToBytes(index);
         try self.emitByte(bytes[0]);
         try self.emitByte(bytes[1]);
         try self.emitByte(bytes[2]);
@@ -337,18 +445,34 @@ fn string(compiler: *Compiler, can_assign: bool) !void {
 }
 
 fn variable(compiler: *Compiler, can_assign: bool) !void {
-    try namedVariable(compiler, can_assign);
+    var name = compiler.parser.previous;
+    try namedVariable(compiler, &name, can_assign);
 }
 
-fn namedVariable(compiler: *Compiler, can_assign: bool) !void {
-    const arg = try compiler.identifierConstant(&compiler.parser.previous);
+fn namedVariable(compiler: *Compiler, name: *Token, can_assign: bool) !void {
+    var getOp: OpCode = undefined;
+    var setOp: OpCode = undefined;
+
+    const arg = try compiler.resolveLocal(name);
+    var arg_value: usize = undefined;
+
+    if (arg) |val| {
+        getOp = .GetLocal;
+        setOp = .SetLocal;
+        arg_value = val;
+    } else {
+        arg_value = try compiler.identifierConstant(name);
+        getOp = .GetGlobal;
+        setOp = .SetGlobal;
+    }
+
     if (can_assign and try compiler.match(.Assign)) {
         try compiler.expression();
-        try compiler.emitOpCode(.SetGlobal);
-        try compiler.emitIndex(arg);
+        try compiler.emitOpCode(setOp);
+        try compiler.emitIndex(arg_value);
     } else {
-        try compiler.emitOpCode(.GetGlobal);
-        try compiler.emitIndex(arg);
+        try compiler.emitOpCode(getOp);
+        try compiler.emitIndex(arg_value);
     }
 }
 

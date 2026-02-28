@@ -140,6 +140,10 @@ pub const VirtualMachine = struct {
         return error.RuntimeError;
     }
 
+    fn readIndex(self: *VirtualMachine) usize {
+        return bytesToIndex(self.readByte(), self.readByte(), self.readByte());
+    }
+
     fn readConstant(self: *VirtualMachine) Value {
         const index = bytesToIndex(self.readByte(), self.readByte(), self.readByte());
         return self.chunk.constants.items[index];
@@ -236,6 +240,14 @@ pub const VirtualMachine = struct {
                     } else {
                         return self.runtimeError("Undefined variable '{s}'", .{name.chars});
                     }
+                },
+                .GetLocal => {
+                    const slot = self.readIndex();
+                    self.push(self.stack[slot]);
+                },
+                .SetLocal => {
+                    const slot = self.readIndex();
+                    self.stack[slot] = self.peek(0);
                 },
                 .Return => {
                     return .Ok;
