@@ -55,6 +55,7 @@ pub const TokenType = enum {
     Print,
     Assert,
     Let,
+    Match,
 
     Error,
 };
@@ -241,6 +242,7 @@ pub const Scanner = struct {
                 }
             },
             'l' => return self.checkKeyword(1, "et", .Let),
+            'm' => return self.checkKeyword(1, "atch", .Match),
             'p' => return self.checkKeyword(1, "rint", .Print),
             'o' => return self.checkKeyword(1, "r", .Or),
             'e' => return self.checkKeyword(1, "lse", .Else),

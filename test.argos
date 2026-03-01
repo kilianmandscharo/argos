@@ -1,1 +1,12 @@
-assert 5 == 4
+let a = "foo"
+
+match (a) {
+    "foo" -> {
+        print "foo"
+    }
+    "bar" -> print "bar"
+    "baz" -> print "baz"
+    else -> print "something else"
+}
+
+print "done"

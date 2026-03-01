@@ -26,6 +26,9 @@ pub const OpCode = enum(u8) {
     SetGlobal,
     GetLocal,
     SetLocal,
+    JumpIfFalse,
+    JumpIfNotEq,
+    Jump,
 };
 
 pub const OpByte = union(enum) {
@@ -66,7 +69,7 @@ pub const Chunk = struct {
 
     pub fn writeConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value, line: usize) !void {
         const constant = try self.addConstant(gpa, value);
-        const bytes = indexToBytes(constant);
+        const bytes = indexToU24(constant);
         try self.write(gpa, OpByte{ .Op = .Constant }, line);
         try self.write(gpa, OpByte{ .Byte = bytes[0] }, line);
         try self.write(gpa, OpByte{ .Byte = bytes[1] }, line);
@@ -114,13 +117,16 @@ pub const Chunk = struct {
             .Constant => return constantInstruction(self, "OP_CONSTANT", offset),
             .GetGlobal => return constantInstruction(self, "OP_GET_GLOBAL", offset),
             .SetGlobal => return constantInstruction(self, "OP_SET_GLOBAL", offset),
-            .GetLocal => return localInstruction(self, "OP_GET_LOCAL", offset),
-            .SetLocal => return localInstruction(self, "OP_SET_LOCAL", offset),
+            .GetLocal => return threeByteInstruction(self, "OP_GET_LOCAL", offset),
+            .SetLocal => return threeByteInstruction(self, "OP_SET_LOCAL", offset),
+            .JumpIfFalse => return twoByteInstruction(self, "OP_JUMP_IF_FALSE", offset),
+            .JumpIfNotEq => return twoByteInstruction(self, "OP_JUMP_IF_NOT_EQ", offset),
+            .Jump => return twoByteInstruction(self, "OP_JUMP", offset),
         }
     }
 };
 
-pub inline fn indexToBytes(index: usize) [3]u8 {
+pub inline fn indexToU24(index: usize) [3]u8 {
     return .{
         @intCast((index >> 16) & 0xFF),
         @intCast((index >> 8) & 0xFF),
@@ -128,8 +134,19 @@ pub inline fn indexToBytes(index: usize) [3]u8 {
     };
 }
 
-pub inline fn bytesToIndex(first: u8, second: u8, third: u8) usize {
+pub inline fn indexToU16(index: usize) [2]u8 {
+    return .{
+        @intCast((index >> 8) & 0xFF),
+        @intCast((index & 0xFF)),
+    };
+}
+
+pub inline fn u24ToIndex(first: u8, second: u8, third: u8) usize {
     return (@as(usize, @intCast(first)) << 16) | (@as(usize, @intCast(second)) << 8) | (@as(usize, @intCast(third)));
+}
+
+pub inline fn u16ToIndex(first: u8, second: u8) usize {
+    return (@as(usize, @intCast(first)) << 8) | (@as(usize, @intCast(second)));
 }
 
 fn simpleInstruction(name: []const u8, offset: usize) usize {
@@ -138,7 +155,7 @@ fn simpleInstruction(name: []const u8, offset: usize) usize {
 }
 
 fn constantInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
-    const constant = bytesToIndex(
+    const constant = u24ToIndex(
         chunk.code.items[offset + 1],
         chunk.code.items[offset + 2],
         chunk.code.items[offset + 3],
@@ -148,12 +165,21 @@ fn constantInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
     return offset + 4;
 }
 
-fn localInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
-    const index = bytesToIndex(
+fn threeByteInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
+    const index = u24ToIndex(
         chunk.code.items[offset + 1],
         chunk.code.items[offset + 2],
         chunk.code.items[offset + 3],
     );
     std.debug.print("{s:<18}{d:4}\n", .{ name, index });
     return offset + 4;
+}
+
+fn twoByteInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
+    const index = u16ToIndex(
+        chunk.code.items[offset + 1],
+        chunk.code.items[offset + 2],
+    );
+    std.debug.print("{s:<18}{d:4}\n", .{ name, index });
+    return offset + 3;
 }

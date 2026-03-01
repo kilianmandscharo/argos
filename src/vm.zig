@@ -17,7 +17,8 @@ const valueNull = value_module.valueNull;
 
 const OpCode = chunk_module.OpCode;
 const Chunk = chunk_module.Chunk;
-const bytesToIndex = chunk_module.bytesToIndex;
+const u24ToIndex = chunk_module.u24ToIndex;
+const u16ToIndex = chunk_module.u16ToIndex;
 
 const Compiler = compiler_module.Compiler;
 
@@ -140,13 +141,16 @@ pub const VirtualMachine = struct {
         return error.RuntimeError;
     }
 
-    fn readIndex(self: *VirtualMachine) usize {
-        return bytesToIndex(self.readByte(), self.readByte(), self.readByte());
+    fn readU24(self: *VirtualMachine) usize {
+        return u24ToIndex(self.readByte(), self.readByte(), self.readByte());
+    }
+
+    fn readU16(self: *VirtualMachine) usize {
+        return u16ToIndex(self.readByte(), self.readByte());
     }
 
     fn readConstant(self: *VirtualMachine) Value {
-        const index = bytesToIndex(self.readByte(), self.readByte(), self.readByte());
-        return self.chunk.constants.items[index];
+        return self.chunk.constants.items[self.readU24()];
     }
 
     fn readString(self: *VirtualMachine) *ObjString {
@@ -201,7 +205,7 @@ pub const VirtualMachine = struct {
                 .Equal => {
                     const b = self.pop();
                     const a = self.peek(0);
-                    self.swapInPlace(wrapBool(try isEqual(self, a, b)), 0);
+                    self.swapInPlace(wrapBool(try isEqual(a, b)), 0);
                 },
                 .Greater => {
                     const b = self.pop();
@@ -247,12 +251,26 @@ pub const VirtualMachine = struct {
                     }
                 },
                 .GetLocal => {
-                    const slot = self.readIndex();
+                    const slot = self.readU24();
                     self.push(self.stack[slot]);
                 },
                 .SetLocal => {
-                    const slot = self.readIndex();
+                    const slot = self.readU24();
                     self.stack[slot] = self.peek(0);
+                },
+                .JumpIfFalse => {
+                    const offset = self.readU16();
+                    if (isFalsey(self.peek(0))) self.ip += offset;
+                },
+                .JumpIfNotEq => {
+                    const offset = self.readU16();
+                    if (!try isEqual(self.pop(), self.peek(0))) {
+                        self.ip += offset;
+                    }
+                },
+                .Jump => {
+                    const offset = self.readU16();
+                    self.ip += offset;
                 },
                 .Return => {
                     return .Ok;
@@ -405,9 +423,9 @@ fn isFalsey(value: Value) bool {
     return value == .Null or (value == .Bool and !value.Bool);
 }
 
-fn isEqual(vm: *VirtualMachine, a: Value, b: Value) !bool {
+fn isEqual(a: Value, b: Value) !bool {
     if (std.meta.activeTag(a) != std.meta.activeTag(b)) {
-        return vm.runtimeError("Can't compare {s} and {s}", .{ a.getType(), b.getType() });
+        return false;
     }
     switch (a) {
         .Int => return a.Int == b.Int,

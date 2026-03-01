@@ -165,6 +165,69 @@ test "vm tests" {
             \\assert e == 12
             ,
         },
+        .{
+            .description = "match first branch",
+            .source =
+            \\let a = true
+            \\let b
+            \\
+            \\match (a) {
+            \\    true -> {
+            \\        b = 1
+            \\    }
+            \\    false -> {
+            \\        b = 2
+            \\    }
+            \\    else -> {
+            \\        b = 3
+            \\    }
+            \\}
+            \\
+            \\assert b == 1
+            ,
+        },
+        .{
+            .description = "match second branch",
+            .source =
+            \\let a = false
+            \\let b
+            \\
+            \\match (a) {
+            \\    true -> {
+            \\        b = 1
+            \\    }
+            \\    false -> {
+            \\        b = 2
+            \\    }
+            \\    else -> {
+            \\        b = 3
+            \\    }
+            \\}
+            \\
+            \\assert b == 2
+            ,
+        },
+        .{
+            .description = "match third branch",
+            .source =
+            \\let a = "foo"
+            \\let b
+            \\
+            \\match (a) {
+            \\    true -> {
+            \\        b = 1
+            \\    }
+            \\    false -> {
+            \\        b = 2
+            \\    }
+            \\    else -> {
+            \\        b = 3
+            \\    }
+            \\}
+            \\
+            \\assert b == 3
+            ,
+        },
     };
 
     try runTests(TestCase, "evaluate vm tests", &test_cases, run);

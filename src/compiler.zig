@@ -21,7 +21,8 @@ const wrapString = value_module.wrapObj;
 const Chunk = chunk_module.Chunk;
 const OpCode = chunk_module.OpCode;
 const OpByte = chunk_module.OpByte;
-const indexToBytes = chunk_module.indexToBytes;
+const indexToU24 = chunk_module.indexToU24;
+const indexToU16 = chunk_module.indexToU16;
 
 const Token = scanner.Token;
 const TokenType = scanner.TokenType;
@@ -217,6 +218,8 @@ pub const Compiler = struct {
             try printStatement(self);
         } else if (try self.match(.Assert)) {
             try assertStatement(self);
+        } else if (try self.match(.Match)) {
+            try matchStatement(self);
         } else if (try self.match(.LBrace)) {
             self.beginScope();
             try self.block();
@@ -224,6 +227,95 @@ pub const Compiler = struct {
         } else {
             try self.expressionStatement();
         }
+    }
+
+    // TODO: implement match without target
+    // with target:
+    // match (foo) {
+    //     "some" -> {},
+    //     "other" -> {},
+    //     else -> {},
+    // }
+    //
+    // with target one liner
+    // match (foo) false -> {}
+    //
+    // without target one liner:
+    // match bar == false -> {}
+    //
+    // without target:
+    // match {
+    //     foo == true -> {},
+    //     bar == true -> {},
+    //     else -> {},
+    // }
+    fn matchStatement(self: *Compiler) anyerror!void {
+        try self.consume(.LParen, "Expect '(' after 'match'");
+        try self.expression();
+        try self.consume(.RParen, "Expect ')' after match target");
+
+        if (!self.check(.LBrace)) {
+            try self.expression();
+            try self.consume(.Arrow, "Expect '->' after match expression");
+            const then_jump = try self.emitJump(.JumpIfNotEq);
+            try self.statement();
+            try self.patchJump(then_jump);
+            return;
+        }
+
+        try self.advance();
+        try self.consume(.NewLine, "Expect new line after '{' in match block");
+
+        var else_jumps: std.ArrayList(usize) = .{};
+        errdefer else_jumps.deinit(self.gpa);
+
+        while (!self.check(.Eof) and !self.check(.RBrace)) {
+            try self.chopNewlines();
+
+            if (self.check(.Else)) break;
+
+            try self.expression();
+            try self.consume(.Arrow, "Expect '->' after match expression");
+            const then_jump = try self.emitJump(.JumpIfNotEq);
+            try self.statement();
+            try else_jumps.append(self.gpa, try self.emitJump(.Jump));
+            try self.patchJump(then_jump);
+        }
+
+        if (self.check(.Else)) {
+            try self.advance();
+            try self.consume(.Arrow, "Expect '->' after else in match expression");
+            try self.statement();
+        }
+
+        for (else_jumps.items) |jump| {
+            try self.patchJump(jump);
+        }
+
+        try self.emitOpCode(.Pop);
+
+        try self.consume(.RBrace, "Expect '}' at the end of match block");
+        try self.consume(.NewLine, "Expect new line after match block");
+
+        else_jumps.deinit(self.gpa);
+    }
+
+    fn emitJump(self: *Compiler, instruction: OpCode) !usize {
+        try self.emitOpCode(instruction);
+        try self.emitByte(0xff);
+        try self.emitByte(0xff);
+        return self.currentChunk().code.items.len - 2;
+    }
+
+    fn patchJump(self: *Compiler, offset: usize) !void {
+        const chunk = self.currentChunk();
+        const jump = chunk.code.items.len - offset - 2;
+        if (jump > std.math.maxInt(u16)) {
+            return self.errorAtPrevious("Too much code to jump over.");
+        }
+        const bytes = indexToU16(jump);
+        chunk.code.items[offset] = bytes[0];
+        chunk.code.items[offset + 1] = bytes[1];
     }
 
     fn chopNewlines(self: *Compiler) !void {
@@ -325,7 +417,7 @@ pub const Compiler = struct {
     }
 
     fn emitIndex(self: *Compiler, index: usize) !void {
-        const bytes = indexToBytes(index);
+        const bytes = indexToU24(index);
         try self.emitByte(bytes[0]);
         try self.emitByte(bytes[1]);
         try self.emitByte(bytes[2]);
@@ -550,6 +642,7 @@ fn initRules() [token_count]ParseRule {
             .Print => .{ .prefix = null, .infix = null, .precedence = null },
             .Assert => .{ .prefix = null, .infix = null, .precedence = null },
             .Let => .{ .prefix = null, .infix = null, .precedence = null },
+            .Match => .{ .prefix = null, .infix = null, .precedence = null },
             .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
     }
