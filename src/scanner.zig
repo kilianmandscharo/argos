@@ -224,7 +224,7 @@ pub const Scanner = struct {
     }
 
     fn makeIdentifier(self: *Scanner) Token {
-        while (Scanner.isAlpha(self.peek()) or std.ascii.isDigit(self.peek())) {
+        while (!self.isAtEnd() and (Scanner.isAlpha(self.peek()) or std.ascii.isDigit(self.peek()))) {
             _ = self.advance();
         }
         return self.makeToken(self.identifierType());

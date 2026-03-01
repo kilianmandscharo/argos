@@ -119,9 +119,9 @@ pub const Chunk = struct {
             .SetGlobal => return constantInstruction(self, "OP_SET_GLOBAL", offset),
             .GetLocal => return threeByteInstruction(self, "OP_GET_LOCAL", offset),
             .SetLocal => return threeByteInstruction(self, "OP_SET_LOCAL", offset),
-            .JumpIfFalse => return twoByteInstruction(self, "OP_JUMP_IF_FALSE", offset),
-            .JumpIfNotEq => return twoByteInstruction(self, "OP_JUMP_IF_NOT_EQ", offset),
-            .Jump => return twoByteInstruction(self, "OP_JUMP", offset),
+            .JumpIfFalse => return jumpByteInstruction(self, "OP_JUMP_IF_FALSE", offset, 1),
+            .JumpIfNotEq => return jumpByteInstruction(self, "OP_JUMP_IF_NOT_EQ", offset, 1),
+            .Jump => return jumpByteInstruction(self, "OP_JUMP", offset, 1),
         }
     }
 };
@@ -175,11 +175,12 @@ fn threeByteInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
     return offset + 4;
 }
 
-fn twoByteInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
-    const index = u16ToIndex(
+fn jumpByteInstruction(chunk: *Chunk, name: []const u8, offset: usize, sign: i8) usize {
+    const jump = u16ToIndex(
         chunk.code.items[offset + 1],
         chunk.code.items[offset + 2],
     );
-    std.debug.print("{s:<18}{d:4}\n", .{ name, index });
+    const to = @as(i32, @intCast(offset)) + 3 + @as(i32, sign) * @as(i32, @intCast(jump));
+    std.debug.print("{s:<18}{d:4} -> {d}\n", .{ name, offset, to });
     return offset + 3;
 }

@@ -208,7 +208,7 @@ test "vm tests" {
             ,
         },
         .{
-            .description = "match third branch",
+            .description = "match else branch",
             .source =
             \\let a = "foo"
             \\let b
@@ -226,6 +226,24 @@ test "vm tests" {
             \\}
             \\
             \\assert b == 3
+            ,
+        },
+        .{
+            .description = "no match",
+            .source =
+            \\let a = "foo"
+            \\let b
+            \\
+            \\match (a) {
+            \\    true -> {
+            \\        b = 1
+            \\    }
+            \\    false -> {
+            \\        b = 2
+            \\    }
+            \\}
+            \\
+            \\assert b == null
             ,
         },
     };
