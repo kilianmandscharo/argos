@@ -133,6 +133,7 @@ pub const Compiler = struct {
     }
 
     fn declaration(self: *Compiler) !void {
+        try self.chopNewlines();
         if (try self.match(.Let)) {
             try self.varDeclaration();
         } else {
@@ -182,7 +183,7 @@ pub const Compiler = struct {
             while (i > 0) : (i -= 1) {
                 var local = self.locals[i - 1];
                 if (local.depth != null and local.depth.? < self.scope_depth) {
-                    return;
+                    break;
                 }
                 if (Compiler.identifiersEqual(&name, &local.name)) {
                     return self.errorAtPrevious("Already a variable with this name in this scope.");
@@ -232,11 +233,11 @@ pub const Compiler = struct {
     }
 
     fn block(self: *Compiler) anyerror!void {
-        try self.chopNewlines();
         while (!self.check(.RBrace) and !self.check(.Eof)) {
             try self.declaration();
         }
         try self.consume(.RBrace, "Expect '}' after block.");
+        try self.consume(.NewLine, "Expect '\n' after block.");
     }
 
     fn beginScope(self: *Compiler) void {

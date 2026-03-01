@@ -26,7 +26,44 @@ fn printError(comptime format: []const u8, args: anytype) void {
     printColor("\x1b[31m", format, args);
 }
 
-pub fn runTests(comptime T: type, name: []const u8, test_cases: []const T, run: fn (arena: std.mem.Allocator, test_case: T) anyerror!void) !void {
+pub fn runTests(comptime T: type, name: []const u8, test_cases: []const T, run: fn (test_case: T) anyerror!void) !void {
+    printHighlight("start {s} tests\n", .{name});
+
+    var success: usize = 0;
+    var failed: usize = 0;
+
+    for (test_cases) |test_case| {
+        std.debug.print("--- running '{s}' ---\n", .{test_case.description});
+
+        const result = run(test_case);
+
+        if (result) {
+            printSuccess("  > ", .{});
+            success += 1;
+        } else |err| {
+            printError("{any}\n", .{err});
+            printError("  > ", .{});
+            failed += 1;
+        }
+        std.debug.print("{s}\n", .{test_case.description});
+    }
+
+    if (failed == 0) {
+        printSuccess("    > {d} successful, {d} failed\n", .{ success, failed });
+    } else {
+        printError("    > {d} successful, {d} failed\n", .{
+            success,
+            failed,
+        });
+    }
+    std.debug.print("\n", .{});
+
+    if (failed > 0) {
+        return error.TestFailed;
+    }
+}
+
+pub fn runTestsWithArena(comptime T: type, name: []const u8, test_cases: []const T, run: fn (arena: std.mem.Allocator, test_case: T) anyerror!void) !void {
     printHighlight("start {s} tests\n", .{name});
 
     var success: usize = 0;

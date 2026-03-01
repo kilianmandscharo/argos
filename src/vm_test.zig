@@ -34,14 +34,138 @@ test "vm tests" {
 
     const test_cases = [_]TestCase{
         .{
-            .description = "global variable assignment",
-            .input =
+            .description = "global variable delcaration",
+            .source =
             \\let a = 6
             \\let b = 7
             \\let c = a + b
+            \\assert c == 13
+            ,
+        },
+        .{
+            .description = "global variable assignment",
+            .source =
+            \\let a = 6
+            \\let b = 7
+            \\a = 2
+            \\b = 4
+            \\let c = a + b
+            \\assert c == 6
+            ,
+        },
+        .{
+            .description = "local variable declaration",
+            .source =
+            \\let a = 6
+            \\
+            \\{
+            \\    let b = 7
+            \\    a = a + b
+            \\}
+            \\
+            \\assert a == 13
+            ,
+        },
+        .{
+            .description = "local variable assignment",
+            .source =
+            \\let a = 6
+            \\
+            \\{
+            \\    let b = 7
+            \\    b = 5
+            \\    a = a + b
+            \\}
+            \\
+            \\assert a == 11
+            ,
+        },
+        .{
+            .description = "local variable declaration nested",
+            .source =
+            \\let a = 6
+            \\
+            \\{
+            \\    let b = 7
+            \\    a = a + b
+            \\
+            \\    {
+            \\        let c = 7
+            \\        a = a + c
+            \\    }
+            \\}
+            \\
+            \\assert a == 20
+            ,
+        },
+        .{
+            .description = "local variable assignment nested",
+            .source =
+            \\let a = 6
+            \\
+            \\{
+            \\    let b = 7
+            \\    a = a + b
+            \\
+            \\    {
+            \\        let c = 7
+            \\        c = 2
+            \\        b = 2
+            \\        a = a + b + c
+            \\    }
+            \\}
+            \\
+            \\assert a == 17
+            ,
+        },
+        .{
+            .description = "shadowing",
+            .source =
+            \\let a = 6
+            \\
+            \\{
+            \\    let a = 10
+            \\    let b = 10
+            \\    a = a + b
+            \\}
+            \\
+            \\assert a == 6
+            ,
+        },
+        .{
+            .description = "shadowing nested",
+            .source =
+            \\let a = 6
+            \\let d = 6
+            \\let e = 6
+            \\
+            \\{
+            \\    let a = 10
+            \\    let b = 10
+            \\    a = 9
+            \\    b = 9
+            \\
+            \\    {
+            \\        let a = 3
+            \\        let b = 3
+            \\        let c = 3
+            \\        a = 2
+            \\        b = 2
+            \\        c = 2
+            \\        a = a + b + c
+            \\        e = e + a
+            \\    }
+            \\
+            \\    a = a + b
+            \\    d = a + b
+            \\}
+            \\
+            \\assert a == 6
+            \\assert d == 27
+            \\assert e == 12
             ,
         },
     };
 
-    try runTests(TestCase, "evaluate memory leaks", &test_cases, run);
+    try runTests(TestCase, "evaluate vm tests", &test_cases, run);
 }

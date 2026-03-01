@@ -119,7 +119,7 @@ pub const Scanner = struct {
     }
 
     pub fn isAtEnd(self: *Scanner) bool {
-        return self.current == self.source.len - 1;
+        return self.current >= self.source.len;
     }
 
     pub fn match(self: *Scanner, expected: u8) bool {
@@ -134,6 +134,7 @@ pub const Scanner = struct {
     }
 
     fn peek(self: *Scanner) u8 {
+        if (self.isAtEnd()) return '0';
         return self.source[self.current];
     }
 
@@ -208,7 +209,7 @@ pub const Scanner = struct {
     }
 
     fn makeNumber(self: *Scanner) Token {
-        while (std.ascii.isDigit(self.peek())) {
+        while (std.ascii.isDigit(self.peek()) and !self.isAtEnd()) {
             _ = self.advance();
         }
         if (self.peek() != '.') return self.makeToken(.Int);
