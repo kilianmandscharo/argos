@@ -53,6 +53,7 @@ pub const TokenType = enum {
     LeftShift,
     RightShift,
     Print,
+    Assert,
     Let,
 
     Error,
@@ -229,7 +230,15 @@ pub const Scanner = struct {
 
     fn identifierType(self: *Scanner) TokenType {
         switch (self.source[self.start]) {
-            'a' => return self.checkKeyword(1, "nd", .And),
+            'a' => {
+                if (self.current - self.start > 1) {
+                    switch (self.source[self.start + 1]) {
+                        'n' => return self.checkKeyword(2, "d", .And),
+                        's' => return self.checkKeyword(2, "sert", .Assert),
+                        else => return .Identifier,
+                    }
+                }
+            },
             'l' => return self.checkKeyword(1, "et", .Let),
             'p' => return self.checkKeyword(1, "rint", .Print),
             'o' => return self.checkKeyword(1, "r", .Or),

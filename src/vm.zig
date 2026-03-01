@@ -217,6 +217,11 @@ pub const VirtualMachine = struct {
                     const value = self.pop();
                     std.debug.print("{f}\n", .{value});
                 },
+                .Assert => {
+                    const value = self.pop();
+                    if (value != .Bool) return self.runtimeError("Expected Boolean, got {s}", .{value.getType()});
+                    if (!value.Bool) return self.runtimeError("Assertion failed", .{});
+                },
                 .Pop => {
                     _ = self.pop();
                 },

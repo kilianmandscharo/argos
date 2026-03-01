@@ -214,6 +214,8 @@ pub const Compiler = struct {
     fn statement(self: *Compiler) !void {
         if (try self.match(.Print)) {
             try printStatement(self);
+        } else if (try self.match(.Assert)) {
+            try assertStatement(self);
         } else if (try self.match(.LBrace)) {
             self.beginScope();
             try self.block();
@@ -278,6 +280,12 @@ pub const Compiler = struct {
         try self.expression();
         try self.expectLineEnd();
         try self.emitOpCode(.Print);
+    }
+
+    fn assertStatement(self: *Compiler) !void {
+        try self.expression();
+        try self.expectLineEnd();
+        try self.emitOpCode(.Assert);
     }
 
     fn expressionStatement(self: *Compiler) !void {
@@ -539,6 +547,7 @@ fn initRules() [token_count]ParseRule {
             .LeftShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
             .RightShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
             .Print => .{ .prefix = null, .infix = null, .precedence = null },
+            .Assert => .{ .prefix = null, .infix = null, .precedence = null },
             .Let => .{ .prefix = null, .infix = null, .precedence = null },
             .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
