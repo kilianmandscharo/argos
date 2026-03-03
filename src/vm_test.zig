@@ -363,6 +363,62 @@ test "vm tests" {
             \\assert a == 5
             ,
         },
+        .{
+            .description = "logical and true",
+            .source =
+            \\let a = true and true
+            \\
+            \\assert a == true
+            ,
+        },
+        .{
+            .description = "logical and false",
+            .source =
+            \\let a = false and true
+            \\
+            \\assert a == false
+            ,
+        },
+        .{
+            .description = "logical and false on right hand side",
+            .source =
+            \\let a = true and false
+            \\
+            \\assert a == false
+            ,
+        },
+        .{
+            .description = "logical or false",
+            .source =
+            \\let a = false or false
+            \\
+            \\assert a == false
+            ,
+        },
+        .{
+            .description = "logical or true both",
+            .source =
+            \\let a = true or true
+            \\
+            \\assert a == true
+            ,
+        },
+        .{
+            .description = "logical or true left",
+            .source =
+            \\let a = true or false
+            \\
+            \\assert a == true
+            ,
+        },
+        .{
+            .description = "logical or true right",
+            .source =
+            \\let a = false or true
+            \\
+            \\assert a == true
+            ,
+        },
     };
 
     try runTests(TestCase, "evaluate vm tests", &test_cases, run);

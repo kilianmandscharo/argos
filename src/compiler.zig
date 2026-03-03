@@ -229,26 +229,6 @@ pub const Compiler = struct {
         }
     }
 
-    // TODO: implement match without target
-    // with target:
-    // match (foo) {
-    //     "some" -> {},
-    //     "other" -> {},
-    //     else -> {},
-    // }
-    //
-    // with target one liner
-    // match (foo) false -> {}
-    //
-    // without target one liner:
-    // match bar == false -> {}
-    //
-    // without target:
-    // match {
-    //     foo == true -> {},
-    //     bar == true -> {},
-    //     else -> {},
-    // }
     fn matchStatement(self: *Compiler) anyerror!void {
         var has_target = false;
 
@@ -266,9 +246,12 @@ pub const Compiler = struct {
             try self.consume(.Arrow, "Expect '->' after match expression");
 
             const then_jump = try self.emitJump(instruction);
-
             try self.statement();
             try self.patchJump(then_jump);
+            try self.emitOpCode(.Pop);
+
+            if (has_target) try self.emitOpCode(.Pop);
+
             return;
         }
 
@@ -285,10 +268,13 @@ pub const Compiler = struct {
 
             try self.expression();
             try self.consume(.Arrow, "Expect '->' after match expression");
+
             const then_jump = try self.emitJump(instruction);
+            try self.emitOpCode(.Pop);
             try self.statement();
             try else_jumps.append(self.gpa, try self.emitJump(.Jump));
             try self.patchJump(then_jump);
+            try self.emitOpCode(.Pop);
         }
 
         // TODO: what if the else branch is not the last?
@@ -587,6 +573,24 @@ fn namedVariable(compiler: *Compiler, name: *Token, can_assign: bool) !void {
     }
 }
 
+fn and_(compiler: *Compiler) !void {
+    const end_jump = try compiler.emitJump(.JumpIfFalse);
+    try compiler.emitOpCode(.Pop);
+    try compiler.parsePrecedence(.LogicalAnd);
+    try compiler.patchJump(end_jump);
+}
+
+fn or_(compiler: *Compiler) !void {
+    const else_jump = try compiler.emitJump(.JumpIfFalse);
+    const end_jump = try compiler.emitJump(.Jump);
+
+    try compiler.patchJump(else_jump);
+    try compiler.emitOpCode(.Pop);
+
+    try compiler.parsePrecedence(.LogicalOr);
+    try compiler.patchJump(end_jump);
+}
+
 const ParseRule = struct {
     prefix: ?*const fn (compiler: *Compiler, can_assign: bool) anyerror!void,
     infix: ?*const fn (compiler: *Compiler) anyerror!void,
@@ -641,8 +645,8 @@ fn initRules() [token_count]ParseRule {
             .Arrow => .{ .prefix = null, .infix = null, .precedence = null },
             .NewLine => .{ .prefix = null, .infix = null, .precedence = null },
             .Eof => .{ .prefix = null, .infix = null, .precedence = null },
-            .And => .{ .prefix = null, .infix = null, .precedence = .LogicalAnd },
-            .Or => .{ .prefix = null, .infix = null, .precedence = .LogicalOr },
+            .And => .{ .prefix = null, .infix = and_, .precedence = .LogicalAnd },
+            .Or => .{ .prefix = null, .infix = or_, .precedence = .LogicalOr },
             .Pipe => .{ .prefix = null, .infix = null, .precedence = .BitwiseOr },
             .Ampersand => .{ .prefix = null, .infix = null, .precedence = .BitwiseAnd },
             .Caret => .{ .prefix = null, .infix = null, .precedence = .BitwiseXor },

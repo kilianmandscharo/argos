@@ -260,11 +260,11 @@ pub const VirtualMachine = struct {
                 },
                 .JumpIfFalse => {
                     const offset = self.readU16();
-                    if (isFalsey(self.pop())) self.ip += offset;
+                    if (isFalsey(self.peek(0))) self.ip += offset;
                 },
                 .JumpIfNotEq => {
                     const offset = self.readU16();
-                    if (!try isEqual(self.pop(), self.peek(0))) {
+                    if (!try isEqual(self.peek(1), self.peek(0))) {
                         self.ip += offset;
                     }
                 },
