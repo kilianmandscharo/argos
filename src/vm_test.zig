@@ -166,6 +166,26 @@ test "vm tests" {
             ,
         },
         .{
+            .description = "match one liner true",
+            .source =
+            \\let a = 5
+            \\
+            \\match (a) 5 -> a = 1
+            \\
+            \\assert a == 1
+            ,
+        },
+        .{
+            .description = "match one liner false",
+            .source =
+            \\let a = 5
+            \\
+            \\match (a) 4 -> a = 1
+            \\
+            \\assert a == 5
+            ,
+        },
+        .{
             .description = "match first branch",
             .source =
             \\let a = true
@@ -244,6 +264,103 @@ test "vm tests" {
             \\}
             \\
             \\assert b == null
+            ,
+        },
+        .{
+            .description = "match one liner no target true",
+            .source =
+            \\let a = 5
+            \\
+            \\match true -> a = 1
+            \\
+            \\assert a == 1
+            ,
+        },
+        .{
+            .description = "match one liner no target false",
+            .source =
+            \\let a = 5
+            \\
+            \\match false -> a = 1
+            \\
+            \\assert a == 5
+            ,
+        },
+        .{
+            .description = "match first branch no target",
+            .source =
+            \\let a = 5
+            \\
+            \\match {
+            \\    5 < 10 -> {
+            \\        a = 1
+            \\    }
+            \\    3 < 11 -> {
+            \\        a = 2
+            \\    }
+            \\    else -> {
+            \\        a = 3
+            \\    }
+            \\}
+            \\
+            \\assert a == 1
+            ,
+        },
+        .{
+            .description = "match second branch no target",
+            .source =
+            \\let a = 5
+            \\
+            \\match {
+            \\    5 > 10 -> {
+            \\        a = 1
+            \\    }
+            \\    3 < 11 -> {
+            \\        a = 2
+            \\    }
+            \\    else -> {
+            \\        a = 3
+            \\    }
+            \\}
+            \\
+            \\assert a == 2
+            ,
+        },
+        .{
+            .description = "match else branch",
+            .source =
+            \\let a = 5
+            \\
+            \\match {
+            \\    5 > 10 -> {
+            \\        a = 1
+            \\    }
+            \\    3 > 11 -> {
+            \\        a = 2
+            \\    }
+            \\    else -> {
+            \\        a = 3
+            \\    }
+            \\}
+            \\
+            \\assert a == 3
+            ,
+        },
+        .{
+            .description = "no match",
+            .source =
+            \\let a = 5
+            \\
+            \\match {
+            \\    5 > 10 -> {
+            \\        a = 1
+            \\    }
+            \\    3 > 11 -> {
+            \\        a = 2
+            \\    }
+            \\}
+            \\
+            \\assert a == 5
             ,
         },
     };

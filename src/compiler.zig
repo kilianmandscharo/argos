@@ -250,14 +250,23 @@ pub const Compiler = struct {
     //     else -> {},
     // }
     fn matchStatement(self: *Compiler) anyerror!void {
-        try self.consume(.LParen, "Expect '(' after 'match'");
-        try self.expression();
-        try self.consume(.RParen, "Expect ')' after match target");
+        var has_target = false;
+
+        if (self.check(.LParen)) {
+            has_target = true;
+            try self.advance();
+            try self.expression();
+            try self.consume(.RParen, "Expect ')' after match target");
+        }
+
+        const instruction: OpCode = if (has_target) .JumpIfNotEq else .JumpIfFalse;
 
         if (!self.check(.LBrace)) {
             try self.expression();
             try self.consume(.Arrow, "Expect '->' after match expression");
-            const then_jump = try self.emitJump(.JumpIfNotEq);
+
+            const then_jump = try self.emitJump(instruction);
+
             try self.statement();
             try self.patchJump(then_jump);
             return;
@@ -276,12 +285,13 @@ pub const Compiler = struct {
 
             try self.expression();
             try self.consume(.Arrow, "Expect '->' after match expression");
-            const then_jump = try self.emitJump(.JumpIfNotEq);
+            const then_jump = try self.emitJump(instruction);
             try self.statement();
             try else_jumps.append(self.gpa, try self.emitJump(.Jump));
             try self.patchJump(then_jump);
         }
 
+        // TODO: what if the else branch is not the last?
         if (self.check(.Else)) {
             try self.advance();
             try self.consume(.Arrow, "Expect '->' after else in match expression");
@@ -292,7 +302,7 @@ pub const Compiler = struct {
             try self.patchJump(jump);
         }
 
-        try self.emitOpCode(.Pop);
+        if (has_target) try self.emitOpCode(.Pop);
 
         try self.consume(.RBrace, "Expect '}' at the end of match block");
         try self.consume(.NewLine, "Expect new line after match block");
