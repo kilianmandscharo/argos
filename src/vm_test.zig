@@ -419,6 +419,21 @@ test "vm tests" {
             \\assert a == true
             ,
         },
+        .{
+            .description = "while loop",
+            .source =
+            \\let a = 10
+            \\let b = 0
+            \\
+            \\while (a > 0) {
+            \\    a = a - 1
+            \\    b = b + 1
+            \\}
+            \\
+            \\assert a == 0
+            \\assert b == 10
+            ,
+        },
     };
 
     try runTests(TestCase, "evaluate vm tests", &test_cases, run);

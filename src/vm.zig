@@ -272,6 +272,10 @@ pub const VirtualMachine = struct {
                     const offset = self.readU16();
                     self.ip += offset;
                 },
+                .Loop => {
+                    const offset = self.readU16();
+                    self.ip -= offset;
+                },
                 .Return => {
                     return .Ok;
                 },

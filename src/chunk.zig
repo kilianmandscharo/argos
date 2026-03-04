@@ -29,6 +29,7 @@ pub const OpCode = enum(u8) {
     JumpIfFalse,
     JumpIfNotEq,
     Jump,
+    Loop,
 };
 
 pub const OpByte = union(enum) {
@@ -122,6 +123,7 @@ pub const Chunk = struct {
             .JumpIfFalse => return jumpByteInstruction(self, "OP_JUMP_IF_FALSE", offset, 1),
             .JumpIfNotEq => return jumpByteInstruction(self, "OP_JUMP_IF_NOT_EQ", offset, 1),
             .Jump => return jumpByteInstruction(self, "OP_JUMP", offset, 1),
+            .Loop => return jumpByteInstruction(self, "OP_JUMP", offset, -1),
         }
     }
 };

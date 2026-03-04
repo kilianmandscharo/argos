@@ -159,7 +159,7 @@ pub const Compiler = struct {
             return;
         }
         try self.emitOpCode(.DefineGlobal);
-        try self.emitIndex(global);
+        try self.emitU24(global);
     }
 
     fn markInitialized(self: *Compiler) void {
@@ -220,6 +220,8 @@ pub const Compiler = struct {
             try assertStatement(self);
         } else if (try self.match(.Match)) {
             try matchStatement(self);
+        } else if (try self.match(.While)) {
+            try whileStatement(self);
         } else if (try self.match(.LBrace)) {
             self.beginScope();
             try self.block();
@@ -227,6 +229,32 @@ pub const Compiler = struct {
         } else {
             try self.expressionStatement();
         }
+    }
+
+    fn whileStatement(self: *Compiler) anyerror!void {
+        const loop_start = self.currentChunk().code.items.len;
+        try self.consume(.LParen, "Expect '(' after 'while'");
+        try self.expression();
+        try self.consume(.RParen, "Expect ')' after condition");
+
+        const exit_jump = try self.emitJump(.JumpIfFalse);
+        try self.emitOpCode(.Pop);
+        try self.statement();
+        try self.emitLoop(loop_start);
+
+        try self.patchJump(exit_jump);
+        try self.emitOpCode(.Pop);
+    }
+
+    fn emitLoop(self: *Compiler, loop_start: usize) !void {
+        try self.emitOpCode(.Loop);
+
+        const offset = self.currentChunk().code.items.len - loop_start + 2;
+        if (offset > std.math.maxInt(u16)) {
+            return self.errorAtPrevious("Loop body too large.");
+        }
+
+        try self.emitU16(offset);
     }
 
     fn matchStatement(self: *Compiler) anyerror!void {
@@ -412,11 +440,17 @@ pub const Compiler = struct {
         try self.currentChunk().write(self.gpa, OpByte{ .Byte = byte }, self.parser.previous.line);
     }
 
-    fn emitIndex(self: *Compiler, index: usize) !void {
+    fn emitU24(self: *Compiler, index: usize) !void {
         const bytes = indexToU24(index);
         try self.emitByte(bytes[0]);
         try self.emitByte(bytes[1]);
         try self.emitByte(bytes[2]);
+    }
+
+    fn emitU16(self: *Compiler, index: usize) !void {
+        const bytes = indexToU16(index);
+        try self.emitByte(bytes[0]);
+        try self.emitByte(bytes[1]);
     }
 
     fn emitOpCode(self: *Compiler, op_code: OpCode) !void {
@@ -566,10 +600,10 @@ fn namedVariable(compiler: *Compiler, name: *Token, can_assign: bool) !void {
     if (can_assign and try compiler.match(.Assign)) {
         try compiler.expression();
         try compiler.emitOpCode(setOp);
-        try compiler.emitIndex(arg_value);
+        try compiler.emitU24(arg_value);
     } else {
         try compiler.emitOpCode(getOp);
-        try compiler.emitIndex(arg_value);
+        try compiler.emitU24(arg_value);
     }
 }
 
@@ -657,6 +691,7 @@ fn initRules() [token_count]ParseRule {
             .Assert => .{ .prefix = null, .infix = null, .precedence = null },
             .Let => .{ .prefix = null, .infix = null, .precedence = null },
             .Match => .{ .prefix = null, .infix = null, .precedence = null },
+            .While => .{ .prefix = null, .infix = null, .precedence = null },
             .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
     }
