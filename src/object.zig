@@ -1,10 +1,13 @@
 const std = @import("std");
 const vm_module = @import("vm.zig");
+const chunk_module = @import("chunk.zig");
 
 const VirtualMachine = vm_module.VirtualMachine;
+const Chunk = chunk_module.Chunk;
 
 pub const ObjType = enum {
     String,
+    Function,
 };
 
 pub fn allocateObject(vm: *VirtualMachine, T: type) !*T {
@@ -22,6 +25,14 @@ pub fn allocateObject(vm: *VirtualMachine, T: type) !*T {
     vm.objects = &object.obj;
 
     return object;
+}
+
+pub fn allocateFunction(vm: *VirtualMachine) !*Obj {
+    const function = try allocateObject(vm, ObjFunction);
+    function.arity = 0;
+    function.name = null;
+    function.chunk = Chunk.init();
+    return function;
 }
 
 pub fn allocateString(vm: *VirtualMachine, chars: []const u8, hash: u64) !*Obj {
@@ -61,6 +72,10 @@ pub const Obj = struct {
                 const string = self.asString();
                 try string.format(writer);
             },
+            .Function => {
+                const function = self.asFunction();
+                try function.format(writer);
+            },
         }
     }
 
@@ -73,7 +88,16 @@ pub const Obj = struct {
                 }
                 gpa.destroy(string_obj);
             },
+            .Function => {
+                const function_obj = self.asFunction();
+                function_obj.chunk.deinit(gpa);
+                gpa.destroy(function_obj);
+            },
         }
+    }
+
+    pub fn asFunction(self: *@This()) *ObjFunction {
+        return @alignCast(@fieldParentPtr("obj", self));
     }
 
     pub fn asString(self: *@This()) *ObjString {
@@ -82,6 +106,10 @@ pub const Obj = struct {
 
     pub fn isString(self: *@This()) bool {
         return self.type == .String;
+    }
+
+    pub fn isFunction(self: *@This()) bool {
+        return self.type == .Function;
     }
 };
 
@@ -98,5 +126,21 @@ pub const ObjString = struct {
         writer: *std.Io.Writer,
     ) std.Io.Writer.Error!void {
         try writer.print("\"{s}\"", .{self.chars});
+    }
+};
+
+pub const ObjFunction = struct {
+    pub const KIND = ObjType.Function;
+
+    obj: Obj = undefined,
+    arity: i32,
+    chunk: Chunk,
+    name: ?*ObjString,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        try writer.print("<fn {s}>", .{self.name.chars});
     }
 };

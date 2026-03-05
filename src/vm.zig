@@ -28,8 +28,8 @@ const InterpretResult = enum {
     RuntimeError,
 };
 
-const DEBUG_PRINT_CODE = true;
-const DEBUG_TRACE_EXECUTION = true;
+const DEBUG_PRINT_CODE = false;
+const DEBUG_TRACE_EXECUTION = false;
 const STACK_MAX = 256;
 
 const GlobalContext = struct {

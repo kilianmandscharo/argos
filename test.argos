@@ -1,3 +1,7 @@
-for (0..3) |i| {
-    print i
+let x = 0
+
+for (0..1000000) |i| {
+    x = x + 1
 }
+
+print x

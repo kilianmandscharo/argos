@@ -410,10 +410,6 @@ pub const Compiler = struct {
 
     fn endScope(self: *Compiler) !void {
         self.scope_depth -= 1;
-        std.debug.print("scope depth: {d}\n", .{self.scope_depth});
-        for (0..self.local_count) |i| {
-            std.debug.print("{s} -> {?}\n", .{ self.locals[i].name.toString(), self.locals[i].depth });
-        }
         while (self.local_count > 0 and
             self.locals[self.local_count - 1].depth != null and
             self.locals[self.local_count - 1].depth.? > self.scope_depth)
