@@ -247,17 +247,6 @@ pub const Compiler = struct {
         try self.emitOpCode(.Pop);
     }
 
-    // for (0..10) |i| {
-    //     a = a + i
-    // }
-    // for (let i = 0; i < 10; i = i + 1) {
-    //     a = a + i
-    // }
-    // let i = 0
-    // while (i < 10) {
-    //     ...
-    //     i = i + 1
-    // }
     fn forStatement(self: *Compiler) anyerror!void {
         self.beginScope();
 
