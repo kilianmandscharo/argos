@@ -30,7 +30,6 @@ const Scanner = scanner.Scanner;
 
 const Precedence = enum(u8) {
     Lowest = 1,
-    Range,
     Assign,
     LogicalOr,
     LogicalAnd,
@@ -222,6 +221,8 @@ pub const Compiler = struct {
             try matchStatement(self);
         } else if (try self.match(.While)) {
             try whileStatement(self);
+        } else if (try self.match(.For)) {
+            try forStatement(self);
         } else if (try self.match(.LBrace)) {
             self.beginScope();
             try self.block();
@@ -244,6 +245,64 @@ pub const Compiler = struct {
 
         try self.patchJump(exit_jump);
         try self.emitOpCode(.Pop);
+    }
+
+    // for (0..10) |i| {
+    //     a = a + i
+    // }
+    // for (let i = 0; i < 10; i = i + 1) {
+    //     a = a + i
+    // }
+    // let i = 0
+    // while (i < 10) {
+    //     ...
+    //     i = i + 1
+    // }
+    fn forStatement(self: *Compiler) anyerror!void {
+        self.beginScope();
+
+        try self.consume(.LParen, "Expect '(' after 'for'");
+        try self.expression();
+        try self.consume(.DotDot, "Expect '..' after expression");
+        try self.expression();
+        try self.consume(.RParen, "Expect ')' after range");
+
+        try self.consume(.Pipe, "Expect '|' after loop range");
+        try self.consume(.Identifier, "Expect identifier in loop capture");
+        try self.declareVariable();
+        self.markInitialized();
+        try self.consume(.Pipe, "Expect '|' after variable capture");
+
+        const increment_var_index = self.local_count - 1;
+
+        // a dummy local for the right side of the range
+        try self.addLocal(.{
+            .source = "",
+            .type = .Identifier,
+            .start = 0,
+            .length = 0,
+            .line = 0,
+        });
+        self.markInitialized();
+
+        const loop_start = self.currentChunk().code.items.len;
+
+        const exit_jump = try self.emitJump(.JumpIfGreaterOrEq);
+        try self.statement();
+
+        try self.emitOpCode(.GetLocal);
+        try self.emitU24(increment_var_index);
+        try self.emitConstant(wrapInt(1));
+        try self.emitOpCode(.Add);
+        try self.emitOpCode(.SetLocal);
+        try self.emitU24(increment_var_index);
+        try self.emitOpCode(.Pop);
+
+        try self.emitLoop(loop_start);
+
+        try self.patchJump(exit_jump);
+
+        try self.endScope();
     }
 
     fn emitLoop(self: *Compiler, loop_start: usize) !void {
@@ -362,6 +421,10 @@ pub const Compiler = struct {
 
     fn endScope(self: *Compiler) !void {
         self.scope_depth -= 1;
+        std.debug.print("scope depth: {d}\n", .{self.scope_depth});
+        for (0..self.local_count) |i| {
+            std.debug.print("{s} -> {?}\n", .{ self.locals[i].name.toString(), self.locals[i].depth });
+        }
         while (self.local_count > 0 and
             self.locals[self.local_count - 1].depth != null and
             self.locals[self.local_count - 1].depth.? > self.scope_depth)
@@ -675,7 +738,7 @@ fn initRules() [token_count]ParseRule {
             .For => .{ .prefix = null, .infix = null, .precedence = null },
             .In => .{ .prefix = null, .infix = null, .precedence = null },
             .Dot => .{ .prefix = null, .infix = null, .precedence = .Index },
-            .DotDot => .{ .prefix = null, .infix = null, .precedence = .Range },
+            .DotDot => .{ .prefix = null, .infix = null, .precedence = null },
             .Arrow => .{ .prefix = null, .infix = null, .precedence = null },
             .NewLine => .{ .prefix = null, .infix = null, .precedence = null },
             .Eof => .{ .prefix = null, .infix = null, .precedence = null },

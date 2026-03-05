@@ -121,7 +121,10 @@ pub const VirtualMachine = struct {
 
     pub fn interpret(self: *VirtualMachine, chunk: *Chunk, source: []const u8) !InterpretResult {
         var compiler = Compiler.init(self, self.gpa);
-        try compiler.compile(chunk, source);
+        compiler.compile(chunk, source) catch |err| {
+            chunk.disassemble();
+            return err;
+        };
         self.chunk = chunk;
         if (comptime DEBUG_PRINT_CODE) chunk.disassemble();
         return try self.run();
@@ -210,12 +213,12 @@ pub const VirtualMachine = struct {
                 .Greater => {
                     const b = self.pop();
                     const a = self.peek(0);
-                    self.swapInPlace(try greater(self, a, b), 0);
+                    self.swapInPlace(wrapBool(try greater(self, a, b)), 0);
                 },
                 .Less => {
                     const b = self.pop();
                     const a = self.peek(0);
-                    self.swapInPlace(try less(self, a, b), 0);
+                    self.swapInPlace(wrapBool(try less(self, a, b)), 0);
                 },
                 .Print => {
                     const value = self.pop();
@@ -268,6 +271,12 @@ pub const VirtualMachine = struct {
                         self.ip += offset;
                     }
                 },
+                .JumpIfGreaterOrEq => {
+                    const offset = self.readU16();
+                    if (!try less(self, self.peek(1), self.peek(0))) {
+                        self.ip += offset;
+                    }
+                },
                 .Jump => {
                     const offset = self.readU16();
                     self.ip += offset;
@@ -284,19 +293,19 @@ pub const VirtualMachine = struct {
     }
 };
 
-fn greater(vm: *VirtualMachine, a: Value, b: Value) !Value {
+fn greater(vm: *VirtualMachine, a: Value, b: Value) !bool {
     switch (a) {
         .Int => |left| {
             switch (b) {
-                .Int => |right| return wrapBool(left > right),
-                .Float => |right| return wrapBool(@as(f64, @floatFromInt(left)) > right),
+                .Int => |right| return left > right,
+                .Float => |right| return @as(f64, @floatFromInt(left)) > right,
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
         .Float => |left| {
             switch (b) {
-                .Int => |right| return wrapBool(left > @as(f64, @floatFromInt(right))),
-                .Float => |right| return wrapBool(left > right),
+                .Int => |right| return left > @as(f64, @floatFromInt(right)),
+                .Float => |right| return left > right,
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
@@ -304,19 +313,19 @@ fn greater(vm: *VirtualMachine, a: Value, b: Value) !Value {
     }
 }
 
-fn less(vm: *VirtualMachine, a: Value, b: Value) !Value {
+fn less(vm: *VirtualMachine, a: Value, b: Value) !bool {
     switch (a) {
         .Int => |left| {
             switch (b) {
-                .Int => |right| return wrapBool(left < right),
-                .Float => |right| return wrapBool(@as(f64, @floatFromInt(left)) < right),
+                .Int => |right| return left < right,
+                .Float => |right| return @as(f64, @floatFromInt(left)) < right,
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
         .Float => |left| {
             switch (b) {
-                .Int => |right| return wrapBool(left < @as(f64, @floatFromInt(right))),
-                .Float => |right| return wrapBool(left < right),
+                .Int => |right| return left < @as(f64, @floatFromInt(right)),
+                .Float => |right| return left < right,
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
@@ -428,6 +437,7 @@ fn isFalsey(value: Value) bool {
 }
 
 fn isEqual(a: Value, b: Value) !bool {
+    // TODO: should we really return false for 3 == 3.0?
     if (std.meta.activeTag(a) != std.meta.activeTag(b)) {
         return false;
     }

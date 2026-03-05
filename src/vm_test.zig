@@ -434,6 +434,36 @@ test "vm tests" {
             \\assert b == 10
             ,
         },
+        .{
+            .description = "for loop",
+            .source =
+            \\let a = 0
+            \\let b = 0
+            \\
+            \\for (0..3) |i| {
+            \\    a = a + i
+            \\    let c = 1
+            \\    b = b + c
+            \\}
+            \\
+            \\assert a == 3
+            \\assert b == 3
+            ,
+        },
+        .{
+            .description = "for loop with vars as range",
+            .source =
+            \\let a = 0
+            \\let start = 0
+            \\let end = 3
+            \\
+            \\for (start..end) |i| {
+            \\    a = a + i
+            \\}
+            \\
+            \\assert a == 3
+            ,
+        },
     };
 
     try runTests(TestCase, "evaluate vm tests", &test_cases, run);

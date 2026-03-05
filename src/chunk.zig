@@ -28,6 +28,7 @@ pub const OpCode = enum(u8) {
     SetLocal,
     JumpIfFalse,
     JumpIfNotEq,
+    JumpIfGreaterOrEq,
     Jump,
     Loop,
 };
@@ -122,6 +123,7 @@ pub const Chunk = struct {
             .SetLocal => return threeByteInstruction(self, "OP_SET_LOCAL", offset),
             .JumpIfFalse => return jumpByteInstruction(self, "OP_JUMP_IF_FALSE", offset, 1),
             .JumpIfNotEq => return jumpByteInstruction(self, "OP_JUMP_IF_NOT_EQ", offset, 1),
+            .JumpIfGreaterOrEq => return jumpByteInstruction(self, "OP_JUMP_IF_GREATER_OR_EQ", offset, 1),
             .Jump => return jumpByteInstruction(self, "OP_JUMP", offset, 1),
             .Loop => return jumpByteInstruction(self, "OP_JUMP", offset, -1),
         }

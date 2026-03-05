@@ -214,7 +214,7 @@ pub const Scanner = struct {
         while (std.ascii.isDigit(self.peek()) and !self.isAtEnd()) {
             _ = self.advance();
         }
-        if (self.peek() != '.') return self.makeToken(.Int);
+        if (self.peek() != '.' or self.peekNext() == '.') return self.makeToken(.Int);
         if (std.ascii.isDigit(self.peekNext())) {
             _ = self.advance();
             while (std.ascii.isDigit(self.peek())) {

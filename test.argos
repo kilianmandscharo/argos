@@ -1,12 +1,3 @@
-let a = "foo"
-
-match (a) {
-    "foo" -> {
-        print "foo"
-    }
-    "bar" -> print "bar"
-    "baz" -> print "baz"
-    else -> print "something else"
+for (0..3) |i| {
+    print i
 }
-
-print "done"
