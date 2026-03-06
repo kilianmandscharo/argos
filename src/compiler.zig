@@ -57,7 +57,7 @@ const FunctionType = enum {
 
 pub const Compiler = struct {
     parser: Parser,
-    scanner: Scanner,
+    scanner: *Scanner,
     gpa: std.mem.Allocator,
     vm: *VirtualMachine,
     locals: [std.math.maxInt(u8) + 1]Local,
@@ -77,14 +77,14 @@ pub const Compiler = struct {
         had_error: bool,
     };
 
-    pub fn init(vm: *VirtualMachine, gpa: std.mem.Allocator, func_type: FunctionType) Compiler {
+    pub fn init(vm: *VirtualMachine, gpa: std.mem.Allocator, scanner_ptr: *Scanner, func_type: FunctionType) Compiler {
         var compiler = Compiler{
             .parser = Parser{
                 .current = undefined,
                 .previous = undefined,
                 .had_error = false,
             },
-            .scanner = undefined,
+            .scanner = scanner_ptr,
             .gpa = gpa,
             .vm = vm,
             .locals = undefined,
@@ -104,9 +104,8 @@ pub const Compiler = struct {
         return compiler;
     }
 
-    pub fn compile(self: *Compiler, source: []const u8) !*ObjFunction {
+    pub fn compile(self: *Compiler) !*ObjFunction {
         self.function = try allocateFunction(self.vm);
-        self.scanner = Scanner.init(source);
         try self.advance();
         // var has_errors = false;
         while (!try self.match(.Eof)) {
@@ -710,7 +709,7 @@ fn or_(compiler: *Compiler) !void {
 fn func(compiler: *Compiler, can_assign: bool) !void {
     _ = can_assign;
 
-    var new_compiler = Compiler.init(compiler.vm, compiler.gpa, .Function);
+    var new_compiler = Compiler.init(compiler.vm, compiler.gpa, compiler.scanner, .Function);
     new_compiler.beginScope();
 
     try new_compiler.consume(.LParen, "Expect '(' after function name.");

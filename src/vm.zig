@@ -3,6 +3,9 @@ const chunk_module = @import("chunk.zig");
 const value_module = @import("value.zig");
 const object_module = @import("object.zig");
 const compiler_module = @import("compiler.zig");
+const scanner_module = @import("scanner.zig");
+
+const Scanner = scanner_module.Scanner;
 
 const ObjString = object_module.ObjString;
 const ObjFunction = object_module.ObjFunction;
@@ -132,8 +135,10 @@ pub const VirtualMachine = struct {
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
-        var compiler = Compiler.init(self, self.gpa, .Script);
-        const function = try compiler.compile(source);
+        var scanner = Scanner.init(source);
+        var compiler = Compiler.init(self, self.gpa, &scanner, .Script);
+
+        const function = try compiler.compile();
 
         self.push(wrapObj(&function.obj));
         const frame = &self.frames[self.frame_count];
