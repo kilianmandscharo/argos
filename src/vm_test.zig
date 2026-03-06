@@ -24,10 +24,7 @@ test "vm tests" {
             var vm = VirtualMachine.init(allocator);
             defer vm.deinit();
 
-            var chunk = Chunk.init();
-            defer chunk.deinit(allocator);
-
-            const result = try vm.interpret(&chunk, test_case.source);
+            const result = try vm.interpret(test_case.source);
             std.debug.print("{}\n", .{result});
         }
     }.runTest;

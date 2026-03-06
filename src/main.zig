@@ -52,10 +52,7 @@ pub fn main() !void {
     var vm = VirtualMachine.init(allocator);
     defer vm.deinit();
 
-    var chunk = Chunk.init();
-    defer chunk.deinit(allocator);
-
-    const result = try vm.interpret(&chunk, source);
+    const result = try vm.interpret(source);
     std.debug.print("{}\n", .{result});
 
     // if (std.os.argv.len == 1) {

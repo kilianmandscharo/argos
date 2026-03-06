@@ -27,7 +27,7 @@ pub fn allocateObject(vm: *VirtualMachine, T: type) !*T {
     return object;
 }
 
-pub fn allocateFunction(vm: *VirtualMachine) !*Obj {
+pub fn allocateFunction(vm: *VirtualMachine) !*ObjFunction {
     const function = try allocateObject(vm, ObjFunction);
     function.arity = 0;
     function.name = null;
@@ -141,6 +141,6 @@ pub const ObjFunction = struct {
         self: @This(),
         writer: *std.Io.Writer,
     ) std.Io.Writer.Error!void {
-        try writer.print("<fn {s}>", .{self.name.chars});
+        try writer.print("<fn {s}>", .{if (self.name) |name| name.chars else ""});
     }
 };

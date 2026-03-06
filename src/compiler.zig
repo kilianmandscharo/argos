@@ -9,6 +9,8 @@ const VirtualMachine = vm_module.VirtualMachine;
 
 const Obj = object_module.Obj;
 const ObjString = object_module.ObjString;
+const ObjFunction = object_module.ObjFunction;
+const allocateFunction = object_module.allocateFunction;
 const allocateStaticString = object_module.allocateStaticString;
 const copyStaticString = object_module.copyStaticString;
 
@@ -28,6 +30,8 @@ const Token = scanner.Token;
 const TokenType = scanner.TokenType;
 const Scanner = scanner.Scanner;
 
+const DEBUG_PRINT_CODE = false;
+
 const Precedence = enum(u8) {
     Lowest = 1,
     Assign,
@@ -46,15 +50,21 @@ const Precedence = enum(u8) {
     Index,
 };
 
+const FunctionType = enum {
+    Function,
+    Script,
+};
+
 pub const Compiler = struct {
     parser: Parser,
     scanner: Scanner,
-    compiling_chunk: *Chunk,
     gpa: std.mem.Allocator,
     vm: *VirtualMachine,
     locals: [std.math.maxInt(u8) + 1]Local,
     local_count: u32,
     scope_depth: u32,
+    function: *ObjFunction,
+    type: FunctionType,
 
     const Local = struct {
         name: Token,
@@ -67,8 +77,8 @@ pub const Compiler = struct {
         had_error: bool,
     };
 
-    pub fn init(vm: *VirtualMachine, gpa: std.mem.Allocator) Compiler {
-        return Compiler{
+    pub fn init(vm: *VirtualMachine, gpa: std.mem.Allocator, func_type: FunctionType) Compiler {
+        var compiler = Compiler{
             .parser = Parser{
                 .current = undefined,
                 .previous = undefined,
@@ -76,28 +86,48 @@ pub const Compiler = struct {
             },
             .scanner = undefined,
             .gpa = gpa,
-            .compiling_chunk = undefined,
             .vm = vm,
             .locals = undefined,
             .scope_depth = 0,
             .local_count = 0,
+            .function = undefined,
+            .type = func_type,
         };
+
+        const local = &compiler.locals[compiler.local_count];
+        compiler.local_count += 1;
+        local.depth = 0;
+        local.name.source = "";
+        local.name.start = 0;
+        local.name.length = 0;
+
+        return compiler;
     }
 
-    pub fn compile(self: *Compiler, chunk: *Chunk, source: []const u8) !void {
+    pub fn compile(self: *Compiler, source: []const u8) !*ObjFunction {
+        self.function = try allocateFunction(self.vm);
         self.scanner = Scanner.init(source);
-        self.compiling_chunk = chunk;
         try self.advance();
         // var has_errors = false;
         while (!try self.match(.Eof)) {
-            try self.declaration();
+            self.declaration() catch |err| {
+                self.currentChunk().disassemble("<error>");
+                return err;
+            };
         }
         // if (has_errors) return error.CompileError;
-        try self.endCompiler();
+        const function = try self.endCompiler();
+        return function;
     }
 
-    fn endCompiler(self: *Compiler) !void {
+    fn endCompiler(self: *Compiler) !*ObjFunction {
         try self.emitOpCode(.Return);
+        const function = self.function;
+        if (comptime DEBUG_PRINT_CODE) {
+            const name = if (self.function.name) |name| name.chars else "<script>";
+            self.currentChunk().disassemble(name);
+        }
+        return function;
     }
 
     fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
@@ -472,7 +502,7 @@ pub const Compiler = struct {
     }
 
     fn currentChunk(self: *Compiler) *Chunk {
-        return self.compiling_chunk;
+        return &self.function.chunk;
     }
 
     fn emitBytes(self: *Compiler, first: OpCode, second: u8) !void {

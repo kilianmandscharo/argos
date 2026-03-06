@@ -5,6 +5,7 @@ const object_module = @import("object.zig");
 const compiler_module = @import("compiler.zig");
 
 const ObjString = object_module.ObjString;
+const ObjFunction = object_module.ObjFunction;
 const Obj = object_module.Obj;
 const allocateString = object_module.allocateString;
 
@@ -30,7 +31,15 @@ const InterpretResult = enum {
 
 const DEBUG_PRINT_CODE = false;
 const DEBUG_TRACE_EXECUTION = false;
-const STACK_MAX = 256;
+
+const FRAME_MAX = 64;
+const STACK_MAX = std.math.maxInt(u8) * FRAME_MAX;
+
+const CallFrame = struct {
+    function: *ObjFunction,
+    ip: usize,
+    slot: usize,
+};
 
 const GlobalContext = struct {
     pub fn hash(_: @This(), key: *ObjString) u64 {
@@ -53,25 +62,27 @@ const StringContext = struct {
 };
 
 pub const VirtualMachine = struct {
-    chunk: *Chunk,
-    ip: usize,
+    gpa: std.mem.Allocator,
     stack: [STACK_MAX]Value,
     stack_top: usize,
-    gpa: std.mem.Allocator,
-    objects: ?*Obj,
+    frames: [FRAME_MAX]CallFrame,
+    frame_count: usize,
+    frame: *CallFrame,
     strings: std.HashMapUnmanaged(*ObjString, void, StringContext, 80),
     globals: std.HashMapUnmanaged(*ObjString, Value, StringContext, 80),
+    objects: ?*Obj,
 
     pub fn init(gpa: std.mem.Allocator) VirtualMachine {
         return VirtualMachine{
-            .chunk = undefined,
-            .ip = 0,
+            .gpa = gpa,
             .stack = undefined,
             .stack_top = 0,
-            .gpa = gpa,
-            .objects = null,
+            .frames = undefined,
+            .frame = undefined,
+            .frame_count = 0,
             .strings = .{},
             .globals = .{},
+            .objects = null,
         };
     }
 
@@ -99,6 +110,7 @@ pub const VirtualMachine = struct {
 
     fn resetStack(self: *VirtualMachine) void {
         self.stack_top = 0;
+        self.frame_count = 0;
     }
 
     fn push(self: *VirtualMachine, value: Value) void {
@@ -119,25 +131,30 @@ pub const VirtualMachine = struct {
         self.stack[self.stack_top - 1 - distance] = value;
     }
 
-    pub fn interpret(self: *VirtualMachine, chunk: *Chunk, source: []const u8) !InterpretResult {
-        var compiler = Compiler.init(self, self.gpa);
-        compiler.compile(chunk, source) catch |err| {
-            chunk.disassemble();
-            return err;
-        };
-        self.chunk = chunk;
-        if (comptime DEBUG_PRINT_CODE) chunk.disassemble();
+    pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
+        var compiler = Compiler.init(self, self.gpa, .Script);
+        const function = try compiler.compile(source);
+
+        self.push(wrapObj(&function.obj));
+        const frame = &self.frames[self.frame_count];
+        self.frame_count += 1;
+        frame.function = function;
+        frame.ip = 0;
+        frame.slot = 0;
+
         return try self.run();
     }
 
     pub inline fn readByte(self: *VirtualMachine) u8 {
-        const instruction = self.chunk.code.items[self.ip];
-        self.ip += 1;
+        const instruction = self.frame.function.chunk.code.items[self.frame.ip];
+        self.frame.ip += 1;
         return instruction;
     }
 
     fn runtimeError(self: *VirtualMachine, comptime format: []const u8, args: anytype) anyerror {
-        const line = self.chunk.lines.items[self.ip - 1];
+        const frame = self.frames[self.frame_count - 1];
+        const instruction = frame.ip - frame.function.chunk.code.items.len - 1;
+        const line = frame.function.chunk.lines.items[instruction];
         std.debug.print(format, args);
         std.debug.print("\n[line {d}] in script\n", .{line});
         self.resetStack();
@@ -153,7 +170,7 @@ pub const VirtualMachine = struct {
     }
 
     fn readConstant(self: *VirtualMachine) Value {
-        return self.chunk.constants.items[self.readU24()];
+        return self.frame.function.chunk.constants.items[self.readU24()];
     }
 
     fn readString(self: *VirtualMachine) *ObjString {
@@ -161,7 +178,17 @@ pub const VirtualMachine = struct {
         return constant.Obj.asString();
     }
 
+    inline fn getSlot(self: *VirtualMachine, slot: usize) Value {
+        return self.stack[self.frame.slot + slot];
+    }
+
+    inline fn setSlot(self: *VirtualMachine, slot: usize, value: Value) void {
+        self.stack[self.frame.slot + slot] = value;
+    }
+
     pub fn run(self: *VirtualMachine) !InterpretResult {
+        self.frame = &self.frames[self.frame_count - 1];
+
         while (true) {
             if (comptime DEBUG_TRACE_EXECUTION) {
                 std.debug.print("          ", .{});
@@ -169,7 +196,7 @@ pub const VirtualMachine = struct {
                     std.debug.print("[ {f} ]", .{self.stack[index]});
                 }
                 std.debug.print("\n", .{});
-                _ = self.chunk.disassembleInstruction(self.ip);
+                _ = self.frame.function.chunk.disassembleInstruction(self.frame.ip);
             }
             const instruction = self.readByte();
             switch (@as(OpCode, @enumFromInt(instruction))) {
@@ -255,35 +282,35 @@ pub const VirtualMachine = struct {
                 },
                 .GetLocal => {
                     const slot = self.readU24();
-                    self.push(self.stack[slot]);
+                    self.push(self.getSlot(slot));
                 },
                 .SetLocal => {
                     const slot = self.readU24();
-                    self.stack[slot] = self.peek(0);
+                    self.setSlot(slot, self.peek(0));
                 },
                 .JumpIfFalse => {
                     const offset = self.readU16();
-                    if (isFalsey(self.peek(0))) self.ip += offset;
+                    if (isFalsey(self.peek(0))) self.frame.ip += offset;
                 },
                 .JumpIfNotEq => {
                     const offset = self.readU16();
                     if (!try isEqual(self.peek(1), self.peek(0))) {
-                        self.ip += offset;
+                        self.frame.ip += offset;
                     }
                 },
                 .JumpIfGreaterOrEq => {
                     const offset = self.readU16();
                     if (!try less(self, self.peek(1), self.peek(0))) {
-                        self.ip += offset;
+                        self.frame.ip += offset;
                     }
                 },
                 .Jump => {
                     const offset = self.readU16();
-                    self.ip += offset;
+                    self.frame.ip += offset;
                 },
                 .Loop => {
                     const offset = self.readU16();
-                    self.ip -= offset;
+                    self.frame.ip -= offset;
                 },
                 .Return => {
                     return .Ok;

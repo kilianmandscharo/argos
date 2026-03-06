@@ -83,7 +83,8 @@ pub const Chunk = struct {
         return self.constants.items.len - 1;
     }
 
-    pub fn disassemble(self: *Chunk) void {
+    pub fn disassemble(self: *Chunk, name: []const u8) void {
+        std.debug.print("== {s} ==\n", .{name});
         var offset: usize = 0;
         while (offset < self.code.items.len) {
             offset = self.disassembleInstruction(offset);
