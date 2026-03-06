@@ -57,6 +57,7 @@ pub const TokenType = enum {
     Let,
     Match,
     While,
+    Fn,
 
     Error,
 };
@@ -256,6 +257,7 @@ pub const Scanner = struct {
                     switch (self.source[self.start + 1]) {
                         'o' => return self.checkKeyword(2, "r", .For),
                         'a' => return self.checkKeyword(2, "lse", .False),
+                        'n' => return self.checkKeyword(2, "", .Fn),
                         else => return .Identifier,
                     }
                 }

@@ -18,7 +18,7 @@ const Value = value_module.Value;
 const wrapInt = value_module.wrapInt;
 const wrapFloat = value_module.wrapFloat;
 const wrapBool = value_module.wrapBool;
-const wrapString = value_module.wrapObj;
+const wrapObj = value_module.wrapObj;
 
 const Chunk = chunk_module.Chunk;
 const OpCode = chunk_module.OpCode;
@@ -174,6 +174,9 @@ pub const Compiler = struct {
     fn varDeclaration(self: *Compiler) !void {
         const global = try self.parseVariable("Expect variable name.");
         if (try self.match(.Assign)) {
+            if (self.check(.Fn)) {
+                self.markInitialized();
+            }
             try self.expression();
         } else {
             try self.emitOpCode(.Null);
@@ -192,6 +195,7 @@ pub const Compiler = struct {
     }
 
     fn markInitialized(self: *Compiler) void {
+        if (self.scope_depth == 0) return;
         self.locals[self.local_count - 1].depth = self.scope_depth;
     }
 
@@ -239,7 +243,7 @@ pub const Compiler = struct {
         const end = name.start + name.length;
         const slice = name.source[start..end];
         const obj = try copyStaticString(self.vm, slice);
-        return try self.makeConstant(wrapString(obj));
+        return try self.makeConstant(wrapObj(obj));
     }
 
     fn statement(self: *Compiler) !void {
@@ -550,7 +554,7 @@ pub const Compiler = struct {
     }
 
     fn consume(self: *Compiler, expected: TokenType, message: []const u8) !void {
-        if (self.parser.current.type == expected) {
+        if (self.check(expected)) {
             try self.advance();
             return;
         }
@@ -650,7 +654,7 @@ fn string(compiler: *Compiler, can_assign: bool) !void {
     const start = compiler.parser.previous.start + 1;
     const end = start + compiler.parser.previous.length - 2;
     const slice = compiler.parser.previous.source[start..end];
-    try compiler.emitConstant(wrapString(try copyStaticString(compiler.vm, slice)));
+    try compiler.emitConstant(wrapObj(try copyStaticString(compiler.vm, slice)));
 }
 
 fn variable(compiler: *Compiler, can_assign: bool) !void {
@@ -701,6 +705,20 @@ fn or_(compiler: *Compiler) !void {
 
     try compiler.parsePrecedence(.LogicalOr);
     try compiler.patchJump(end_jump);
+}
+
+fn func(compiler: *Compiler, can_assign: bool) !void {
+    _ = can_assign;
+
+    var new_compiler = Compiler.init(compiler.vm, compiler.gpa, .Function);
+    new_compiler.beginScope();
+
+    try new_compiler.consume(.LParen, "Expect '(' after function name.");
+    try new_compiler.consume(.RParen, "Expect ')' after function parameters.");
+    try new_compiler.statement();
+
+    const function = try new_compiler.endCompiler();
+    try compiler.emitConstant(wrapObj(&function.obj));
 }
 
 const ParseRule = struct {
@@ -770,6 +788,7 @@ fn initRules() [token_count]ParseRule {
             .Let => .{ .prefix = null, .infix = null, .precedence = null },
             .Match => .{ .prefix = null, .infix = null, .precedence = null },
             .While => .{ .prefix = null, .infix = null, .precedence = null },
+            .Fn => .{ .prefix = func, .infix = null, .precedence = null },
             .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
     }
