@@ -118,6 +118,8 @@ pub const ObjString = struct {
 
     obj: Obj = undefined,
     chars: []const u8,
+    // TODO: allowing static strings means we need to keep the source code
+    // around for the full runtime, do we want that?
     static_lifetime: bool = false,
     hash: u64,
 

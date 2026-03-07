@@ -1,7 +1,5 @@
-let x = 0
-
-for (0..1000000) |i| {
-    x = x + 1
+let foo = fn () {
+    print "bar"
 }
 
-print x
+print foo

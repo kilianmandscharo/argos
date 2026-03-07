@@ -83,6 +83,7 @@ pub const Compiler = struct {
     scope_depth: u32,
     function: *ObjFunction,
     type: FunctionType,
+    current_var: ?Token,
 
     const Local = struct {
         name: Token,
@@ -94,7 +95,8 @@ pub const Compiler = struct {
         gpa: std.mem.Allocator,
         parser: *Parser,
         func_type: FunctionType,
-    ) Compiler {
+        current_var: ?Token,
+    ) !Compiler {
         var compiler = Compiler{
             .parser = parser,
             .gpa = gpa,
@@ -102,8 +104,9 @@ pub const Compiler = struct {
             .locals = undefined,
             .scope_depth = 0,
             .local_count = 0,
-            .function = undefined,
+            .function = try allocateFunction(vm),
             .type = func_type,
+            .current_var = null,
         };
 
         const local = &compiler.locals[compiler.local_count];
@@ -113,11 +116,20 @@ pub const Compiler = struct {
         local.name.start = 0;
         local.name.length = 0;
 
+        if (func_type != .Script) {
+            if (current_var) |curr| {
+                const start = curr.start;
+                const end = start + curr.length;
+                const slice = curr.source[start..end];
+                const obj = try copyStaticString(vm, slice);
+                compiler.function.name = obj.asString();
+            }
+        }
+
         return compiler;
     }
 
     pub fn compile(self: *Compiler) !*ObjFunction {
-        self.function = try allocateFunction(self.vm);
         try self.parser.advance();
         // TODO: we stop compilation on the first error, which makes sense for
         // degugging, but how to best handle?
@@ -196,6 +208,7 @@ pub const Compiler = struct {
     }
 
     fn defineVariable(self: *Compiler, global: usize) !void {
+        self.current_var = null;
         if (self.scope_depth > 0) {
             self.markInitialized();
             return;
@@ -211,6 +224,7 @@ pub const Compiler = struct {
 
     fn parseVariable(self: *Compiler, message: []const u8) !usize {
         try self.consume(.Identifier, message);
+        self.current_var = self.parser.previous;
 
         try self.declareVariable();
         if (self.scope_depth > 0) return 0;
@@ -711,16 +725,30 @@ fn logicalOr(compiler: *Compiler) !void {
 fn func(compiler: *Compiler, can_assign: bool) !void {
     _ = can_assign;
 
-    var new_compiler = Compiler.init(
+    var new_compiler = try Compiler.init(
         compiler.vm,
         compiler.gpa,
         compiler.parser,
         .Function,
+        compiler.current_var,
     );
 
     new_compiler.beginScope();
 
     try new_compiler.consume(.LParen, "Expect '(' after function name.");
+
+    if (!new_compiler.check(.RParen)) {
+        while (true) {
+            new_compiler.function.arity += 1;
+            if (new_compiler.function.arity > 255) {
+                return compiler.errorAtCurrent("Can't have more than 255 parameters.");
+            }
+            const constant = try new_compiler.parseVariable("Expect parameter name.");
+            try new_compiler.defineVariable(constant);
+            if (!try new_compiler.match(.Comma)) break;
+        }
+    }
+
     try new_compiler.consume(.RParen, "Expect ')' after function parameters.");
     try new_compiler.statement();
 
