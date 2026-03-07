@@ -24,8 +24,7 @@ test "vm tests" {
             var vm = VirtualMachine.init(allocator);
             defer vm.deinit();
 
-            const result = try vm.interpret(test_case.source);
-            std.debug.print("{}\n", .{result});
+            _ = vm.interpret(test_case.source);
         }
     }.runTest;
 

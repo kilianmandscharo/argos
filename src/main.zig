@@ -52,8 +52,7 @@ pub fn main() !void {
     var vm = VirtualMachine.init(allocator);
     defer vm.deinit();
 
-    const result = try vm.interpret(source);
-    std.debug.print("{}\n", .{result});
+    _ = vm.interpret(source);
 
     // if (std.os.argv.len == 1) {
     //     try repl(allocator);

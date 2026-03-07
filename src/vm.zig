@@ -36,8 +36,8 @@ const InterpretResult = enum {
 const DEBUG_PRINT_CODE = false;
 const DEBUG_TRACE_EXECUTION = false;
 
-const FRAME_MAX = 64;
-const STACK_MAX = std.math.maxInt(u8) * FRAME_MAX;
+const FRAMES_MAX = 64;
+const STACK_MAX = std.math.maxInt(u8) * FRAMES_MAX;
 
 const CallFrame = struct {
     function: *ObjFunction,
@@ -69,7 +69,7 @@ pub const VirtualMachine = struct {
     gpa: std.mem.Allocator,
     stack: [STACK_MAX]Value,
     stack_top: usize,
-    frames: [FRAME_MAX]CallFrame,
+    frames: [FRAMES_MAX]CallFrame,
     frame_count: usize,
     frame: *CallFrame,
     strings: std.HashMapUnmanaged(*ObjString, void, StringContext, 80),
@@ -135,21 +135,28 @@ pub const VirtualMachine = struct {
         self.stack[self.stack_top - 1 - distance] = value;
     }
 
-    pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
+    pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretResult {
         var scanner = Scanner.init(source);
         var parser = Parser.init(&scanner);
-        var compiler = try Compiler.init(self, self.gpa, &parser, .Script, null);
+        var compiler = Compiler.init(self, self.gpa, &parser, .Script, null) catch {
+            std.debug.print("Failed to init compiler.\n", .{});
+            return .CompileError;
+        };
 
-        const function = try compiler.compile();
+        const function = compiler.compile() catch {
+            std.debug.print("Compilation failed.\n", .{});
+            return .CompileError;
+        };
 
         self.push(wrapObj(&function.obj));
-        const frame = &self.frames[self.frame_count];
-        self.frame_count += 1;
-        frame.function = function;
-        frame.ip = 0;
-        frame.slot = 0;
+        self.call(function, 0) catch {
+            return .RuntimeError;
+        };
 
-        return try self.run();
+        _ = self.run() catch {
+            return .RuntimeError;
+        };
+        return .Ok;
     }
 
     pub inline fn readByte(self: *VirtualMachine) u8 {
@@ -159,11 +166,21 @@ pub const VirtualMachine = struct {
     }
 
     fn runtimeError(self: *VirtualMachine, comptime format: []const u8, args: anytype) anyerror {
-        const frame = self.frames[self.frame_count - 1];
-        const instruction = frame.ip - frame.function.chunk.code.items.len - 1;
-        const line = frame.function.chunk.lines.items[instruction];
         std.debug.print(format, args);
-        std.debug.print("\n[line {d}] in script\n", .{line});
+        std.debug.print("\n", .{});
+        var i: i32 = @as(i32, @intCast(self.frame_count)) - 1;
+        while (i >= 0) : (i -= 1) {
+            const frame = self.frames[@intCast(i)];
+            const function = frame.function;
+            const instruction = frame.ip - 1;
+            std.debug.print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
+            if (function.name) |name| {
+                std.debug.print("{s}()\n", .{name.chars});
+            } else {
+                std.debug.print("script\n", .{});
+            }
+        }
+
         self.resetStack();
         return error.RuntimeError;
     }
@@ -193,7 +210,28 @@ pub const VirtualMachine = struct {
         self.stack[self.frame.slot + slot] = value;
     }
 
-    pub fn run(self: *VirtualMachine) !InterpretResult {
+    fn callValue(self: *VirtualMachine, callee: Value, argCount: u8) !void {
+        if (!callee.isObjType(.Function)) {
+            return self.runtimeError("Can only call functions.", .{});
+        }
+        try self.call(callee.asObj().asFunction(), argCount);
+    }
+
+    fn call(self: *VirtualMachine, function: *ObjFunction, argCount: u8) !void {
+        if (argCount != function.arity) {
+            return self.runtimeError("Expected {d} arguments but got {d}", .{ function.arity, argCount });
+        }
+        if (self.frame_count == FRAMES_MAX) {
+            return self.runtimeError("Stack overflow.", .{});
+        }
+        const frame = &self.frames[self.frame_count];
+        self.frame_count += 1;
+        frame.function = function;
+        frame.ip = 0;
+        frame.slot = self.stack_top - argCount - 1;
+    }
+
+    pub fn run(self: *VirtualMachine) !void {
         self.frame = &self.frames[self.frame_count - 1];
 
         while (true) {
@@ -319,8 +357,13 @@ pub const VirtualMachine = struct {
                     const offset = self.readU16();
                     self.frame.ip -= offset;
                 },
+                .Call => {
+                    const arg_count = self.readByte();
+                    try self.callValue(self.peek(arg_count), arg_count);
+                    self.frame = &self.frames[self.frame_count - 1];
+                },
                 .Return => {
-                    return .Ok;
+                    return;
                 },
             }
         }

@@ -757,6 +757,27 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
     try compiler.emitConstant(wrapObj(&function.obj));
 }
 
+fn call(compiler: *Compiler) !void {
+    const arg_count = try argumentList(compiler);
+    try compiler.emitBytes(.Call, arg_count);
+}
+
+fn argumentList(compiler: *Compiler) !u8 {
+    var count: u8 = 0;
+    if (!compiler.check(.RParen)) {
+        while (true) {
+            if (count == 255) {
+                return compiler.errorAtPrevious("Can't have more than 255 arguments");
+            }
+            try compiler.expression();
+            count += 1;
+            if (!try compiler.match(.Comma)) break;
+        }
+    }
+    try compiler.consume(.RParen, "Expect ')' after arguments.");
+    return count;
+}
+
 const ParseRule = struct {
     prefix: ?*const fn (compiler: *Compiler, can_assign: bool) anyerror!void,
     infix: ?*const fn (compiler: *Compiler) anyerror!void,
@@ -774,7 +795,7 @@ fn initRules() [token_count]ParseRule {
         const index = field.value;
         const tag = @as(TokenType, @enumFromInt(index));
         table[index] = switch (tag) {
-            .LParen => .{ .prefix = grouping, .infix = null, .precedence = .Call },
+            .LParen => .{ .prefix = grouping, .infix = call, .precedence = .Call },
             .RParen => .{ .prefix = null, .infix = null, .precedence = null },
             .LBracket => .{ .prefix = null, .infix = null, .precedence = .Index },
             .RBracket => .{ .prefix = null, .infix = null, .precedence = null },

@@ -1,5 +1,5 @@
-let foo = fn () {
-    print "bar"
+let foo = fn(a, b) {
+    print a + b
 }
 
-print foo
+foo(1, 2)

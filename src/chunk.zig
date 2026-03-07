@@ -31,6 +31,7 @@ pub const OpCode = enum(u8) {
     JumpIfGreaterOrEq,
     Jump,
     Loop,
+    Call,
 };
 
 pub const OpByte = union(enum) {
@@ -127,6 +128,7 @@ pub const Chunk = struct {
             .JumpIfGreaterOrEq => return jumpByteInstruction(self, "OP_JUMP_IF_GREATER_OR_EQ", offset, 1),
             .Jump => return jumpByteInstruction(self, "OP_JUMP", offset, 1),
             .Loop => return jumpByteInstruction(self, "OP_JUMP", offset, -1),
+            .Call => return byteInstruction(self, "OP_CALL", offset),
         }
     }
 };
@@ -178,6 +180,11 @@ fn threeByteInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
     );
     std.debug.print("{s:<18}{d:4}\n", .{ name, index });
     return offset + 4;
+}
+
+fn byteInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
+    std.debug.print("{s:<18}{d:4}\n", .{ name, chunk.code.items[offset + 1] });
+    return offset + 2;
 }
 
 fn jumpByteInstruction(chunk: *Chunk, name: []const u8, offset: usize, sign: i8) usize {
