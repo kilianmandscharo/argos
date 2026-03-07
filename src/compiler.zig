@@ -30,7 +30,7 @@ const Token = scanner_module.Token;
 const TokenType = scanner_module.TokenType;
 const Scanner = scanner_module.Scanner;
 
-const DEBUG_PRINT_CODE = false;
+const DEBUG_PRINT_CODE = true;
 
 const Precedence = enum(u8) {
     Lowest = 1,
@@ -143,13 +143,18 @@ pub const Compiler = struct {
     }
 
     fn endCompiler(self: *Compiler) !*ObjFunction {
-        try self.emitOpCode(.Return);
+        try self.emitReturn();
         const function = self.function;
         if (comptime DEBUG_PRINT_CODE) {
             const name = if (self.function.name) |name| name.chars else "<script>";
             self.currentChunk().disassemble(name);
         }
         return function;
+    }
+
+    fn emitReturn(self: *Compiler) !void {
+        try self.emitOpCode(.Null);
+        try self.emitOpCode(.Return);
     }
 
     fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
@@ -175,13 +180,17 @@ pub const Compiler = struct {
         }
     }
 
-    fn expectLineEnd(self: *Compiler) !void {
+    fn isLineEnd(self: *Compiler) bool {
         const token_type = self.parser.current.type;
-        if (token_type == .NewLine or token_type == .Eof) {
+        return token_type == .NewLine or token_type == .Eof;
+    }
+
+    fn expectLineEnd(self: *Compiler) !void {
+        if (self.isLineEnd()) {
             try self.parser.advance();
             return;
         }
-        return self.errorAtCurrent("Expected new line.");
+        return self.errorAtCurrent("Expected line end.");
     }
 
     fn declaration(self: *Compiler) !void {
@@ -203,7 +212,7 @@ pub const Compiler = struct {
         } else {
             try self.emitOpCode(.Null);
         }
-        try self.expectLineEnd();
+        _ = try self.match(.NewLine);
         try self.defineVariable(global);
     }
 
@@ -272,21 +281,37 @@ pub const Compiler = struct {
 
     fn statement(self: *Compiler) !void {
         if (try self.match(.Print)) {
-            try printStatement(self);
+            try self.printStatement();
         } else if (try self.match(.Assert)) {
-            try assertStatement(self);
+            try self.assertStatement();
         } else if (try self.match(.Match)) {
-            try matchStatement(self);
+            try self.matchStatement();
         } else if (try self.match(.While)) {
-            try whileStatement(self);
+            try self.whileStatement();
         } else if (try self.match(.For)) {
-            try forStatement(self);
+            try self.forStatement();
+        } else if (try self.match(.Return)) {
+            try self.returnStatement();
         } else if (try self.match(.LBrace)) {
             self.beginScope();
             try self.block();
             try self.endScope();
         } else {
             try self.expressionStatement();
+        }
+    }
+
+    fn returnStatement(self: *Compiler) !void {
+        if (self.type == .Script) {
+            return self.errorAtPrevious("Can't return from top-level code.");
+        }
+        if (self.isLineEnd()) {
+            try self.parser.advance();
+            try self.emitReturn();
+        } else {
+            try self.expression();
+            try self.expectLineEnd();
+            try self.emitOpCode(.Return);
         }
     }
 

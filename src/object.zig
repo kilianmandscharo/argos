@@ -143,6 +143,6 @@ pub const ObjFunction = struct {
         self: @This(),
         writer: *std.Io.Writer,
     ) std.Io.Writer.Error!void {
-        try writer.print("<fn {s}>", .{if (self.name) |name| name.chars else ""});
+        try writer.print("<fn {s}>", .{if (self.name) |name| name.chars else "script"});
     }
 };

@@ -24,7 +24,8 @@ test "vm tests" {
             var vm = VirtualMachine.init(allocator);
             defer vm.deinit();
 
-            _ = vm.interpret(test_case.source);
+            const result = try vm.interpret(test_case.source);
+            try std.testing.expect(result == .Ok);
         }
     }.runTest;
 
@@ -458,6 +459,45 @@ test "vm tests" {
             \\}
             \\
             \\assert a == 3
+            ,
+        },
+        .{
+            .description = "function calls no return",
+            .source =
+            \\let foo = fn() {
+            \\    print "Hello, World!"
+            \\} 
+            \\
+            \\let result = foo()
+            \\
+            \\assert result == null
+            ,
+        },
+        .{
+            .description = "function calls with return",
+            .source =
+            \\let foo = fn(a, b) {
+            \\    return a + b
+            \\} 
+            \\
+            \\let result = foo(25, 11)
+            \\
+            \\assert result == 36
+            ,
+        },
+        .{
+            .description = "nested functions",
+            .source =
+            \\let foo = fn() {
+            \\    let bar = fn(a, b) {
+            \\        return a + b
+            \\    }
+            \\    return bar(2, 7)    
+            \\} 
+            \\
+            \\let result = foo()
+            \\
+            \\assert result == 9
             ,
         },
     };

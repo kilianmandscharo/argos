@@ -33,8 +33,7 @@ const InterpretResult = enum {
     RuntimeError,
 };
 
-const DEBUG_PRINT_CODE = false;
-const DEBUG_TRACE_EXECUTION = false;
+const DEBUG_TRACE_EXECUTION = true;
 
 const FRAMES_MAX = 64;
 const STACK_MAX = std.math.maxInt(u8) * FRAMES_MAX;
@@ -135,23 +134,15 @@ pub const VirtualMachine = struct {
         self.stack[self.stack_top - 1 - distance] = value;
     }
 
-    pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretResult {
+    pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
         var scanner = Scanner.init(source);
         var parser = Parser.init(&scanner);
-        var compiler = Compiler.init(self, self.gpa, &parser, .Script, null) catch {
-            std.debug.print("Failed to init compiler.\n", .{});
-            return .CompileError;
-        };
+        var compiler = try Compiler.init(self, self.gpa, &parser, .Script, null);
 
-        const function = compiler.compile() catch {
-            std.debug.print("Compilation failed.\n", .{});
-            return .CompileError;
-        };
+        const function = try compiler.compile();
 
         self.push(wrapObj(&function.obj));
-        self.call(function, 0) catch {
-            return .RuntimeError;
-        };
+        try self.call(function, 0);
 
         _ = self.run() catch {
             return .RuntimeError;
@@ -363,7 +354,15 @@ pub const VirtualMachine = struct {
                     self.frame = &self.frames[self.frame_count - 1];
                 },
                 .Return => {
-                    return;
+                    const result = self.pop();
+                    self.frame_count -= 1;
+                    if (self.frame_count == 0) {
+                        _ = self.pop();
+                        return;
+                    }
+                    self.stack_top = self.frame.slot;
+                    self.push(result);
+                    self.frame = &self.frames[self.frame_count - 1];
                 },
             }
         }
