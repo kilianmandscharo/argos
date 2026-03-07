@@ -1,5 +1,5 @@
 const std = @import("std");
-const scanner = @import("scanner.zig");
+const scanner_module = @import("scanner.zig");
 const chunk_module = @import("chunk.zig");
 const value_module = @import("value.zig");
 const object_module = @import("object.zig");
@@ -26,9 +26,9 @@ const OpByte = chunk_module.OpByte;
 const indexToU24 = chunk_module.indexToU24;
 const indexToU16 = chunk_module.indexToU16;
 
-const Token = scanner.Token;
-const TokenType = scanner.TokenType;
-const Scanner = scanner.Scanner;
+const Token = scanner_module.Token;
+const TokenType = scanner_module.TokenType;
+const Scanner = scanner_module.Scanner;
 
 const DEBUG_PRINT_CODE = false;
 
@@ -55,9 +55,27 @@ const FunctionType = enum {
     Script,
 };
 
-pub const Compiler = struct {
-    parser: Parser,
+pub const Parser = struct {
+    current: Token,
+    previous: Token,
     scanner: *Scanner,
+
+    pub fn init(scanner: *Scanner) @This() {
+        return Parser{
+            .current = undefined,
+            .previous = undefined,
+            .scanner = scanner,
+        };
+    }
+
+    pub fn advance(self: *Parser) !void {
+        self.previous = self.current;
+        self.current = self.scanner.next();
+    }
+};
+
+pub const Compiler = struct {
+    parser: *Parser,
     gpa: std.mem.Allocator,
     vm: *VirtualMachine,
     locals: [std.math.maxInt(u8) + 1]Local,
@@ -71,20 +89,14 @@ pub const Compiler = struct {
         depth: ?u32,
     };
 
-    const Parser = struct {
-        current: Token,
-        previous: Token,
-        had_error: bool,
-    };
-
-    pub fn init(vm: *VirtualMachine, gpa: std.mem.Allocator, scanner_ptr: *Scanner, func_type: FunctionType) Compiler {
+    pub fn init(
+        vm: *VirtualMachine,
+        gpa: std.mem.Allocator,
+        parser: *Parser,
+        func_type: FunctionType,
+    ) Compiler {
         var compiler = Compiler{
-            .parser = Parser{
-                .current = undefined,
-                .previous = undefined,
-                .had_error = false,
-            },
-            .scanner = scanner_ptr,
+            .parser = parser,
             .gpa = gpa,
             .vm = vm,
             .locals = undefined,
@@ -106,17 +118,16 @@ pub const Compiler = struct {
 
     pub fn compile(self: *Compiler) !*ObjFunction {
         self.function = try allocateFunction(self.vm);
-        try self.advance();
-        // var has_errors = false;
+        try self.parser.advance();
+        // TODO: we stop compilation on the first error, which makes sense for
+        // degugging, but how to best handle?
         while (!try self.match(.Eof)) {
             self.declaration() catch |err| {
                 self.currentChunk().disassemble("<error>");
                 return err;
             };
         }
-        // if (has_errors) return error.CompileError;
-        const function = try self.endCompiler();
-        return function;
+        return try self.endCompiler();
     }
 
     fn endCompiler(self: *Compiler) !*ObjFunction {
@@ -130,14 +141,14 @@ pub const Compiler = struct {
     }
 
     fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
-        try self.advance();
+        try self.parser.advance();
 
         if (getRule(self.parser.previous.type).prefix) |prefixFn| {
             const can_assign = @intFromEnum(precedence) < @intFromEnum(Precedence.Assign);
             try prefixFn(self, can_assign);
 
             while (@intFromEnum(precedence) < getRulePrecedenceValue(self.parser.current.type)) {
-                try self.advance();
+                try self.parser.advance();
                 if (self.parser.current.type == .Eof) return;
                 if (getRule(self.parser.previous.type).infix) |infixFn| {
                     try infixFn(self);
@@ -155,7 +166,7 @@ pub const Compiler = struct {
     fn expectLineEnd(self: *Compiler) !void {
         const token_type = self.parser.current.type;
         if (token_type == .NewLine or token_type == .Eof) {
-            try self.advance();
+            try self.parser.advance();
             return;
         }
         return self.errorAtCurrent("Expected new line.");
@@ -343,7 +354,7 @@ pub const Compiler = struct {
 
         if (self.check(.LParen)) {
             has_target = true;
-            try self.advance();
+            try self.parser.advance();
             try self.expression();
             try self.consume(.RParen, "Expect ')' after match target");
         }
@@ -364,7 +375,7 @@ pub const Compiler = struct {
             return;
         }
 
-        try self.advance();
+        try self.parser.advance();
         try self.consume(.NewLine, "Expect new line after '{' in match block");
 
         var else_jumps: std.ArrayList(usize) = .{};
@@ -388,7 +399,7 @@ pub const Compiler = struct {
 
         // TODO: what if the else branch is not the last?
         if (self.check(.Else)) {
-            try self.advance();
+            try self.parser.advance();
             try self.consume(.Arrow, "Expect '->' after else in match expression");
             try self.statement();
         }
@@ -425,7 +436,7 @@ pub const Compiler = struct {
 
     fn chopNewlines(self: *Compiler) !void {
         while (self.check(.NewLine)) {
-            try self.advance();
+            try self.parser.advance();
         }
     }
 
@@ -543,18 +554,9 @@ pub const Compiler = struct {
         try self.currentChunk().write(self.gpa, OpByte{ .Op = b }, self.parser.previous.line);
     }
 
-    fn advance(self: *Compiler) !void {
-        self.parser.previous = self.parser.current;
-        while (true) {
-            self.parser.current = self.scanner.next();
-            if (self.parser.current.type != .Error) break;
-            return self.errorAtCurrent(self.parser.current.toString());
-        }
-    }
-
     fn consume(self: *Compiler, expected: TokenType, message: []const u8) !void {
         if (self.check(expected)) {
-            try self.advance();
+            try self.parser.advance();
             return;
         }
         return self.errorAtCurrent(message);
@@ -562,7 +564,7 @@ pub const Compiler = struct {
 
     fn match(self: *Compiler, token_type: TokenType) !bool {
         if (!self.check(token_type)) return false;
-        try self.advance();
+        try self.parser.advance();
         return true;
     }
 
@@ -688,14 +690,14 @@ fn namedVariable(compiler: *Compiler, name: *Token, can_assign: bool) !void {
     }
 }
 
-fn and_(compiler: *Compiler) !void {
+fn logicalAnd(compiler: *Compiler) !void {
     const end_jump = try compiler.emitJump(.JumpIfFalse);
     try compiler.emitOpCode(.Pop);
     try compiler.parsePrecedence(.LogicalAnd);
     try compiler.patchJump(end_jump);
 }
 
-fn or_(compiler: *Compiler) !void {
+fn logicalOr(compiler: *Compiler) !void {
     const else_jump = try compiler.emitJump(.JumpIfFalse);
     const end_jump = try compiler.emitJump(.Jump);
 
@@ -709,7 +711,13 @@ fn or_(compiler: *Compiler) !void {
 fn func(compiler: *Compiler, can_assign: bool) !void {
     _ = can_assign;
 
-    var new_compiler = Compiler.init(compiler.vm, compiler.gpa, compiler.scanner, .Function);
+    var new_compiler = Compiler.init(
+        compiler.vm,
+        compiler.gpa,
+        compiler.parser,
+        .Function,
+    );
+
     new_compiler.beginScope();
 
     try new_compiler.consume(.LParen, "Expect '(' after function name.");
@@ -717,6 +725,7 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
     try new_compiler.statement();
 
     const function = try new_compiler.endCompiler();
+
     try compiler.emitConstant(wrapObj(&function.obj));
 }
 
@@ -774,8 +783,8 @@ fn initRules() [token_count]ParseRule {
             .Arrow => .{ .prefix = null, .infix = null, .precedence = null },
             .NewLine => .{ .prefix = null, .infix = null, .precedence = null },
             .Eof => .{ .prefix = null, .infix = null, .precedence = null },
-            .And => .{ .prefix = null, .infix = and_, .precedence = .LogicalAnd },
-            .Or => .{ .prefix = null, .infix = or_, .precedence = .LogicalOr },
+            .And => .{ .prefix = null, .infix = logicalAnd, .precedence = .LogicalAnd },
+            .Or => .{ .prefix = null, .infix = logicalOr, .precedence = .LogicalOr },
             .Pipe => .{ .prefix = null, .infix = null, .precedence = .BitwiseOr },
             .Ampersand => .{ .prefix = null, .infix = null, .precedence = .BitwiseAnd },
             .Caret => .{ .prefix = null, .infix = null, .precedence = .BitwiseXor },

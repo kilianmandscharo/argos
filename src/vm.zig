@@ -25,6 +25,7 @@ const u24ToIndex = chunk_module.u24ToIndex;
 const u16ToIndex = chunk_module.u16ToIndex;
 
 const Compiler = compiler_module.Compiler;
+const Parser = compiler_module.Parser;
 
 const InterpretResult = enum {
     Ok,
@@ -136,7 +137,8 @@ pub const VirtualMachine = struct {
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
         var scanner = Scanner.init(source);
-        var compiler = Compiler.init(self, self.gpa, &scanner, .Script);
+        var parser = Parser.init(&scanner);
+        var compiler = Compiler.init(self, self.gpa, &parser, .Script);
 
         const function = try compiler.compile();
 
