@@ -49,10 +49,10 @@ pub fn main() !void {
     const source = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(source);
 
-    var vm = VirtualMachine.init(allocator);
+    var vm = try VirtualMachine.init(allocator);
     defer vm.deinit();
 
-    _ = vm.interpret(source);
+    _ = try vm.interpret(source);
 
     // if (std.os.argv.len == 1) {
     //     try repl(allocator);

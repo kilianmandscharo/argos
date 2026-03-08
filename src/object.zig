@@ -1,13 +1,16 @@
 const std = @import("std");
 const vm_module = @import("vm.zig");
 const chunk_module = @import("chunk.zig");
+const value_module = @import("value.zig");
 
 const VirtualMachine = vm_module.VirtualMachine;
 const Chunk = chunk_module.Chunk;
+const Value = value_module.Value;
 
 pub const ObjType = enum {
     String,
     Function,
+    NativeFn,
 };
 
 pub fn allocateObject(vm: *VirtualMachine, T: type) !*T {
@@ -25,6 +28,12 @@ pub fn allocateObject(vm: *VirtualMachine, T: type) !*T {
     vm.objects = &object.obj;
 
     return object;
+}
+
+pub fn allocateNative(vm: *VirtualMachine, function: NativeFn) !*Obj {
+    const native = try allocateObject(vm, ObjNative);
+    native.function = function;
+    return &native.obj;
 }
 
 pub fn allocateFunction(vm: *VirtualMachine) !*ObjFunction {
@@ -63,6 +72,14 @@ pub const Obj = struct {
     type: ObjType,
     next: ?*Obj,
 
+    pub fn getType(self: *@This()) []const u8 {
+        return switch (self.type) {
+            .Function => "Function",
+            .NativeFn => "NativeFn",
+            .String => "String",
+        };
+    }
+
     pub fn format(
         self: *@This(),
         writer: *std.Io.Writer,
@@ -75,6 +92,10 @@ pub const Obj = struct {
             .Function => {
                 const function = self.asFunction();
                 try function.format(writer);
+            },
+            .NativeFn => {
+                const native = self.asFunction();
+                try native.format(writer);
             },
         }
     }
@@ -93,6 +114,10 @@ pub const Obj = struct {
                 function_obj.chunk.deinit(gpa);
                 gpa.destroy(function_obj);
             },
+            .NativeFn => {
+                const native_obj = self.asNative();
+                gpa.destroy(native_obj);
+            },
         }
     }
 
@@ -104,12 +129,20 @@ pub const Obj = struct {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
+    pub fn asNative(self: *@This()) *ObjNative {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
     pub fn isString(self: *@This()) bool {
         return self.type == .String;
     }
 
     pub fn isFunction(self: *@This()) bool {
         return self.type == .Function;
+    }
+
+    pub fn isNative(self: *@This()) bool {
+        return self.type == .NativeFn;
     }
 };
 
@@ -144,5 +177,22 @@ pub const ObjFunction = struct {
         writer: *std.Io.Writer,
     ) std.Io.Writer.Error!void {
         try writer.print("<fn {s}>", .{if (self.name) |name| name.chars else "script"});
+    }
+};
+
+pub const NativeFn = *const fn (arg_count: usize, args: []Value) Value;
+
+pub const ObjNative = struct {
+    pub const KIND = ObjType.NativeFn;
+
+    obj: Obj = undefined,
+    function: NativeFn,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        _ = self;
+        try writer.print("<native fn>", .{});
     }
 };

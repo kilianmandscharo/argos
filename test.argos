@@ -1,5 +1,12 @@
-let foo = fn(a, b) {
-    print a + b
+let fib = fn(n) {
+    match {
+        n < 2 -> return n
+        else -> return fib(n - 2) + fib(n - 1)
+    }
 }
 
-foo(1, 2)
+let start = clock()
+print fib(35)
+let end = clock()
+
+print end - start

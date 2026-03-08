@@ -16,7 +16,13 @@ pub const Value = union(enum) {
         writer: *std.Io.Writer,
     ) std.Io.Writer.Error!void {
         switch (self) {
-            .Float => |val| try writer.print("{d}", .{val}),
+            .Float => |val| {
+                if (val == @trunc(val)) {
+                    try writer.print("{d:.1}", .{val});
+                } else {
+                    try writer.print("{d}", .{val});
+                }
+            },
             .Int => |val| try writer.print("{d}", .{val}),
             .Bool => |val| try writer.print("{}", .{val}),
             .Null => try writer.print("null", .{}),

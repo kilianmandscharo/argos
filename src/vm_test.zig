@@ -21,7 +21,7 @@ test "vm tests" {
         fn runTest(test_case: TestCase) anyerror!void {
             const allocator = std.testing.allocator;
 
-            var vm = VirtualMachine.init(allocator);
+            var vm = try VirtualMachine.init(allocator);
             defer vm.deinit();
 
             const result = try vm.interpret(test_case.source);

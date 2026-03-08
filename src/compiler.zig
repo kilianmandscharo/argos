@@ -11,7 +11,6 @@ const Obj = object_module.Obj;
 const ObjString = object_module.ObjString;
 const ObjFunction = object_module.ObjFunction;
 const allocateFunction = object_module.allocateFunction;
-const allocateStaticString = object_module.allocateStaticString;
 const copyStaticString = object_module.copyStaticString;
 
 const Value = value_module.Value;

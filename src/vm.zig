@@ -4,13 +4,19 @@ const value_module = @import("value.zig");
 const object_module = @import("object.zig");
 const compiler_module = @import("compiler.zig");
 const scanner_module = @import("scanner.zig");
+const native_module = @import("native.zig");
+
+const clockNative = native_module.clockNative;
 
 const Scanner = scanner_module.Scanner;
 
 const ObjString = object_module.ObjString;
 const ObjFunction = object_module.ObjFunction;
 const Obj = object_module.Obj;
+const NativeFn = object_module.NativeFn;
 const allocateString = object_module.allocateString;
+const allocateNative = object_module.allocateNative;
+const copyStaticString = object_module.copyStaticString;
 
 const Value = value_module.Value;
 const wrapFloat = value_module.wrapFloat;
@@ -33,7 +39,7 @@ const InterpretResult = enum {
     RuntimeError,
 };
 
-const DEBUG_TRACE_EXECUTION = true;
+const DEBUG_TRACE_EXECUTION = false;
 
 const FRAMES_MAX = 64;
 const STACK_MAX = std.math.maxInt(u8) * FRAMES_MAX;
@@ -75,8 +81,8 @@ pub const VirtualMachine = struct {
     globals: std.HashMapUnmanaged(*ObjString, Value, StringContext, 80),
     objects: ?*Obj,
 
-    pub fn init(gpa: std.mem.Allocator) VirtualMachine {
-        return VirtualMachine{
+    pub fn init(gpa: std.mem.Allocator) !VirtualMachine {
+        var vm = VirtualMachine{
             .gpa = gpa,
             .stack = undefined,
             .stack_top = 0,
@@ -87,6 +93,10 @@ pub const VirtualMachine = struct {
             .globals = .{},
             .objects = null,
         };
+
+        try vm.defineNative("clock", clockNative);
+
+        return vm;
     }
 
     pub fn deinit(self: *VirtualMachine) void {
@@ -176,6 +186,14 @@ pub const VirtualMachine = struct {
         return error.RuntimeError;
     }
 
+    fn defineNative(self: *VirtualMachine, name: []const u8, function: NativeFn) !void {
+        self.push(wrapObj(try copyStaticString(self, name)));
+        self.push(wrapObj(try allocateNative(self, function)));
+        try self.globals.put(self.gpa, self.stack[0].asObj().asString(), self.stack[1]);
+        _ = self.pop();
+        _ = self.pop();
+    }
+
     fn readU24(self: *VirtualMachine) usize {
         return u24ToIndex(self.readByte(), self.readByte(), self.readByte());
     }
@@ -202,10 +220,22 @@ pub const VirtualMachine = struct {
     }
 
     fn callValue(self: *VirtualMachine, callee: Value, argCount: u8) !void {
-        if (!callee.isObjType(.Function)) {
-            return self.runtimeError("Can only call functions.", .{});
+        switch (callee) {
+            .Obj => |obj| {
+                switch (obj.type) {
+                    .Function => try self.call(obj.asFunction(), argCount),
+                    .NativeFn => {
+                        const native = obj.asNative();
+                        const start = self.stack_top - argCount;
+                        const result = native.function(argCount, self.stack[start..self.stack_top]);
+                        self.stack_top -= argCount + 1;
+                        self.push(result);
+                    },
+                    else => return self.runtimeError("Can't call object of type '{s}'", .{obj.getType()}),
+                }
+            },
+            else => return self.runtimeError("Can't call value of type '{s}'", .{callee.getType()}),
         }
-        try self.call(callee.asObj().asFunction(), argCount);
     }
 
     fn call(self: *VirtualMachine, function: *ObjFunction, argCount: u8) !void {
