@@ -1,37 +1,12 @@
 const std = @import("std");
-const chunk_module = @import("chunk.zig");
-const value_module = @import("value.zig");
-const object_module = @import("object.zig");
-const compiler_module = @import("compiler.zig");
-const scanner_module = @import("scanner.zig");
-const native_module = @import("native.zig");
+const chunk = @import("chunk.zig");
+const value = @import("value.zig");
+const object = @import("object.zig");
+const compiler = @import("compiler.zig");
+const scanner = @import("scanner.zig");
+const native = @import("native.zig");
 
-const clockNative = native_module.clockNative;
-
-const Scanner = scanner_module.Scanner;
-
-const ObjString = object_module.ObjString;
-const ObjFunction = object_module.ObjFunction;
-const Obj = object_module.Obj;
-const NativeFn = object_module.NativeFn;
-const allocateString = object_module.allocateString;
-const allocateNative = object_module.allocateNative;
-const copyStaticString = object_module.copyStaticString;
-
-const Value = value_module.Value;
-const wrapFloat = value_module.wrapFloat;
-const wrapInt = value_module.wrapInt;
-const wrapBool = value_module.wrapBool;
-const wrapObj = value_module.wrapObj;
-const valueNull = value_module.valueNull;
-
-const OpCode = chunk_module.OpCode;
-const Chunk = chunk_module.Chunk;
-const u24ToIndex = chunk_module.u24ToIndex;
-const u16ToIndex = chunk_module.u16ToIndex;
-
-const Compiler = compiler_module.Compiler;
-const Parser = compiler_module.Parser;
+const clockNative = native.clockNative;
 
 const InterpretResult = enum {
     Ok,
@@ -39,47 +14,47 @@ const InterpretResult = enum {
     RuntimeError,
 };
 
-const DEBUG_TRACE_EXECUTION = false;
+const DEBUG_TRACE_EXECUTION = true;
 
 const FRAMES_MAX = 64;
 const STACK_MAX = std.math.maxInt(u8) * FRAMES_MAX;
 
 const CallFrame = struct {
-    function: *ObjFunction,
+    closure: *object.ObjClosure,
     ip: usize,
     slot: usize,
 };
 
 const GlobalContext = struct {
-    pub fn hash(_: @This(), key: *ObjString) u64 {
+    pub fn hash(_: @This(), key: *object.ObjString) u64 {
         return key.hash;
     }
 
-    pub fn eql(_: @This(), a: *ObjString, b: *ObjString) bool {
+    pub fn eql(_: @This(), a: *object.ObjString, b: *object.ObjString) bool {
         return a == b;
     }
 };
 
 const StringContext = struct {
-    pub fn hash(_: @This(), key: *ObjString) u64 {
+    pub fn hash(_: @This(), key: *object.ObjString) u64 {
         return key.hash;
     }
 
-    pub fn eql(_: @This(), a: *ObjString, b: *ObjString) bool {
+    pub fn eql(_: @This(), a: *object.ObjString, b: *object.ObjString) bool {
         return std.mem.eql(u8, a.chars, b.chars);
     }
 };
 
 pub const VirtualMachine = struct {
     gpa: std.mem.Allocator,
-    stack: [STACK_MAX]Value,
+    stack: [STACK_MAX]value.Value,
     stack_top: usize,
     frames: [FRAMES_MAX]CallFrame,
     frame_count: usize,
     frame: *CallFrame,
-    strings: std.HashMapUnmanaged(*ObjString, void, StringContext, 80),
-    globals: std.HashMapUnmanaged(*ObjString, Value, StringContext, 80),
-    objects: ?*Obj,
+    strings: std.HashMapUnmanaged(*object.ObjString, void, StringContext, 80),
+    globals: std.HashMapUnmanaged(*object.ObjString, value.Value, StringContext, 80),
+    objects: ?*object.Obj,
 
     pub fn init(gpa: std.mem.Allocator) !VirtualMachine {
         var vm = VirtualMachine{
@@ -100,18 +75,18 @@ pub const VirtualMachine = struct {
     }
 
     pub fn deinit(self: *VirtualMachine) void {
-        var obj = self.objects;
-        while (obj) |object| {
-            const next = object.next;
-            object.deinit(self.gpa);
-            obj = next;
+        var head = self.objects;
+        while (head) |obj| {
+            const next = obj.next;
+            obj.deinit(self.gpa);
+            head = next;
         }
         self.strings.deinit(self.gpa);
         self.globals.deinit(self.gpa);
     }
 
-    pub fn findString(self: *VirtualMachine, chars: []const u8, hash: u64) ?*Obj {
-        var tmp = ObjString{
+    pub fn findString(self: *VirtualMachine, chars: []const u8, hash: u64) ?*object.Obj {
+        var tmp = object.ObjString{
             .chars = chars,
             .hash = hash,
         };
@@ -126,42 +101,48 @@ pub const VirtualMachine = struct {
         self.frame_count = 0;
     }
 
-    fn push(self: *VirtualMachine, value: Value) void {
-        self.stack[self.stack_top] = value;
+    fn push(self: *VirtualMachine, val: value.Value) void {
+        self.stack[self.stack_top] = val;
         self.stack_top += 1;
     }
 
-    fn pop(self: *VirtualMachine) Value {
+    fn pop(self: *VirtualMachine) value.Value {
         self.stack_top -= 1;
         return self.stack[self.stack_top];
     }
 
-    fn peek(self: *VirtualMachine, distance: usize) Value {
+    fn peek(self: *VirtualMachine, distance: usize) value.Value {
         return self.stack[self.stack_top - 1 - distance];
     }
 
-    fn swapInPlace(self: *VirtualMachine, value: Value, distance: usize) void {
-        self.stack[self.stack_top - 1 - distance] = value;
+    fn swapInPlace(self: *VirtualMachine, val: value.Value, distance: usize) void {
+        self.stack[self.stack_top - 1 - distance] = val;
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
-        var scanner = Scanner.init(source);
-        var parser = Parser.init(&scanner);
-        var compiler = try Compiler.init(self, self.gpa, &parser, .Script, null);
+        var s = scanner.Scanner.init(source);
+        var p = compiler.Parser.init(&s);
+        var c = try compiler.Compiler.init(self, self.gpa, &p, .Script, null, null, 0);
 
-        const function = try compiler.compile();
+        std.debug.print("Compiling...\n", .{});
+        const function = try c.compile();
 
-        self.push(wrapObj(&function.obj));
-        try self.call(function, 0);
+        self.push(value.wrapObj(&function.obj));
+        const closure = try object.allocateClosure(self, function);
+        _ = self.pop();
+        self.push(value.wrapObj(&closure.obj));
+        try self.call(closure, 0);
 
+        std.debug.print("Running byte code...\n", .{});
         _ = self.run() catch {
             return .RuntimeError;
         };
+
         return .Ok;
     }
 
     pub inline fn readByte(self: *VirtualMachine) u8 {
-        const instruction = self.frame.function.chunk.code.items[self.frame.ip];
+        const instruction = self.frame.closure.function.chunk.code.items[self.frame.ip];
         self.frame.ip += 1;
         return instruction;
     }
@@ -172,7 +153,7 @@ pub const VirtualMachine = struct {
         var i: i32 = @as(i32, @intCast(self.frame_count)) - 1;
         while (i >= 0) : (i -= 1) {
             const frame = self.frames[@intCast(i)];
-            const function = frame.function;
+            const function = frame.closure.function;
             const instruction = frame.ip - 1;
             std.debug.print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
             if (function.name) |name| {
@@ -186,48 +167,48 @@ pub const VirtualMachine = struct {
         return error.RuntimeError;
     }
 
-    fn defineNative(self: *VirtualMachine, name: []const u8, function: NativeFn) !void {
-        self.push(wrapObj(try copyStaticString(self, name)));
-        self.push(wrapObj(try allocateNative(self, function)));
+    fn defineNative(self: *VirtualMachine, name: []const u8, function: object.NativeFn) !void {
+        self.push(value.wrapObj(try object.copyStaticString(self, name)));
+        self.push(value.wrapObj(try object.allocateNative(self, function)));
         try self.globals.put(self.gpa, self.stack[0].asObj().asString(), self.stack[1]);
         _ = self.pop();
         _ = self.pop();
     }
 
     fn readU24(self: *VirtualMachine) usize {
-        return u24ToIndex(self.readByte(), self.readByte(), self.readByte());
+        return chunk.u24ToIndex(self.readByte(), self.readByte(), self.readByte());
     }
 
     fn readU16(self: *VirtualMachine) usize {
-        return u16ToIndex(self.readByte(), self.readByte());
+        return chunk.u16ToIndex(self.readByte(), self.readByte());
     }
 
-    fn readConstant(self: *VirtualMachine) Value {
-        return self.frame.function.chunk.constants.items[self.readU24()];
+    fn readConstant(self: *VirtualMachine) value.Value {
+        return self.frame.closure.function.chunk.constants.items[self.readU24()];
     }
 
-    fn readString(self: *VirtualMachine) *ObjString {
+    fn readString(self: *VirtualMachine) *object.ObjString {
         const constant = self.readConstant();
         return constant.Obj.asString();
     }
 
-    inline fn getSlot(self: *VirtualMachine, slot: usize) Value {
+    inline fn getSlot(self: *VirtualMachine, slot: usize) value.Value {
         return self.stack[self.frame.slot + slot];
     }
 
-    inline fn setSlot(self: *VirtualMachine, slot: usize, value: Value) void {
-        self.stack[self.frame.slot + slot] = value;
+    inline fn setSlot(self: *VirtualMachine, slot: usize, val: value.Value) void {
+        self.stack[self.frame.slot + slot] = val;
     }
 
-    fn callValue(self: *VirtualMachine, callee: Value, argCount: u8) !void {
+    fn callValue(self: *VirtualMachine, callee: value.Value, argCount: u8) !void {
         switch (callee) {
             .Obj => |obj| {
                 switch (obj.type) {
-                    .Function => try self.call(obj.asFunction(), argCount),
+                    .Closure => try self.call(obj.asClosure(), argCount),
                     .NativeFn => {
-                        const native = obj.asNative();
+                        const native_fn = obj.asNative();
                         const start = self.stack_top - argCount;
-                        const result = native.function(argCount, self.stack[start..self.stack_top]);
+                        const result = native_fn.function(argCount, self.stack[start..self.stack_top]);
                         self.stack_top -= argCount + 1;
                         self.push(result);
                     },
@@ -238,16 +219,21 @@ pub const VirtualMachine = struct {
         }
     }
 
-    fn call(self: *VirtualMachine, function: *ObjFunction, argCount: u8) !void {
-        if (argCount != function.arity) {
-            return self.runtimeError("Expected {d} arguments but got {d}", .{ function.arity, argCount });
+    fn captureUpvalue(self: *VirtualMachine, local: *value.Value) !*object.ObjUpvalue {
+        const upvalue = try object.allocateUpvalue(self, local);
+        return upvalue;
+    }
+
+    fn call(self: *VirtualMachine, closure: *object.ObjClosure, argCount: u8) !void {
+        if (argCount != closure.function.arity) {
+            return self.runtimeError("Expected {d} arguments but got {d}", .{ closure.function.arity, argCount });
         }
         if (self.frame_count == FRAMES_MAX) {
             return self.runtimeError("Stack overflow.", .{});
         }
         const frame = &self.frames[self.frame_count];
         self.frame_count += 1;
-        frame.function = function;
+        frame.closure = closure;
         frame.ip = 0;
         frame.slot = self.stack_top - argCount - 1;
     }
@@ -262,14 +248,14 @@ pub const VirtualMachine = struct {
                     std.debug.print("[ {f} ]", .{self.stack[index]});
                 }
                 std.debug.print("\n", .{});
-                _ = self.frame.function.chunk.disassembleInstruction(self.frame.ip);
+                _ = self.frame.closure.function.chunk.disassembleInstruction(self.frame.ip);
             }
             const instruction = self.readByte();
-            switch (@as(OpCode, @enumFromInt(instruction))) {
+            switch (@as(chunk.OpCode, @enumFromInt(instruction))) {
                 .Constant => self.push(self.readConstant()),
-                .Null => self.push(valueNull()),
-                .True => self.push(wrapBool(true)),
-                .False => self.push(wrapBool(false)),
+                .Null => self.push(value.valueNull()),
+                .True => self.push(value.wrapBool(true)),
+                .False => self.push(value.wrapBool(false)),
                 .Add => {
                     const b = self.pop();
                     const a = self.peek(0);
@@ -291,36 +277,36 @@ pub const VirtualMachine = struct {
                     self.swapInPlace(try divide(self, a, b), 0);
                 },
                 .Negate => {
-                    const value = self.peek(0);
-                    self.swapInPlace(try negate(self, value), 0);
+                    const val = self.peek(0);
+                    self.swapInPlace(try negate(self, val), 0);
                 },
                 .Not => {
-                    const value = self.peek(0);
-                    self.swapInPlace(wrapBool(isFalsey(value)), 0);
+                    const val = self.peek(0);
+                    self.swapInPlace(value.wrapBool(isFalsey(val)), 0);
                 },
                 .Equal => {
                     const b = self.pop();
                     const a = self.peek(0);
-                    self.swapInPlace(wrapBool(try isEqual(a, b)), 0);
+                    self.swapInPlace(value.wrapBool(try isEqual(a, b)), 0);
                 },
                 .Greater => {
                     const b = self.pop();
                     const a = self.peek(0);
-                    self.swapInPlace(wrapBool(try greater(self, a, b)), 0);
+                    self.swapInPlace(value.wrapBool(try greater(self, a, b)), 0);
                 },
                 .Less => {
                     const b = self.pop();
                     const a = self.peek(0);
-                    self.swapInPlace(wrapBool(try less(self, a, b)), 0);
+                    self.swapInPlace(value.wrapBool(try less(self, a, b)), 0);
                 },
                 .Print => {
-                    const value = self.pop();
-                    std.debug.print("{f}\n", .{value});
+                    const val = self.pop();
+                    std.debug.print("{f}\n", .{val});
                 },
                 .Assert => {
-                    const value = self.pop();
-                    if (value != .Bool) return self.runtimeError("Expected Boolean, got {s}", .{value.getType()});
-                    if (!value.Bool) return self.runtimeError("Assertion failed", .{});
+                    const val = self.pop();
+                    if (val != .Bool) return self.runtimeError("Expected Boolean, got {s}", .{val.getType()});
+                    if (!val.Bool) return self.runtimeError("Assertion failed", .{});
                 },
                 .Pop => {
                     _ = self.pop();
@@ -332,8 +318,8 @@ pub const VirtualMachine = struct {
                 },
                 .GetGlobal => {
                     const name = self.readString();
-                    if (self.globals.get(name)) |value| {
-                        self.push(value);
+                    if (self.globals.get(name)) |val| {
+                        self.push(val);
                     } else {
                         return self.runtimeError("Undefined variable '{s}'", .{name.chars});
                     }
@@ -383,6 +369,30 @@ pub const VirtualMachine = struct {
                     try self.callValue(self.peek(arg_count), arg_count);
                     self.frame = &self.frames[self.frame_count - 1];
                 },
+                .Closure => {
+                    const function = self.readConstant().asObj().asFunction();
+                    const closure = try object.allocateClosure(self, function);
+                    self.push(value.wrapObj(&closure.obj));
+
+                    for (0..closure.upvalues.len) |i| {
+                        const is_local = self.readByte() == 1;
+                        const index = self.readByte();
+                        if (is_local) {
+                            const slot = self.frame.slot + index;
+                            closure.upvalues[i] = try self.captureUpvalue(&self.stack[slot]);
+                        } else {
+                            closure.upvalues[i] = self.frame.closure.upvalues[index];
+                        }
+                    }
+                },
+                .GetUpvalue => {
+                    const slot = self.readByte();
+                    self.push(self.frame.closure.upvalues[slot].?.location.*);
+                },
+                .SetUpvalue => {
+                    const slot = self.readByte();
+                    self.frame.closure.upvalues[slot].?.location.* = self.peek(0);
+                },
                 .Return => {
                     const result = self.pop();
                     self.frame_count -= 1;
@@ -399,7 +409,7 @@ pub const VirtualMachine = struct {
     }
 };
 
-fn greater(vm: *VirtualMachine, a: Value, b: Value) !bool {
+fn greater(vm: *VirtualMachine, a: value.Value, b: value.Value) !bool {
     switch (a) {
         .Int => |left| {
             switch (b) {
@@ -419,7 +429,7 @@ fn greater(vm: *VirtualMachine, a: Value, b: Value) !bool {
     }
 }
 
-fn less(vm: *VirtualMachine, a: Value, b: Value) !bool {
+fn less(vm: *VirtualMachine, a: value.Value, b: value.Value) !bool {
     switch (a) {
         .Int => |left| {
             switch (b) {
@@ -439,19 +449,19 @@ fn less(vm: *VirtualMachine, a: Value, b: Value) !bool {
     }
 }
 
-fn subtract(vm: *VirtualMachine, a: Value, b: Value) !Value {
+fn subtract(vm: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {
     switch (a) {
         .Int => |left| {
             switch (b) {
-                .Int => |right| return wrapInt(left - right),
-                .Float => |right| return wrapFloat(@as(f64, @floatFromInt(left)) - right),
+                .Int => |right| return value.wrapInt(left - right),
+                .Float => |right| return value.wrapFloat(@as(f64, @floatFromInt(left)) - right),
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
         .Float => |left| {
             switch (b) {
-                .Int => |right| return wrapFloat(left - @as(f64, @floatFromInt(right))),
-                .Float => |right| return wrapFloat(left - right),
+                .Int => |right| return value.wrapFloat(left - @as(f64, @floatFromInt(right))),
+                .Float => |right| return value.wrapFloat(left - right),
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
@@ -459,19 +469,19 @@ fn subtract(vm: *VirtualMachine, a: Value, b: Value) !Value {
     }
 }
 
-fn add(vm: *VirtualMachine, a: Value, b: Value) !Value {
+fn add(vm: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {
     switch (a) {
         .Int => |left| {
             switch (b) {
-                .Int => |right| return wrapInt(left + right),
-                .Float => |right| return wrapFloat(@as(f64, @floatFromInt(left)) + right),
+                .Int => |right| return value.wrapInt(left + right),
+                .Float => |right| return value.wrapFloat(@as(f64, @floatFromInt(left)) + right),
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
         .Float => |left| {
             switch (b) {
-                .Int => |right| return wrapFloat(left + @as(f64, @floatFromInt(right))),
-                .Float => |right| return wrapFloat(left + right),
+                .Int => |right| return value.wrapFloat(left + @as(f64, @floatFromInt(right))),
+                .Float => |right| return value.wrapFloat(left + right),
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
@@ -490,19 +500,19 @@ fn add(vm: *VirtualMachine, a: Value, b: Value) !Value {
     }
 }
 
-fn multiply(vm: *VirtualMachine, a: Value, b: Value) !Value {
+fn multiply(vm: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {
     switch (a) {
         .Int => |left| {
             switch (b) {
-                .Int => |right| return wrapInt(left * right),
-                .Float => |right| return wrapFloat(@as(f64, @floatFromInt(left)) * right),
+                .Int => |right| return value.wrapInt(left * right),
+                .Float => |right| return value.wrapFloat(@as(f64, @floatFromInt(left)) * right),
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
         .Float => |left| {
             switch (b) {
-                .Float => |right| return wrapFloat(left * right),
-                .Int => |right| return wrapFloat(left * @as(f64, @floatFromInt(right))),
+                .Float => |right| return value.wrapFloat(left * right),
+                .Int => |right| return value.wrapFloat(left * @as(f64, @floatFromInt(right))),
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
@@ -510,19 +520,19 @@ fn multiply(vm: *VirtualMachine, a: Value, b: Value) !Value {
     }
 }
 
-fn divide(vm: *VirtualMachine, a: Value, b: Value) !Value {
+fn divide(vm: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {
     switch (a) {
         .Int => |left| {
             switch (b) {
-                .Int => |right| return wrapFloat(@as(f64, @floatFromInt(left)) / @as(f64, @floatFromInt(right))),
-                .Float => |right| return wrapFloat(@as(f64, @floatFromInt(left)) / right),
+                .Int => |right| return value.wrapFloat(@as(f64, @floatFromInt(left)) / @as(f64, @floatFromInt(right))),
+                .Float => |right| return value.wrapFloat(@as(f64, @floatFromInt(left)) / right),
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
         .Float => |left| {
             switch (b) {
-                .Float => |right| return wrapFloat(left / right),
-                .Int => |right| return wrapFloat(left / @as(f64, @floatFromInt(right))),
+                .Float => |right| return value.wrapFloat(left / right),
+                .Int => |right| return value.wrapFloat(left / @as(f64, @floatFromInt(right))),
                 else => return vm.runtimeError("Right operand must be a number.", .{}),
             }
         },
@@ -530,19 +540,19 @@ fn divide(vm: *VirtualMachine, a: Value, b: Value) !Value {
     }
 }
 
-fn negate(vm: *VirtualMachine, value: Value) !Value {
-    return switch (value) {
-        .Float => |val| wrapFloat(-val),
-        .Int => |val| wrapInt(-val),
+fn negate(vm: *VirtualMachine, val: value.Value) !value.Value {
+    return switch (val) {
+        .Float => |float| value.wrapFloat(-float),
+        .Int => |int| value.wrapInt(-int),
         else => return vm.runtimeError("Operand must be a number.", .{}),
     };
 }
 
-fn isFalsey(value: Value) bool {
-    return value == .Null or (value == .Bool and !value.Bool);
+fn isFalsey(val: value.Value) bool {
+    return val == .Null or (val == .Bool and !val.Bool);
 }
 
-fn isEqual(a: Value, b: Value) !bool {
+fn isEqual(a: value.Value, b: value.Value) !bool {
     // TODO: should we really return false for 3 == 3.0?
     if (std.meta.activeTag(a) != std.meta.activeTag(b)) {
         return false;
@@ -561,7 +571,7 @@ fn isEqual(a: Value, b: Value) !bool {
     }
 }
 
-fn concatenateStrings(vm: *VirtualMachine, left: *Obj, right: *Obj) !Value {
+fn concatenateStrings(vm: *VirtualMachine, left: *object.Obj, right: *object.Obj) !value.Value {
     const left_string = left.asString().chars;
     const right_string = right.asString().chars;
 
@@ -574,8 +584,8 @@ fn concatenateStrings(vm: *VirtualMachine, left: *Obj, right: *Obj) !Value {
 
     if (interned) |string_object| {
         vm.gpa.free(chars);
-        return wrapObj(string_object);
+        return value.wrapObj(string_object);
     }
 
-    return wrapObj(try allocateString(vm, chars, hash));
+    return value.wrapObj(try object.allocateString(vm, chars, hash));
 }

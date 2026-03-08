@@ -11,6 +11,8 @@ pub const ObjType = enum {
     String,
     Function,
     NativeFn,
+    Closure,
+    Upvalue,
 };
 
 pub fn allocateObject(vm: *VirtualMachine, T: type) !*T {
@@ -30,6 +32,12 @@ pub fn allocateObject(vm: *VirtualMachine, T: type) !*T {
     return object;
 }
 
+pub fn allocateUpvalue(vm: *VirtualMachine, slot: *Value) !*ObjUpvalue {
+    const upvalue = try allocateObject(vm, ObjUpvalue);
+    upvalue.location = slot;
+    return upvalue;
+}
+
 pub fn allocateNative(vm: *VirtualMachine, function: NativeFn) !*Obj {
     const native = try allocateObject(vm, ObjNative);
     native.function = function;
@@ -41,7 +49,17 @@ pub fn allocateFunction(vm: *VirtualMachine) !*ObjFunction {
     function.arity = 0;
     function.name = null;
     function.chunk = Chunk.init();
+    function.upvalue_count = 0;
     return function;
+}
+
+pub fn allocateClosure(vm: *VirtualMachine, function: *ObjFunction) !*ObjClosure {
+    const closure = try allocateObject(vm, ObjClosure);
+    const upvalues = try vm.gpa.alloc(?*ObjUpvalue, function.upvalue_count);
+    @memset(upvalues, null);
+    closure.function = function;
+    closure.upvalues = upvalues;
+    return closure;
 }
 
 pub fn allocateString(vm: *VirtualMachine, chars: []const u8, hash: u64) !*Obj {
@@ -77,6 +95,8 @@ pub const Obj = struct {
             .Function => "Function",
             .NativeFn => "NativeFn",
             .String => "String",
+            .Closure => "Closure",
+            .Upvalue => "Upvalue",
         };
     }
 
@@ -96,6 +116,14 @@ pub const Obj = struct {
             .NativeFn => {
                 const native = self.asFunction();
                 try native.format(writer);
+            },
+            .Closure => {
+                const closure = self.asClosure();
+                try closure.format(writer);
+            },
+            .Upvalue => {
+                const upvalue = self.asUpvalue();
+                try upvalue.format(writer);
             },
         }
     }
@@ -118,6 +146,15 @@ pub const Obj = struct {
                 const native_obj = self.asNative();
                 gpa.destroy(native_obj);
             },
+            .Closure => {
+                const closure_obj = self.asClosure();
+                gpa.free(closure_obj.upvalues);
+                gpa.destroy(closure_obj);
+            },
+            .Upvalue => {
+                const upvalue_obj = self.asUpvalue();
+                gpa.destroy(upvalue_obj);
+            },
         }
     }
 
@@ -133,6 +170,14 @@ pub const Obj = struct {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
+    pub fn asClosure(self: *@This()) *ObjClosure {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    pub fn asUpvalue(self: *@This()) *ObjUpvalue {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
     pub fn isString(self: *@This()) bool {
         return self.type == .String;
     }
@@ -143,6 +188,14 @@ pub const Obj = struct {
 
     pub fn isNative(self: *@This()) bool {
         return self.type == .NativeFn;
+    }
+
+    pub fn isClosure(self: *@This()) bool {
+        return self.type == .Closure;
+    }
+
+    pub fn isUpvalue(self: *@This()) bool {
+        return self.type == .Upvalue;
     }
 };
 
@@ -171,6 +224,7 @@ pub const ObjFunction = struct {
     arity: i32,
     chunk: Chunk,
     name: ?*ObjString,
+    upvalue_count: u8,
 
     pub fn format(
         self: @This(),
@@ -194,5 +248,35 @@ pub const ObjNative = struct {
     ) std.Io.Writer.Error!void {
         _ = self;
         try writer.print("<native fn>", .{});
+    }
+};
+
+pub const ObjClosure = struct {
+    pub const KIND = ObjType.Closure;
+
+    obj: Obj = undefined,
+    function: *ObjFunction,
+    upvalues: []?*ObjUpvalue,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        try self.function.format(writer);
+    }
+};
+
+pub const ObjUpvalue = struct {
+    pub const KIND = ObjType.Upvalue;
+
+    obj: Obj = undefined,
+    location: *Value,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        _ = self;
+        try writer.print("upvalue", .{});
     }
 };

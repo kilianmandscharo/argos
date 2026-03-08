@@ -70,6 +70,7 @@ pub const Token = struct {
     line: usize,
 
     pub fn toString(self: *Token) []const u8 {
+        if (self.type == .NewLine) return "<newline>";
         return self.source[self.start .. self.start + self.length];
     }
 

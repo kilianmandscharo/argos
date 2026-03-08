@@ -4,6 +4,7 @@ const chunk_module = @import("chunk.zig");
 const value_module = @import("value.zig");
 const object_module = @import("object.zig");
 const vm_module = @import("vm.zig");
+const logging = @import("logging.zig");
 
 const VirtualMachine = vm_module.VirtualMachine;
 
@@ -29,7 +30,8 @@ const Token = scanner_module.Token;
 const TokenType = scanner_module.TokenType;
 const Scanner = scanner_module.Scanner;
 
-const DEBUG_PRINT_CODE = true;
+const DEBUG_DISASSEMBLE = true;
+const DEBUG_PRINT_STEPS = false;
 
 const Precedence = enum(u8) {
     Lowest = 1,
@@ -77,24 +79,36 @@ pub const Compiler = struct {
     parser: *Parser,
     gpa: std.mem.Allocator,
     vm: *VirtualMachine,
-    locals: [std.math.maxInt(u8) + 1]Local,
+    locals: [UINT8_COUNT]Local,
     local_count: u32,
     scope_depth: u32,
     function: *ObjFunction,
     type: FunctionType,
     current_var: ?Token,
+    enclosing: ?*Compiler,
+    upvalues: [UINT8_COUNT]Upvalue,
+    indent: usize,
 
     const Local = struct {
         name: Token,
         depth: ?u32,
     };
 
+    const Upvalue = struct {
+        index: u8,
+        is_local: bool,
+    };
+
+    const UINT8_COUNT = std.math.maxInt(u8) + 1;
+
     pub fn init(
         vm: *VirtualMachine,
         gpa: std.mem.Allocator,
         parser: *Parser,
         func_type: FunctionType,
+        enclosing: ?*Compiler,
         current_var: ?Token,
+        indent: usize,
     ) !Compiler {
         var compiler = Compiler{
             .parser = parser,
@@ -106,6 +120,9 @@ pub const Compiler = struct {
             .function = try allocateFunction(vm),
             .type = func_type,
             .current_var = null,
+            .enclosing = enclosing,
+            .upvalues = undefined,
+            .indent = indent,
         };
 
         const local = &compiler.locals[compiler.local_count];
@@ -128,6 +145,16 @@ pub const Compiler = struct {
         return compiler;
     }
 
+    fn log(self: *Compiler, comptime format: []const u8, args: anytype) void {
+        if (!DEBUG_PRINT_STEPS) return;
+        const name = if (self.function.name) |name| name.chars else "script";
+        logging.log(
+            format,
+            args,
+            .{ .indent = self.indent, .module = name },
+        );
+    }
+
     pub fn compile(self: *Compiler) !*ObjFunction {
         try self.parser.advance();
         // TODO: we stop compilation on the first error, which makes sense for
@@ -144,7 +171,7 @@ pub const Compiler = struct {
     fn endCompiler(self: *Compiler) !*ObjFunction {
         try self.emitReturn();
         const function = self.function;
-        if (comptime DEBUG_PRINT_CODE) {
+        if (comptime DEBUG_DISASSEMBLE) {
             const name = if (self.function.name) |name| name.chars else "<script>";
             self.currentChunk().disassemble(name);
         }
@@ -158,6 +185,8 @@ pub const Compiler = struct {
 
     fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
         try self.parser.advance();
+
+        self.log("expression on {s}", .{self.parser.previous.toString()});
 
         if (getRule(self.parser.previous.type).prefix) |prefixFn| {
             const can_assign = @intFromEnum(precedence) < @intFromEnum(Precedence.Assign);
@@ -177,6 +206,8 @@ pub const Compiler = struct {
         } else {
             return self.errorAtPrevious("Expect expression.");
         }
+
+        self.log("end expression", .{});
     }
 
     fn isLineEnd(self: *Compiler) bool {
@@ -202,6 +233,9 @@ pub const Compiler = struct {
     }
 
     fn varDeclaration(self: *Compiler) !void {
+        self.log("var declaration", .{});
+        defer self.log("end var declaration", .{});
+
         const global = try self.parseVariable("Expect variable name.");
         if (try self.match(.Assign)) {
             if (self.check(.Fn)) {
@@ -293,7 +327,7 @@ pub const Compiler = struct {
             try self.returnStatement();
         } else if (try self.match(.LBrace)) {
             self.beginScope();
-            try self.block();
+            try self.blockStatement();
             try self.endScope();
         } else {
             try self.expressionStatement();
@@ -301,6 +335,9 @@ pub const Compiler = struct {
     }
 
     fn returnStatement(self: *Compiler) !void {
+        self.log("return statement", .{});
+        defer self.log("end return statement", .{});
+
         if (self.type == .Script) {
             return self.errorAtPrevious("Can't return from top-level code.");
         }
@@ -315,6 +352,9 @@ pub const Compiler = struct {
     }
 
     fn whileStatement(self: *Compiler) anyerror!void {
+        self.log("while statement", .{});
+        defer self.log("end while statement", .{});
+
         const loop_start = self.currentChunk().code.items.len;
         try self.consume(.LParen, "Expect '(' after 'while'");
         try self.expression();
@@ -330,6 +370,9 @@ pub const Compiler = struct {
     }
 
     fn forStatement(self: *Compiler) anyerror!void {
+        self.log("for statement", .{});
+        defer self.log("end for statement", .{});
+
         self.beginScope();
 
         try self.consume(.LParen, "Expect '(' after 'for'");
@@ -388,6 +431,9 @@ pub const Compiler = struct {
     }
 
     fn matchStatement(self: *Compiler) anyerror!void {
+        self.log("match statement", .{});
+        defer self.log("end match statement", .{});
+
         var has_target = false;
 
         if (self.check(.LParen)) {
@@ -472,13 +518,49 @@ pub const Compiler = struct {
         chunk.code.items[offset + 1] = bytes[1];
     }
 
+    fn addUpvalue(self: *Compiler, index: u8, is_local: bool) !u8 {
+        const upvalue_count = self.function.upvalue_count;
+
+        for (0..upvalue_count) |i| {
+            const upvalue = &self.upvalues[i];
+            if (upvalue.index == index and upvalue.is_local == is_local) {
+                return @intCast(i);
+            }
+        }
+
+        if (upvalue_count == UINT8_COUNT) {
+            return self.errorAtPrevious("Too many closure variables in function.");
+        }
+
+        self.upvalues[upvalue_count].is_local = is_local;
+        self.upvalues[upvalue_count].index = index;
+        const retVal = self.function.upvalue_count;
+        self.function.upvalue_count += 1;
+        return retVal;
+    }
+
+    fn resolveUpvalue(self: *Compiler, name: *Token) !?u8 {
+        if (self.enclosing == null) return null;
+
+        const local = try self.enclosing.?.resolveLocal(name);
+        if (local) |index| return try self.addUpvalue(@intCast(index), true);
+
+        const upvalue = try self.enclosing.?.resolveUpvalue(name);
+        if (upvalue) |index| return try self.addUpvalue(index, false);
+
+        return null;
+    }
+
     fn chopNewlines(self: *Compiler) !void {
         while (self.check(.NewLine)) {
             try self.parser.advance();
         }
     }
 
-    fn block(self: *Compiler) anyerror!void {
+    fn blockStatement(self: *Compiler) anyerror!void {
+        self.log("block statement", .{});
+        defer self.log("end block statement", .{});
+
         while (!self.check(.RBrace) and !self.check(.Eof)) {
             try self.declaration();
         }
@@ -524,18 +606,27 @@ pub const Compiler = struct {
     }
 
     fn printStatement(self: *Compiler) !void {
+        self.log("print statement", .{});
+        defer self.log("end print statement", .{});
+
         try self.expression();
         try self.expectLineEnd();
         try self.emitOpCode(.Print);
     }
 
     fn assertStatement(self: *Compiler) !void {
+        self.log("assert statement", .{});
+        defer self.log("end assert statement", .{});
+
         try self.expression();
         try self.expectLineEnd();
         try self.emitOpCode(.Assert);
     }
 
     fn expressionStatement(self: *Compiler) !void {
+        self.log("expression statement", .{});
+        defer self.log("end expression statement", .{});
+
         try self.expression();
         try self.expectLineEnd();
         try self.emitOpCode(.Pop);
@@ -705,15 +796,20 @@ fn namedVariable(compiler: *Compiler, name: *Token, can_assign: bool) !void {
     var getOp: OpCode = undefined;
     var setOp: OpCode = undefined;
 
-    const arg = try compiler.resolveLocal(name);
-    var arg_value: usize = undefined;
+    var arg: usize = undefined;
+    var emit_u24 = true;
 
-    if (arg) |val| {
+    if (try compiler.resolveLocal(name)) |val| {
         getOp = .GetLocal;
         setOp = .SetLocal;
-        arg_value = val;
+        arg = val;
+    } else if (try compiler.resolveUpvalue(name)) |val| {
+        getOp = .GetUpvalue;
+        setOp = .SetUpvalue;
+        arg = val;
+        emit_u24 = false;
     } else {
-        arg_value = try compiler.identifierConstant(name);
+        arg = try compiler.identifierConstant(name);
         getOp = .GetGlobal;
         setOp = .SetGlobal;
     }
@@ -721,10 +817,18 @@ fn namedVariable(compiler: *Compiler, name: *Token, can_assign: bool) !void {
     if (can_assign and try compiler.match(.Assign)) {
         try compiler.expression();
         try compiler.emitOpCode(setOp);
-        try compiler.emitU24(arg_value);
+        if (emit_u24) {
+            try compiler.emitU24(arg);
+        } else {
+            try compiler.emitByte(@intCast(arg));
+        }
     } else {
         try compiler.emitOpCode(getOp);
-        try compiler.emitU24(arg_value);
+        if (emit_u24) {
+            try compiler.emitU24(arg);
+        } else {
+            try compiler.emitByte(@intCast(arg));
+        }
     }
 }
 
@@ -749,12 +853,16 @@ fn logicalOr(compiler: *Compiler) !void {
 fn func(compiler: *Compiler, can_assign: bool) !void {
     _ = can_assign;
 
+    compiler.indent += 1;
+
     var new_compiler = try Compiler.init(
         compiler.vm,
         compiler.gpa,
         compiler.parser,
         .Function,
+        compiler,
         compiler.current_var,
+        compiler.indent,
     );
 
     new_compiler.beginScope();
@@ -777,8 +885,16 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
     try new_compiler.statement();
 
     const function = try new_compiler.endCompiler();
+    const constant = try compiler.makeConstant(wrapObj(&function.obj));
+    try compiler.emitOpCode(.Closure);
+    try compiler.emitU24(constant);
 
-    try compiler.emitConstant(wrapObj(&function.obj));
+    for (0..function.upvalue_count) |i| {
+        try compiler.emitByte(@intFromBool(new_compiler.upvalues[i].is_local));
+        try compiler.emitByte(new_compiler.upvalues[i].index);
+    }
+
+    compiler.indent -= 1;
 }
 
 fn call(compiler: *Compiler) !void {

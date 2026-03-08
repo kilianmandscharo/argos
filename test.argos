@@ -1,12 +1,8 @@
-let fib = fn(n) {
-    match {
-        n < 2 -> return n
-        else -> return fib(n - 2) + fib(n - 1)
-    }
+let outer = fn() {
+  let x = "outside"
+  let inner = fn() {
+    print x
+  }
+  inner()
 }
-
-let start = clock()
-print fib(35)
-let end = clock()
-
-print end - start
+outer()

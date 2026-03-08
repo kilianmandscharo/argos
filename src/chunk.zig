@@ -32,6 +32,9 @@ pub const OpCode = enum(u8) {
     Jump,
     Loop,
     Call,
+    Closure,
+    GetUpvalue,
+    SetUpvalue,
 };
 
 pub const OpByte = union(enum) {
@@ -129,6 +132,28 @@ pub const Chunk = struct {
             .Jump => return jumpByteInstruction(self, "OP_JUMP", offset, 1),
             .Loop => return jumpByteInstruction(self, "OP_JUMP", offset, -1),
             .Call => return byteInstruction(self, "OP_CALL", offset),
+            .GetUpvalue => return byteInstruction(self, "OP_GET_UPVALUE", offset),
+            .SetUpvalue => return byteInstruction(self, "OP_SET_UPVALUE", offset),
+            .Closure => {
+                var curr_offset = offset;
+                const constant = u24ToIndex(
+                    self.code.items[curr_offset + 1],
+                    self.code.items[curr_offset + 2],
+                    self.code.items[curr_offset + 3],
+                );
+                curr_offset += 4;
+                const value = self.constants.items[constant];
+                const function = value.asObj().asFunction();
+                std.debug.print("{s:<18}{d:4} {f}\n", .{ "OP_CLOSURE", constant, value });
+                for (0..function.upvalue_count) |_| {
+                    const is_local = if (self.code.items[curr_offset] == 1) "local" else "upvalue";
+                    curr_offset += 1;
+                    const index = self.code.items[curr_offset];
+                    curr_offset += 1;
+                    std.debug.print("{d:0>4}    | {s:<23}{s}{d:4}\n", .{ curr_offset - 2, "", is_local, index });
+                }
+                return curr_offset;
+            },
         }
     }
 };
@@ -168,7 +193,7 @@ fn constantInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
         chunk.code.items[offset + 3],
     );
     const value = chunk.constants.items[constant];
-    std.debug.print("{s:<18}{d:4} '{f}'\n", .{ name, constant, value });
+    std.debug.print("{s:<18}{d:4} {f}\n", .{ name, constant, value });
     return offset + 4;
 }
 

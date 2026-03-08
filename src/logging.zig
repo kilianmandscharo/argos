@@ -48,5 +48,6 @@ pub fn log(comptime fmt: []const u8, args: anytype, options: LogOptions) void {
     }
 
     std.debug.print(fmt, args);
+    std.debug.print("\n", .{});
     std.debug.print("\x1b[0m", .{});
 }
