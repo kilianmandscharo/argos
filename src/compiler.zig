@@ -92,6 +92,7 @@ pub const Compiler = struct {
     const Local = struct {
         name: Token,
         depth: ?u32,
+        is_captured: bool,
     };
 
     const Upvalue = struct {
@@ -128,6 +129,7 @@ pub const Compiler = struct {
         const local = &compiler.locals[compiler.local_count];
         compiler.local_count += 1;
         local.depth = 0;
+        local.is_captured = false;
         local.name.source = "";
         local.name.start = 0;
         local.name.length = 0;
@@ -302,6 +304,7 @@ pub const Compiler = struct {
         self.local_count += 1;
         local.name = name;
         local.depth = null;
+        local.is_captured = false;
     }
 
     fn identifierConstant(self: *Compiler, name: *Token) !usize {
@@ -542,8 +545,12 @@ pub const Compiler = struct {
     fn resolveUpvalue(self: *Compiler, name: *Token) !?u8 {
         if (self.enclosing == null) return null;
 
-        const local = try self.enclosing.?.resolveLocal(name);
-        if (local) |index| return try self.addUpvalue(@intCast(index), true);
+        const enclosing = self.enclosing.?;
+        const local = try enclosing.resolveLocal(name);
+        if (local) |index| {
+            enclosing.locals[index].is_captured = true;
+            return try self.addUpvalue(@intCast(index), true);
+        }
 
         const upvalue = try self.enclosing.?.resolveUpvalue(name);
         if (upvalue) |index| return try self.addUpvalue(index, false);
@@ -578,7 +585,11 @@ pub const Compiler = struct {
             self.locals[self.local_count - 1].depth != null and
             self.locals[self.local_count - 1].depth.? > self.scope_depth)
         {
-            try self.emitOpCode(.Pop);
+            if (self.locals[self.local_count - 1].is_captured) {
+                try self.emitOpCode(.CloseUpvalue);
+            } else {
+                try self.emitOpCode(.Pop);
+            }
             self.local_count -= 1;
         }
     }

@@ -35,6 +35,7 @@ pub const OpCode = enum(u8) {
     Closure,
     GetUpvalue,
     SetUpvalue,
+    CloseUpvalue,
 };
 
 pub const OpByte = union(enum) {
@@ -134,6 +135,7 @@ pub const Chunk = struct {
             .Call => return byteInstruction(self, "OP_CALL", offset),
             .GetUpvalue => return byteInstruction(self, "OP_GET_UPVALUE", offset),
             .SetUpvalue => return byteInstruction(self, "OP_SET_UPVALUE", offset),
+            .CloseUpvalue => return simpleInstruction("OP_CLOSE_UPVALUE", offset),
             .Closure => {
                 var curr_offset = offset;
                 const constant = u24ToIndex(

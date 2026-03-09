@@ -35,6 +35,8 @@ pub fn allocateObject(vm: *VirtualMachine, T: type) !*T {
 pub fn allocateUpvalue(vm: *VirtualMachine, slot: *Value) !*ObjUpvalue {
     const upvalue = try allocateObject(vm, ObjUpvalue);
     upvalue.location = slot;
+    upvalue.next = null;
+    upvalue.closed = null;
     return upvalue;
 }
 
@@ -271,6 +273,8 @@ pub const ObjUpvalue = struct {
 
     obj: Obj = undefined,
     location: *Value,
+    closed: ?Value,
+    next: ?*ObjUpvalue,
 
     pub fn format(
         self: @This(),

@@ -55,6 +55,7 @@ pub const VirtualMachine = struct {
     strings: std.HashMapUnmanaged(*object.ObjString, void, StringContext, 80),
     globals: std.HashMapUnmanaged(*object.ObjString, value.Value, StringContext, 80),
     objects: ?*object.Obj,
+    open_upvalues: ?*object.ObjUpvalue,
 
     pub fn init(gpa: std.mem.Allocator) !VirtualMachine {
         var vm = VirtualMachine{
@@ -67,6 +68,7 @@ pub const VirtualMachine = struct {
             .strings = .{},
             .globals = .{},
             .objects = null,
+            .open_upvalues = null,
         };
 
         try vm.defineNative("clock", clockNative);
@@ -220,8 +222,34 @@ pub const VirtualMachine = struct {
     }
 
     fn captureUpvalue(self: *VirtualMachine, local: *value.Value) !*object.ObjUpvalue {
-        const upvalue = try object.allocateUpvalue(self, local);
-        return upvalue;
+        var prev_upvalue: ?*object.ObjUpvalue = null;
+        var upvalue = self.open_upvalues;
+        while (upvalue != null and @intFromPtr(upvalue.?.location) > @intFromPtr(local)) {
+            prev_upvalue = upvalue;
+            upvalue = upvalue.?.next;
+        }
+
+        if (upvalue != null and upvalue.?.location == local) return upvalue.?;
+
+        const created_upvalue = try object.allocateUpvalue(self, local);
+        created_upvalue.next = upvalue;
+
+        if (prev_upvalue) |prev| {
+            prev.next = created_upvalue;
+        } else {
+            self.open_upvalues = created_upvalue;
+        }
+
+        return created_upvalue;
+    }
+
+    fn closeUpvalues(self: *VirtualMachine, last: *value.Value) void {
+        while (self.open_upvalues != null and @intFromPtr(self.open_upvalues.?.location) >= @intFromPtr(last)) {
+            const upvalue = self.open_upvalues.?;
+            upvalue.closed = upvalue.location.*;
+            upvalue.location = &upvalue.closed.?;
+            self.open_upvalues = upvalue.next;
+        }
     }
 
     fn call(self: *VirtualMachine, closure: *object.ObjClosure, argCount: u8) !void {
@@ -393,8 +421,14 @@ pub const VirtualMachine = struct {
                     const slot = self.readByte();
                     self.frame.closure.upvalues[slot].?.location.* = self.peek(0);
                 },
+                .CloseUpvalue => {
+                    std.debug.print("close upvalue\n", .{});
+                    self.closeUpvalues(&self.stack[self.stack_top - 1]);
+                    _ = self.pop();
+                },
                 .Return => {
                     const result = self.pop();
+                    self.closeUpvalues(&self.stack[self.frame.slot]);
                     self.frame_count -= 1;
                     if (self.frame_count == 0) {
                         _ = self.pop();

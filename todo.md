@@ -10,3 +10,4 @@
 - implement ternary
 - implement orelse
 - fix line numbers
+- a variable that is assigned a fn can't ever be reassigned

@@ -500,6 +500,46 @@ test "vm tests" {
             \\assert result == 9
             ,
         },
+        .{
+            .description = "closure",
+            .source =
+            \\let foo = fn() {
+            \\    let x = 2
+            \\    let bar = fn(a) {
+            \\        return a + x
+            \\    }
+            \\    return bar
+            \\}
+            \\
+            \\let func = foo()
+            \\let result = func(10)
+            \\
+            \\assert result == 12
+            ,
+        },
+        .{
+            .description = "deep closure",
+            .source =
+            \\let foo = fn() {
+            \\    let x = 1
+            \\    let bar = fn() {
+            \\        let y = 2 
+            \\        let baz = fn() {
+            \\            let z = 3
+            \\            return x + y + z
+            \\        }
+            \\        return baz
+            \\    }
+            \\    return bar
+            \\}
+            \\
+            \\let bar = foo()
+            \\let baz = bar()
+            \\let result = baz()
+            \\
+            \\assert result == 6
+            ,
+        },
     };
 
     try runTests(TestCase, "evaluate vm tests", &test_cases, run);

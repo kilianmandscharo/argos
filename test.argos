@@ -1,8 +1,14 @@
-let outer = fn() {
-  let x = "outside"
-  let inner = fn() {
-    print x
-  }
-  inner()
+let foo = fn() {
+    let x = 2
+    let y = 3
+    let z = x + y
+    let bar = fn(a) {
+        return a + z
+    }
+    return bar
 }
-outer()
+
+let func = foo()
+let result = func(10)
+
+print result
