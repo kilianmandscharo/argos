@@ -2,10 +2,15 @@ const std = @import("std");
 const vm_module = @import("vm.zig");
 const chunk_module = @import("chunk.zig");
 const value_module = @import("value.zig");
+const memory = @import("memory.zig");
+const logging = @import("logging.zig");
 
 const VirtualMachine = vm_module.VirtualMachine;
 const Chunk = chunk_module.Chunk;
 const Value = value_module.Value;
+
+const DEBUG_STRESS_GC = true;
+const DEBUG_LOG_GC = true;
 
 pub const ObjType = enum {
     String,
@@ -20,14 +25,23 @@ pub fn allocateObject(vm: *VirtualMachine, T: type) !*T {
         @compileError("Object type must have field 'obj'");
     }
 
+    if (comptime DEBUG_STRESS_GC) {
+        try memory.collectGarbage(vm);
+    }
+
     const object = try vm.gpa.create(T);
 
     object.obj = .{
         .type = T.KIND,
+        .is_marked = false,
         .next = vm.objects,
     };
 
     vm.objects = &object.obj;
+
+    if (comptime DEBUG_LOG_GC) {
+        logging.log("0x{x} allocate {d} for {s}", .{ @intFromPtr(object), @sizeOf(T), @typeName(T) }, .{});
+    }
 
     return object;
 }
@@ -90,6 +104,7 @@ fn allocateStringInternal(vm: *VirtualMachine, chars: []const u8, hash: u64, sta
 
 pub const Obj = struct {
     type: ObjType,
+    is_marked: bool,
     next: ?*Obj,
 
     pub fn getType(self: *@This()) []const u8 {
@@ -131,6 +146,10 @@ pub const Obj = struct {
     }
 
     pub fn deinit(self: *@This(), gpa: std.mem.Allocator) void {
+        if (comptime DEBUG_LOG_GC) {
+            logging.log("0x{x} free type {s}", .{ @intFromPtr(self), self.getType() }, .{});
+        }
+
         switch (self.type) {
             .String => {
                 const string_obj = self.asString();

@@ -1018,3 +1018,5 @@ fn getRulePrecedence(token_type: TokenType) Precedence {
     }
     return Precedence.Lowest;
 }
+
+pub fn markCompilerRoots(compiler: *Compiler) void {}

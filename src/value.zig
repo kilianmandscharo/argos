@@ -44,6 +44,10 @@ pub const Value = union(enum) {
         return self == .Obj and self.Obj.type == expected_type;
     }
 
+    pub inline fn isObj(self: @This()) bool {
+        return self == .Obj;
+    }
+
     pub inline fn asObj(self: @This()) *Obj {
         return self.Obj;
     }

@@ -1,14 +1,7 @@
 let foo = fn() {
-    let x = 2
-    let y = 3
-    let z = x + y
-    let bar = fn(a) {
-        return a + z
-    }
-    return bar
+    return 1 + 2
 }
 
-let func = foo()
-let result = func(10)
+foo = 4
 
-print result
+print foo

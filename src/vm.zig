@@ -45,6 +45,8 @@ const StringContext = struct {
     }
 };
 
+pub const TableGlobals = std.HashMapUnmanaged(*object.ObjString, value.Value, StringContext, 80);
+
 pub const VirtualMachine = struct {
     gpa: std.mem.Allocator,
     stack: [STACK_MAX]value.Value,
@@ -53,7 +55,7 @@ pub const VirtualMachine = struct {
     frame_count: usize,
     frame: *CallFrame,
     strings: std.HashMapUnmanaged(*object.ObjString, void, StringContext, 80),
-    globals: std.HashMapUnmanaged(*object.ObjString, value.Value, StringContext, 80),
+    globals: TableGlobals,
     objects: ?*object.Obj,
     open_upvalues: ?*object.ObjUpvalue,
 
