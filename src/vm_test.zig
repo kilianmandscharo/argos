@@ -1,13 +1,7 @@
 const std = @import("std");
-
 const test_utils = @import("test_utils.zig");
-const runTests = test_utils.runTests;
-
-const vm_module = @import("vm.zig");
-const chunck_module = @import("chunk.zig");
-
-const VirtualMachine = vm_module.VirtualMachine;
-const Chunk = chunck_module.Chunk;
+const virtual_machine = @import("vm.zig");
+const chunck = @import("chunk.zig");
 
 const DEBUG = true;
 
@@ -21,7 +15,7 @@ test "vm tests" {
         fn runTest(test_case: TestCase) anyerror!void {
             const allocator = std.testing.allocator;
 
-            var vm = try VirtualMachine.init(allocator);
+            var vm = try virtual_machine.VirtualMachine.init(allocator);
             defer vm.deinit();
 
             const result = try vm.interpret(test_case.source);
@@ -542,5 +536,5 @@ test "vm tests" {
         },
     };
 
-    try runTests(TestCase, "evaluate vm tests", &test_cases, run);
+    try test_utils.runTests(TestCase, "evaluate vm tests", &test_cases, run);
 }

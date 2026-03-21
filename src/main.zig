@@ -1,9 +1,6 @@
 const std = @import("std");
-const vm_module = @import("vm.zig");
-const chunck_module = @import("chunk.zig");
-
-const VirtualMachine = vm_module.VirtualMachine;
-const Chunk = chunck_module.Chunk;
+const virtual_machine = @import("vm.zig");
+const chunck = @import("chunk.zig");
 
 fn repl(_: std.mem.Allocator) !void {
     var stdin_buf: [1024]u8 = undefined;
@@ -26,7 +23,7 @@ fn repl(_: std.mem.Allocator) !void {
     }
 }
 
-fn runFile(allocator: std.mem.Allocator, vm: *VirtualMachine) !void {
+fn runFile(allocator: std.mem.Allocator, vm: *virtual_machine.VirtualMachine) !void {
     const file = try std.fs.cwd().openFile("test.argos", .{});
     defer file.close();
 
@@ -49,7 +46,7 @@ pub fn main() !void {
     const source = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(source);
 
-    var vm = try VirtualMachine.init(allocator);
+    var vm = try virtual_machine.VirtualMachine.init(allocator);
     defer vm.deinit();
 
     _ = try vm.interpret(source);

@@ -1,7 +1,5 @@
 const std = @import("std");
-const value_module = @import("value.zig");
-
-const Value = value_module.Value;
+const value = @import("value.zig");
 
 pub const OpCode = enum(u8) {
     Return,
@@ -45,7 +43,7 @@ pub const OpByte = union(enum) {
 
 pub const Chunk = struct {
     code: std.ArrayList(u8),
-    constants: std.ArrayList(Value),
+    constants: std.ArrayList(value.Value),
     lines: std.ArrayList(usize),
 
     pub fn init() Chunk {
@@ -74,8 +72,8 @@ pub const Chunk = struct {
         try self.lines.append(gpa, line);
     }
 
-    pub fn writeConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value, line: usize) !void {
-        const constant = try self.addConstant(gpa, value);
+    pub fn writeConstant(self: *Chunk, gpa: std.mem.Allocator, val: value.Value, line: usize) !void {
+        const constant = try self.addConstant(gpa, val);
         const bytes = indexToU24(constant);
         try self.write(gpa, OpByte{ .Op = .Constant }, line);
         try self.write(gpa, OpByte{ .Byte = bytes[0] }, line);
@@ -83,9 +81,9 @@ pub const Chunk = struct {
         try self.write(gpa, OpByte{ .Byte = bytes[2] }, line);
     }
 
-    pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value) !usize {
+    pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, val: value.Value) !usize {
         // TODO: push value on to stack
-        try self.constants.append(gpa, value);
+        try self.constants.append(gpa, val);
         // TODO: pop value from stack
         return self.constants.items.len - 1;
     }
@@ -146,9 +144,9 @@ pub const Chunk = struct {
                     self.code.items[curr_offset + 3],
                 );
                 curr_offset += 4;
-                const value = self.constants.items[constant];
-                const function = value.asObj().asFunction();
-                std.debug.print("{s:<18}{d:4} {f}\n", .{ "OP_CLOSURE", constant, value });
+                const val = self.constants.items[constant];
+                const function = val.asObj().asFunction();
+                std.debug.print("{s:<18}{d:4} {f}\n", .{ "OP_CLOSURE", constant, val });
                 for (0..function.upvalue_count) |_| {
                     const is_local = if (self.code.items[curr_offset] == 1) "local" else "upvalue";
                     curr_offset += 1;
@@ -196,8 +194,8 @@ fn constantInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
         chunk.code.items[offset + 2],
         chunk.code.items[offset + 3],
     );
-    const value = chunk.constants.items[constant];
-    std.debug.print("{s:<18}{d:4} {f}\n", .{ name, constant, value });
+    const val = chunk.constants.items[constant];
+    std.debug.print("{s:<18}{d:4} {f}\n", .{ name, constant, val });
     return offset + 4;
 }
 

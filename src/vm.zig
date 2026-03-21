@@ -7,8 +7,6 @@ const scanner = @import("scanner.zig");
 const native = @import("native.zig");
 const logging = @import("logging.zig");
 
-const clockNative = native.clockNative;
-
 const InterpretResult = enum {
     Ok,
     CompileError,
@@ -88,7 +86,7 @@ pub const VirtualMachine = struct {
             .next_gc = 1024 * 1024,
         };
 
-        try vm.defineNative("clock", clockNative);
+        try vm.defineNative("clock", native.clockNative);
 
         return vm;
     }

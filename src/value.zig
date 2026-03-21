@@ -1,15 +1,12 @@
 const std = @import("std");
-const object_module = @import("object.zig");
-
-const Obj = object_module.Obj;
-const ObjType = object_module.ObjType;
+const object = @import("object.zig");
 
 pub const Value = union(enum) {
     Float: f64,
     Int: i64,
     Bool: bool,
     Null,
-    Obj: *Obj,
+    Obj: *object.Obj,
 
     pub fn format(
         self: @This(),
@@ -40,7 +37,7 @@ pub const Value = union(enum) {
         };
     }
 
-    pub inline fn isObjType(self: @This(), expected_type: ObjType) bool {
+    pub inline fn isObjType(self: @This(), expected_type: object.ObjType) bool {
         return self == .Obj and self.Obj.type == expected_type;
     }
 
@@ -48,12 +45,12 @@ pub const Value = union(enum) {
         return self == .Obj;
     }
 
-    pub inline fn asObj(self: @This()) *Obj {
+    pub inline fn asObj(self: @This()) *object.Obj {
         return self.Obj;
     }
 };
 
-pub inline fn wrapObj(val: *Obj) Value {
+pub inline fn wrapObj(val: *object.Obj) Value {
     return Value{ .Obj = val };
 }
 

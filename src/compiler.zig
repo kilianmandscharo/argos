@@ -1,35 +1,11 @@
 const std = @import("std");
-const scanner_module = @import("scanner.zig");
-const chunk_module = @import("chunk.zig");
-const value_module = @import("value.zig");
-const object_module = @import("object.zig");
-const vm_module = @import("vm.zig");
+const scanner = @import("scanner.zig");
+const chunk = @import("chunk.zig");
+const value = @import("value.zig");
+const object = @import("object.zig");
+const virtual_machine = @import("vm.zig");
 const logging = @import("logging.zig");
 const memory = @import("memory.zig");
-
-const VirtualMachine = vm_module.VirtualMachine;
-
-const Obj = object_module.Obj;
-const ObjString = object_module.ObjString;
-const ObjFunction = object_module.ObjFunction;
-const allocateFunction = object_module.allocateFunction;
-const copyStaticString = object_module.copyStaticString;
-
-const Value = value_module.Value;
-const wrapInt = value_module.wrapInt;
-const wrapFloat = value_module.wrapFloat;
-const wrapBool = value_module.wrapBool;
-const wrapObj = value_module.wrapObj;
-
-const Chunk = chunk_module.Chunk;
-const OpCode = chunk_module.OpCode;
-const OpByte = chunk_module.OpByte;
-const indexToU24 = chunk_module.indexToU24;
-const indexToU16 = chunk_module.indexToU16;
-
-const Token = scanner_module.Token;
-const TokenType = scanner_module.TokenType;
-const Scanner = scanner_module.Scanner;
 
 const DEBUG_DISASSEMBLE = true;
 const DEBUG_PRINT_STEPS = false;
@@ -58,15 +34,15 @@ const FunctionType = enum {
 };
 
 pub const Parser = struct {
-    current: Token,
-    previous: Token,
-    scanner: *Scanner,
+    current: scanner.Token,
+    previous: scanner.Token,
+    scanner: *scanner.Scanner,
 
-    pub fn init(scanner: *Scanner) @This() {
+    pub fn init(scanner_instance: *scanner.Scanner) @This() {
         return Parser{
             .current = undefined,
             .previous = undefined,
-            .scanner = scanner,
+            .scanner = scanner_instance,
         };
     }
 
@@ -79,19 +55,19 @@ pub const Parser = struct {
 pub const Compiler = struct {
     parser: *Parser,
     gpa: std.mem.Allocator,
-    vm: *VirtualMachine,
+    vm: *virtual_machine.VirtualMachine,
     locals: [UINT8_COUNT]Local,
     local_count: u32,
     scope_depth: u32,
-    function: *ObjFunction,
+    function: *object.ObjFunction,
     type: FunctionType,
-    current_var: ?Token,
+    current_var: ?scanner.Token,
     enclosing: ?*Compiler,
     upvalues: [UINT8_COUNT]Upvalue,
     indent: usize,
 
     const Local = struct {
-        name: Token,
+        name: scanner.Token,
         depth: ?u32,
         is_captured: bool,
     };
@@ -104,12 +80,12 @@ pub const Compiler = struct {
     const UINT8_COUNT = std.math.maxInt(u8) + 1;
 
     pub fn init(
-        vm: *VirtualMachine,
+        vm: *virtual_machine.VirtualMachine,
         gpa: std.mem.Allocator,
         parser: *Parser,
         func_type: FunctionType,
         enclosing: ?*Compiler,
-        current_var: ?Token,
+        current_var: ?scanner.Token,
         indent: usize,
     ) !Compiler {
         var compiler = Compiler{
@@ -119,7 +95,7 @@ pub const Compiler = struct {
             .locals = undefined,
             .scope_depth = 0,
             .local_count = 0,
-            .function = try allocateFunction(vm),
+            .function = try object.allocateFunction(vm),
             .type = func_type,
             .current_var = null,
             .enclosing = enclosing,
@@ -140,7 +116,7 @@ pub const Compiler = struct {
                 const start = curr.start;
                 const end = start + curr.length;
                 const slice = curr.source[start..end];
-                const obj = try copyStaticString(vm, slice);
+                const obj = try object.copyStaticString(vm, slice);
                 compiler.function.name = obj.asString();
             }
         }
@@ -158,7 +134,7 @@ pub const Compiler = struct {
         );
     }
 
-    pub fn compile(self: *Compiler) !*ObjFunction {
+    pub fn compile(self: *Compiler) !*object.ObjFunction {
         try self.parser.advance();
         // TODO: we stop compilation on the first error, which makes sense for
         // degugging, but how to best handle?
@@ -171,7 +147,7 @@ pub const Compiler = struct {
         return try self.endCompiler();
     }
 
-    fn endCompiler(self: *Compiler) !*ObjFunction {
+    fn endCompiler(self: *Compiler) !*object.ObjFunction {
         try self.emitReturn();
         const function = self.function;
         if (comptime DEBUG_DISASSEMBLE) {
@@ -297,7 +273,7 @@ pub const Compiler = struct {
         try self.addLocal(name);
     }
 
-    fn addLocal(self: *Compiler, name: Token) !void {
+    fn addLocal(self: *Compiler, name: scanner.Token) !void {
         if (self.local_count == std.math.maxInt(u8) + 1) {
             return self.errorAtPrevious("Too many local variables in block.");
         }
@@ -308,12 +284,12 @@ pub const Compiler = struct {
         local.is_captured = false;
     }
 
-    fn identifierConstant(self: *Compiler, name: *Token) !usize {
+    fn identifierConstant(self: *Compiler, name: *scanner.Token) !usize {
         const start = name.start;
         const end = name.start + name.length;
         const slice = name.source[start..end];
-        const obj = try copyStaticString(self.vm, slice);
-        return try self.makeConstant(wrapObj(obj));
+        const obj = try object.copyStaticString(self.vm, slice);
+        return try self.makeConstant(value.wrapObj(obj));
     }
 
     fn statement(self: *Compiler) !void {
@@ -410,7 +386,7 @@ pub const Compiler = struct {
 
         try self.emitOpCode(.GetLocal);
         try self.emitU24(increment_var_index);
-        try self.emitConstant(wrapInt(1));
+        try self.emitConstant(value.wrapInt(1));
         try self.emitOpCode(.Add);
         try self.emitOpCode(.SetLocal);
         try self.emitU24(increment_var_index);
@@ -447,7 +423,7 @@ pub const Compiler = struct {
             try self.consume(.RParen, "Expect ')' after match target");
         }
 
-        const instruction: OpCode = if (has_target) .JumpIfNotEq else .JumpIfFalse;
+        const instruction: chunk.OpCode = if (has_target) .JumpIfNotEq else .JumpIfFalse;
 
         if (!self.check(.LBrace)) {
             try self.expression();
@@ -504,7 +480,7 @@ pub const Compiler = struct {
         else_jumps.deinit(self.gpa);
     }
 
-    fn emitJump(self: *Compiler, instruction: OpCode) !usize {
+    fn emitJump(self: *Compiler, instruction: chunk.OpCode) !usize {
         try self.emitOpCode(instruction);
         try self.emitByte(0xff);
         try self.emitByte(0xff);
@@ -512,14 +488,14 @@ pub const Compiler = struct {
     }
 
     fn patchJump(self: *Compiler, offset: usize) !void {
-        const chunk = self.currentChunk();
-        const jump = chunk.code.items.len - offset - 2;
+        const cur_chunk = self.currentChunk();
+        const jump = cur_chunk.code.items.len - offset - 2;
         if (jump > std.math.maxInt(u16)) {
             return self.errorAtPrevious("Too much code to jump over.");
         }
-        const bytes = indexToU16(jump);
-        chunk.code.items[offset] = bytes[0];
-        chunk.code.items[offset + 1] = bytes[1];
+        const bytes = chunk.indexToU16(jump);
+        cur_chunk.code.items[offset] = bytes[0];
+        cur_chunk.code.items[offset + 1] = bytes[1];
     }
 
     fn addUpvalue(self: *Compiler, index: u8, is_local: bool) !u8 {
@@ -543,7 +519,7 @@ pub const Compiler = struct {
         return retVal;
     }
 
-    fn resolveUpvalue(self: *Compiler, name: *Token) !?u8 {
+    fn resolveUpvalue(self: *Compiler, name: *scanner.Token) !?u8 {
         if (self.enclosing == null) return null;
 
         const enclosing = self.enclosing.?;
@@ -595,7 +571,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn resolveLocal(self: *Compiler, name: *Token) !?usize {
+    fn resolveLocal(self: *Compiler, name: *scanner.Token) !?usize {
         if (self.local_count == 0) return null;
         var i = self.local_count;
         while (i > 0) : (i -= 1) {
@@ -610,7 +586,7 @@ pub const Compiler = struct {
         return null;
     }
 
-    fn identifiersEqual(a: *Token, b: *Token) bool {
+    fn identifiersEqual(a: *scanner.Token, b: *scanner.Token) bool {
         const a_string = a.toString();
         const b_string = b.toString();
         if (a_string.len != b_string.len) return false;
@@ -648,54 +624,54 @@ pub const Compiler = struct {
         try self.parsePrecedence(.Lowest);
     }
 
-    fn emitConstant(self: *Compiler, value: Value) !void {
-        try self.currentChunk().writeConstant(self.gpa, value, self.parser.previous.line);
+    fn emitConstant(self: *Compiler, val: value.Value) !void {
+        try self.currentChunk().writeConstant(self.gpa, val, self.parser.previous.line);
     }
 
-    fn makeConstant(self: *Compiler, value: Value) !usize {
-        return try self.currentChunk().addConstant(self.gpa, value);
+    fn makeConstant(self: *Compiler, val: value.Value) !usize {
+        return try self.currentChunk().addConstant(self.gpa, val);
     }
 
-    fn currentChunk(self: *Compiler) *Chunk {
+    fn currentChunk(self: *Compiler) *chunk.Chunk {
         return &self.function.chunk;
     }
 
-    fn emitBytes(self: *Compiler, first: OpCode, second: u8) !void {
+    fn emitBytes(self: *Compiler, first: chunk.OpCode, second: u8) !void {
         try self.emitOpCode(first);
         try self.emitByte(second);
     }
 
-    fn emitOpByte(self: *Compiler, op_byte: OpByte) !void {
+    fn emitOpByte(self: *Compiler, op_byte: chunk.OpByte) !void {
         try self.currentChunk().write(self.gpa, op_byte, self.parser.previous.line);
     }
 
     fn emitByte(self: *Compiler, byte: u8) !void {
-        try self.currentChunk().write(self.gpa, OpByte{ .Byte = byte }, self.parser.previous.line);
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Byte = byte }, self.parser.previous.line);
     }
 
     fn emitU24(self: *Compiler, index: usize) !void {
-        const bytes = indexToU24(index);
+        const bytes = chunk.indexToU24(index);
         try self.emitByte(bytes[0]);
         try self.emitByte(bytes[1]);
         try self.emitByte(bytes[2]);
     }
 
     fn emitU16(self: *Compiler, index: usize) !void {
-        const bytes = indexToU16(index);
+        const bytes = chunk.indexToU16(index);
         try self.emitByte(bytes[0]);
         try self.emitByte(bytes[1]);
     }
 
-    fn emitOpCode(self: *Compiler, op_code: OpCode) !void {
-        try self.currentChunk().write(self.gpa, OpByte{ .Op = op_code }, self.parser.previous.line);
+    fn emitOpCode(self: *Compiler, op_code: chunk.OpCode) !void {
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = op_code }, self.parser.previous.line);
     }
 
-    fn emitOpCodes(self: *Compiler, a: OpCode, b: OpCode) !void {
-        try self.currentChunk().write(self.gpa, OpByte{ .Op = a }, self.parser.previous.line);
-        try self.currentChunk().write(self.gpa, OpByte{ .Op = b }, self.parser.previous.line);
+    fn emitOpCodes(self: *Compiler, a: chunk.OpCode, b: chunk.OpCode) !void {
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = a }, self.parser.previous.line);
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = b }, self.parser.previous.line);
     }
 
-    fn consume(self: *Compiler, expected: TokenType, message: []const u8) !void {
+    fn consume(self: *Compiler, expected: scanner.TokenType, message: []const u8) !void {
         if (self.check(expected)) {
             try self.parser.advance();
             return;
@@ -703,13 +679,13 @@ pub const Compiler = struct {
         return self.errorAtCurrent(message);
     }
 
-    fn match(self: *Compiler, token_type: TokenType) !bool {
+    fn match(self: *Compiler, token_type: scanner.TokenType) !bool {
         if (!self.check(token_type)) return false;
         try self.parser.advance();
         return true;
     }
 
-    fn check(self: *Compiler, token_type: TokenType) bool {
+    fn check(self: *Compiler, token_type: scanner.TokenType) bool {
         return self.parser.current.type == token_type;
     }
 
@@ -721,7 +697,7 @@ pub const Compiler = struct {
         return Compiler.errorAt(&self.parser.previous, message);
     }
 
-    fn errorAt(token: *Token, message: []const u8) anyerror {
+    fn errorAt(token: *scanner.Token, message: []const u8) anyerror {
         std.debug.print("[line {d}] Error", .{token.line});
         switch (token.type) {
             .Eof => std.debug.print(" at end", .{}),
@@ -771,14 +747,14 @@ fn unary(compiler: *Compiler, can_assign: bool) !void {
 
 fn float(compiler: *Compiler, can_assign: bool) !void {
     _ = can_assign;
-    const value = try std.fmt.parseFloat(f64, compiler.parser.previous.toString());
-    try compiler.emitConstant(wrapFloat(value));
+    const val = try std.fmt.parseFloat(f64, compiler.parser.previous.toString());
+    try compiler.emitConstant(value.wrapFloat(val));
 }
 
 fn integer(compiler: *Compiler, can_assign: bool) !void {
     _ = can_assign;
-    const value = try std.fmt.parseInt(i64, compiler.parser.previous.toString(), 10);
-    try compiler.emitConstant(wrapInt(value));
+    const val = try std.fmt.parseInt(i64, compiler.parser.previous.toString(), 10);
+    try compiler.emitConstant(value.wrapInt(val));
 }
 
 fn literal(compiler: *Compiler, can_assign: bool) !void {
@@ -796,7 +772,7 @@ fn string(compiler: *Compiler, can_assign: bool) !void {
     const start = compiler.parser.previous.start + 1;
     const end = start + compiler.parser.previous.length - 2;
     const slice = compiler.parser.previous.source[start..end];
-    try compiler.emitConstant(wrapObj(try copyStaticString(compiler.vm, slice)));
+    try compiler.emitConstant(value.wrapObj(try object.copyStaticString(compiler.vm, slice)));
 }
 
 fn variable(compiler: *Compiler, can_assign: bool) !void {
@@ -804,9 +780,9 @@ fn variable(compiler: *Compiler, can_assign: bool) !void {
     try namedVariable(compiler, &name, can_assign);
 }
 
-fn namedVariable(compiler: *Compiler, name: *Token, can_assign: bool) !void {
-    var getOp: OpCode = undefined;
-    var setOp: OpCode = undefined;
+fn namedVariable(compiler: *Compiler, name: *scanner.Token, can_assign: bool) !void {
+    var getOp: chunk.OpCode = undefined;
+    var setOp: chunk.OpCode = undefined;
 
     var arg: usize = undefined;
     var emit_u24 = true;
@@ -902,7 +878,7 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
 
     compiler.vm.current_compiler = compiler;
 
-    const constant = try compiler.makeConstant(wrapObj(&function.obj));
+    const constant = try compiler.makeConstant(value.wrapObj(&function.obj));
     try compiler.emitOpCode(.Closure);
     try compiler.emitU24(constant);
 
@@ -941,16 +917,16 @@ const ParseRule = struct {
     precedence: ?Precedence,
 };
 
-const token_count = @typeInfo(TokenType).@"enum".fields.len;
+const token_count = @typeInfo(scanner.TokenType).@"enum".fields.len;
 
 const rules: [token_count]ParseRule = initRules();
 
 fn initRules() [token_count]ParseRule {
     var table: [token_count]ParseRule = undefined;
 
-    inline for (@typeInfo(TokenType).@"enum".fields) |field| {
+    inline for (@typeInfo(scanner.TokenType).@"enum".fields) |field| {
         const index = field.value;
-        const tag = @as(TokenType, @enumFromInt(index));
+        const tag = @as(scanner.TokenType, @enumFromInt(index));
         table[index] = switch (tag) {
             .LParen => .{ .prefix = grouping, .infix = call, .precedence = .Call },
             .RParen => .{ .prefix = null, .infix = null, .precedence = null },
@@ -1010,15 +986,15 @@ fn initRules() [token_count]ParseRule {
     return table;
 }
 
-fn getRule(token_type: TokenType) *const ParseRule {
+fn getRule(token_type: scanner.TokenType) *const ParseRule {
     return &rules[@intFromEnum(token_type)];
 }
 
-fn getRulePrecedenceValue(token_type: TokenType) usize {
+fn getRulePrecedenceValue(token_type: scanner.TokenType) usize {
     return @intFromEnum(getRulePrecedence(token_type));
 }
 
-fn getRulePrecedence(token_type: TokenType) Precedence {
+fn getRulePrecedence(token_type: scanner.TokenType) Precedence {
     if (getRule(token_type).precedence) |precedence| {
         return precedence;
     }
