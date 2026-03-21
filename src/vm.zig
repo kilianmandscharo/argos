@@ -140,7 +140,8 @@ pub const VirtualMachine = struct {
     pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
         var s = scanner.Scanner.init(source);
         var p = compiler.Parser.init(&s);
-        var c = try compiler.Compiler.init(self, self.gpa, &p, .Script, null, null, 0);
+        var c: compiler.Compiler = undefined;
+        try compiler.Compiler.init(&c, self, self.gpa, &p, .Script, null, null, 0);
 
         self.current_compiler = &c;
 

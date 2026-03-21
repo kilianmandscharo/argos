@@ -486,8 +486,8 @@ test "vm tests" {
             \\    let bar = fn(a, b) {
             \\        return a + b
             \\    }
-            \\    return bar(2, 7)    
-            \\} 
+            \\    return bar(2, 7)
+            \\}
             \\
             \\let result = foo()
             \\
@@ -517,7 +517,7 @@ test "vm tests" {
             \\let foo = fn() {
             \\    let x = 1
             \\    let bar = fn() {
-            \\        let y = 2 
+            \\        let y = 2
             \\        let baz = fn() {
             \\            let z = 3
             \\            return x + y + z

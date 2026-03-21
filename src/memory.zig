@@ -131,7 +131,9 @@ fn markRoots(vm: *virtual_machine.VirtualMachine) !void {
 fn markCompilerRoots(vm: *virtual_machine.VirtualMachine) !void {
     var current = vm.current_compiler;
     while (current) |c| {
-        try markObject(vm, &c.function.obj);
+        if (c.function) |f| {
+            try markObject(vm, &f.obj);
+        }
         current = c.enclosing;
     }
 }
@@ -141,6 +143,7 @@ fn markValue(vm: *virtual_machine.VirtualMachine, val: value.Value) !void {
 }
 
 pub fn markObject(vm: *virtual_machine.VirtualMachine, obj: *object.Obj) !void {
+    if (obj.is_marked) return;
     if (comptime DEBUG_LOG_GC) {
         logDebug("0x{x} mark {s}", .{ @intFromPtr(obj), obj.getType() });
     }

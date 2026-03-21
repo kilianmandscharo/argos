@@ -59,7 +59,7 @@ pub const Compiler = struct {
     locals: [UINT8_COUNT]Local,
     local_count: u32,
     scope_depth: u32,
-    function: *object.ObjFunction,
+    function: ?*object.ObjFunction,
     type: FunctionType,
     current_var: ?scanner.Token,
     enclosing: ?*Compiler,
@@ -80,6 +80,7 @@ pub const Compiler = struct {
     const UINT8_COUNT = std.math.maxInt(u8) + 1;
 
     pub fn init(
+        self: *Compiler,
         vm: *virtual_machine.VirtualMachine,
         gpa: std.mem.Allocator,
         parser: *Parser,
@@ -87,24 +88,27 @@ pub const Compiler = struct {
         enclosing: ?*Compiler,
         current_var: ?scanner.Token,
         indent: usize,
-    ) !Compiler {
-        var compiler = Compiler{
-            .parser = parser,
-            .gpa = gpa,
-            .vm = vm,
-            .locals = undefined,
-            .scope_depth = 0,
-            .local_count = 0,
-            .function = try object.allocateFunction(vm),
-            .type = func_type,
-            .current_var = null,
-            .enclosing = enclosing,
-            .upvalues = undefined,
-            .indent = indent,
-        };
+    ) !void {
+        self.parser = parser;
+        self.gpa = gpa;
+        self.vm = vm;
+        self.locals = undefined;
+        self.scope_depth = 0;
+        self.local_count = 0;
+        self.type = func_type;
+        self.current_var = null;
+        self.enclosing = enclosing;
+        self.upvalues = undefined;
+        self.indent = indent;
+        self.function = null;
 
-        const local = &compiler.locals[compiler.local_count];
-        compiler.local_count += 1;
+        // Set current_compiler BEFORE any allocations that could trigger GC
+        vm.current_compiler = self;
+
+        self.function = try object.allocateFunction(vm);
+
+        const local = &self.locals[self.local_count];
+        self.local_count += 1;
         local.depth = 0;
         local.is_captured = false;
         local.name.source = "";
@@ -117,16 +121,18 @@ pub const Compiler = struct {
                 const end = start + curr.length;
                 const slice = curr.source[start..end];
                 const obj = try object.copyStaticString(vm, slice);
-                compiler.function.name = obj.asString();
+                self.function.?.name = obj.asString();
             }
         }
+    }
 
-        return compiler;
+    fn getFunctionName(self: *Compiler) []const u8 {
+        return if (self.function.?.name) |name| name.chars else "script";
     }
 
     fn log(self: *Compiler, comptime format: []const u8, args: anytype) void {
         if (!DEBUG_PRINT_STEPS) return;
-        const name = if (self.function.name) |name| name.chars else "script";
+        const name = self.getFunctionName();
         logging.log(
             format,
             args,
@@ -149,12 +155,13 @@ pub const Compiler = struct {
 
     fn endCompiler(self: *Compiler) !*object.ObjFunction {
         try self.emitReturn();
+        self.vm.current_compiler = self.enclosing;
         const function = self.function;
         if (comptime DEBUG_DISASSEMBLE) {
-            const name = if (self.function.name) |name| name.chars else "<script>";
+            const name = self.getFunctionName();
             self.currentChunk().disassemble(name);
         }
-        return function;
+        return function.?;
     }
 
     fn emitReturn(self: *Compiler) !void {
@@ -499,7 +506,7 @@ pub const Compiler = struct {
     }
 
     fn addUpvalue(self: *Compiler, index: u8, is_local: bool) !u8 {
-        const upvalue_count = self.function.upvalue_count;
+        const upvalue_count = self.function.?.upvalue_count;
 
         for (0..upvalue_count) |i| {
             const upvalue = &self.upvalues[i];
@@ -514,8 +521,8 @@ pub const Compiler = struct {
 
         self.upvalues[upvalue_count].is_local = is_local;
         self.upvalues[upvalue_count].index = index;
-        const retVal = self.function.upvalue_count;
-        self.function.upvalue_count += 1;
+        const retVal = self.function.?.upvalue_count;
+        self.function.?.upvalue_count += 1;
         return retVal;
     }
 
@@ -633,7 +640,7 @@ pub const Compiler = struct {
     }
 
     fn currentChunk(self: *Compiler) *chunk.Chunk {
-        return &self.function.chunk;
+        return &self.function.?.chunk;
     }
 
     fn emitBytes(self: *Compiler, first: chunk.OpCode, second: u8) !void {
@@ -843,7 +850,9 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
 
     compiler.indent += 1;
 
-    var new_compiler = try Compiler.init(
+    var new_compiler: Compiler = undefined;
+    try Compiler.init(
+        &new_compiler,
         compiler.vm,
         compiler.gpa,
         compiler.parser,
@@ -853,16 +862,15 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
         compiler.indent,
     );
 
-    compiler.vm.current_compiler = &new_compiler;
-
+    new_compiler.vm.current_compiler = &new_compiler;
     new_compiler.beginScope();
 
     try new_compiler.consume(.LParen, "Expect '(' after function name.");
 
     if (!new_compiler.check(.RParen)) {
         while (true) {
-            new_compiler.function.arity += 1;
-            if (new_compiler.function.arity > 255) {
+            new_compiler.function.?.arity += 1;
+            if (new_compiler.function.?.arity > 255) {
                 return compiler.errorAtCurrent("Can't have more than 255 parameters.");
             }
             const constant = try new_compiler.parseVariable("Expect parameter name.");
@@ -875,8 +883,6 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
     try new_compiler.statement();
 
     const function = try new_compiler.endCompiler();
-
-    compiler.vm.current_compiler = compiler;
 
     const constant = try compiler.makeConstant(value.wrapObj(&function.obj));
     try compiler.emitOpCode(.Closure);
