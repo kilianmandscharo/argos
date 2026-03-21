@@ -5,6 +5,7 @@ const object = @import("object.zig");
 const compiler = @import("compiler.zig");
 const scanner = @import("scanner.zig");
 const native = @import("native.zig");
+const logging = @import("logging.zig");
 
 const clockNative = native.clockNative;
 
@@ -18,6 +19,12 @@ const DEBUG_TRACE_EXECUTION = true;
 
 const FRAMES_MAX = 64;
 const STACK_MAX = std.math.maxInt(u8) * FRAMES_MAX;
+
+fn logDebug(comptime fmt: []const u8, args: anytype) void {
+    logging.log(fmt, args, .{
+        .module = "VirtualMachine",
+    });
+}
 
 const CallFrame = struct {
     closure: *object.ObjClosure,
@@ -58,6 +65,10 @@ pub const VirtualMachine = struct {
     globals: TableGlobals,
     objects: ?*object.Obj,
     open_upvalues: ?*object.ObjUpvalue,
+    current_compiler: ?*compiler.Compiler,
+    gray_stack: std.ArrayList(*object.Obj),
+    bytes_allocated: usize,
+    next_gc: usize,
 
     pub fn init(gpa: std.mem.Allocator) !VirtualMachine {
         var vm = VirtualMachine{
@@ -71,6 +82,10 @@ pub const VirtualMachine = struct {
             .globals = .{},
             .objects = null,
             .open_upvalues = null,
+            .current_compiler = null,
+            .gray_stack = .{},
+            .bytes_allocated = 0,
+            .next_gc = 1024 * 1024,
         };
 
         try vm.defineNative("clock", clockNative);
@@ -82,11 +97,12 @@ pub const VirtualMachine = struct {
         var head = self.objects;
         while (head) |obj| {
             const next = obj.next;
-            obj.deinit(self.gpa);
+            obj.deinit(self);
             head = next;
         }
         self.strings.deinit(self.gpa);
         self.globals.deinit(self.gpa);
+        self.gray_stack.deinit(self.gpa);
     }
 
     pub fn findString(self: *VirtualMachine, chars: []const u8, hash: u64) ?*object.Obj {
@@ -128,7 +144,9 @@ pub const VirtualMachine = struct {
         var p = compiler.Parser.init(&s);
         var c = try compiler.Compiler.init(self, self.gpa, &p, .Script, null, null, 0);
 
-        std.debug.print("Compiling...\n", .{});
+        self.current_compiler = &c;
+
+        logDebug("Compiling...", .{});
         const function = try c.compile();
 
         self.push(value.wrapObj(&function.obj));
@@ -137,7 +155,7 @@ pub const VirtualMachine = struct {
         self.push(value.wrapObj(&closure.obj));
         try self.call(closure, 0);
 
-        std.debug.print("Running byte code...\n", .{});
+        logDebug("Running byte code...", .{});
         _ = self.run() catch {
             return .RuntimeError;
         };
@@ -287,6 +305,8 @@ pub const VirtualMachine = struct {
                 .True => self.push(value.wrapBool(true)),
                 .False => self.push(value.wrapBool(false)),
                 .Add => {
+                    // TODO keep the values until the concatenation has finished,
+                    // so the gc does not collect any of the two strings too early
                     const b = self.pop();
                     const a = self.peek(0);
                     self.swapInPlace(try add(self, a, b), 0);
@@ -424,7 +444,6 @@ pub const VirtualMachine = struct {
                     self.frame.closure.upvalues[slot].?.location.* = self.peek(0);
                 },
                 .CloseUpvalue => {
-                    std.debug.print("close upvalue\n", .{});
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);
                     _ = self.pop();
                 },

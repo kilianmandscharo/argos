@@ -5,6 +5,7 @@ const value_module = @import("value.zig");
 const object_module = @import("object.zig");
 const vm_module = @import("vm.zig");
 const logging = @import("logging.zig");
+const memory = @import("memory.zig");
 
 const VirtualMachine = vm_module.VirtualMachine;
 
@@ -876,6 +877,8 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
         compiler.indent,
     );
 
+    compiler.vm.current_compiler = &new_compiler;
+
     new_compiler.beginScope();
 
     try new_compiler.consume(.LParen, "Expect '(' after function name.");
@@ -896,6 +899,9 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
     try new_compiler.statement();
 
     const function = try new_compiler.endCompiler();
+
+    compiler.vm.current_compiler = compiler;
+
     const constant = try compiler.makeConstant(wrapObj(&function.obj));
     try compiler.emitOpCode(.Closure);
     try compiler.emitU24(constant);
@@ -1018,5 +1024,3 @@ fn getRulePrecedence(token_type: TokenType) Precedence {
     }
     return Precedence.Lowest;
 }
-
-pub fn markCompilerRoots(compiler: *Compiler) void {}

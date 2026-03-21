@@ -84,7 +84,9 @@ pub const Chunk = struct {
     }
 
     pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, value: Value) !usize {
+        // TODO: push value on to stack
         try self.constants.append(gpa, value);
+        // TODO: pop value from stack
         return self.constants.items.len - 1;
     }
 

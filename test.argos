@@ -1,7 +1,7 @@
-let foo = fn() {
-    return 1 + 2
+let i = 0
+while (i < 3) {
+    let a = "hello"
+    let b = "world"
+    let c = "hello world"
+    i = i + 1
 }
-
-foo = 4
-
-print foo
