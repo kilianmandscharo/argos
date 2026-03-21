@@ -6,9 +6,13 @@ const object = @import("object.zig");
 const virtual_machine = @import("vm.zig");
 const logging = @import("logging.zig");
 const memory = @import("memory.zig");
+const constants = @import("constants.zig");
 
-const DEBUG_DISASSEMBLE = true;
-const DEBUG_PRINT_STEPS = false;
+fn logDebug(comptime fmt: []const u8, args: anytype) void {
+    logging.log(fmt, args, .{
+        .module = "Compiler",
+    });
+}
 
 const Precedence = enum(u8) {
     Lowest = 1,
@@ -131,7 +135,7 @@ pub const Compiler = struct {
     }
 
     fn log(self: *Compiler, comptime format: []const u8, args: anytype) void {
-        if (!DEBUG_PRINT_STEPS) return;
+        if (!constants.debug_print_steps) return;
         const name = self.getFunctionName();
         logging.log(
             format,
@@ -157,8 +161,9 @@ pub const Compiler = struct {
         try self.emitReturn();
         self.vm.current_compiler = self.enclosing;
         const function = self.function;
-        if (comptime DEBUG_DISASSEMBLE) {
+        if (comptime constants.debug_disassemble) {
             const name = self.getFunctionName();
+            logDebug("Finished compiling {s}", .{name});
             self.currentChunk().disassemble(name);
         }
         return function.?;

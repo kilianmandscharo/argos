@@ -4,9 +4,7 @@ const value = @import("value.zig");
 const object = @import("object.zig");
 const virtual_machine = @import("vm.zig");
 const compiler = @import("compiler.zig");
-
-const DEBUG_LOG_GC = true;
-const GC_HEAP_GROW_FACTOR = 2;
+const constants = @import("constants.zig");
 
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
     logging.log(fmt, args, .{
@@ -15,7 +13,7 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
 }
 
 pub fn collectGarbage(vm: *virtual_machine.VirtualMachine) !void {
-    if (comptime DEBUG_LOG_GC) {
+    if (comptime constants.debug_log_gc) {
         logDebug("-- gc begin", .{});
     }
 
@@ -26,9 +24,9 @@ pub fn collectGarbage(vm: *virtual_machine.VirtualMachine) !void {
     tableRemoveWhite(vm);
     sweep(vm);
 
-    vm.next_gc = vm.bytes_allocated * GC_HEAP_GROW_FACTOR;
+    vm.next_gc = vm.bytes_allocated * constants.gc_heap_grow_factor;
 
-    if (comptime DEBUG_LOG_GC) {
+    if (comptime constants.debug_log_gc) {
         logDebug("-- gc end", .{});
         logDebug("collected {d} bytes (from {d} to {d} next at {d})", .{
             before - vm.bytes_allocated, before, vm.bytes_allocated, vm.next_gc,
@@ -73,7 +71,7 @@ fn traceReferences(vm: *virtual_machine.VirtualMachine) !void {
 }
 
 fn blackenObj(vm: *virtual_machine.VirtualMachine, obj: *object.Obj) !void {
-    if (comptime DEBUG_LOG_GC) {
+    if (comptime constants.debug_log_gc) {
         logDebug("0x{x} blacken {f}", .{ @intFromPtr(obj), obj });
     }
 
@@ -144,7 +142,7 @@ fn markValue(vm: *virtual_machine.VirtualMachine, val: value.Value) !void {
 
 pub fn markObject(vm: *virtual_machine.VirtualMachine, obj: *object.Obj) !void {
     if (obj.is_marked) return;
-    if (comptime DEBUG_LOG_GC) {
+    if (comptime constants.debug_log_gc) {
         logDebug("0x{x} mark {s}", .{ @intFromPtr(obj), obj.getType() });
     }
     obj.is_marked = true;

@@ -6,6 +6,7 @@ const compiler = @import("compiler.zig");
 const scanner = @import("scanner.zig");
 const native = @import("native.zig");
 const logging = @import("logging.zig");
+const constants = @import("constants.zig");
 
 const InterpretResult = enum {
     Ok,
@@ -13,14 +14,10 @@ const InterpretResult = enum {
     RuntimeError,
 };
 
-const DEBUG_TRACE_EXECUTION = true;
-
-const FRAMES_MAX = 64;
-const STACK_MAX = std.math.maxInt(u8) * FRAMES_MAX;
-
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
     logging.log(fmt, args, .{
         .module = "VirtualMachine",
+        .color = .Blue,
     });
 }
 
@@ -54,9 +51,9 @@ pub const TableGlobals = std.HashMapUnmanaged(*object.ObjString, value.Value, St
 
 pub const VirtualMachine = struct {
     gpa: std.mem.Allocator,
-    stack: [STACK_MAX]value.Value,
+    stack: [constants.stack_max]value.Value,
     stack_top: usize,
-    frames: [FRAMES_MAX]CallFrame,
+    frames: [constants.stack_max]CallFrame,
     frame_count: usize,
     frame: *CallFrame,
     strings: std.HashMapUnmanaged(*object.ObjString, void, StringContext, 80),
@@ -69,6 +66,8 @@ pub const VirtualMachine = struct {
     next_gc: usize,
 
     pub fn init(gpa: std.mem.Allocator) !VirtualMachine {
+        logDebug("Init vm...", .{});
+
         var vm = VirtualMachine{
             .gpa = gpa,
             .stack = undefined,
@@ -87,6 +86,8 @@ pub const VirtualMachine = struct {
         };
 
         try vm.defineNative("clock", native.clockNative);
+
+        logDebug("Vm initialized.", .{});
 
         return vm;
     }
@@ -138,26 +139,32 @@ pub const VirtualMachine = struct {
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
+        logDebug("Starting pre-compilation...", .{});
         var s = scanner.Scanner.init(source);
         var p = compiler.Parser.init(&s);
         var c: compiler.Compiler = undefined;
         try compiler.Compiler.init(&c, self, self.gpa, &p, .Script, null, null, 0);
+        logDebug("Pre-compilation finished.", .{});
 
         self.current_compiler = &c;
 
         logDebug("Compiling...", .{});
         const function = try c.compile();
+        logDebug("Compilation finished.", .{});
 
+        logDebug("Setting up global function...", .{});
         self.push(value.wrapObj(&function.obj));
         const closure = try object.allocateClosure(self, function);
         _ = self.pop();
         self.push(value.wrapObj(&closure.obj));
         try self.call(closure, 0);
+        logDebug("Global function set up.", .{});
 
         logDebug("Running byte code...", .{});
         _ = self.run() catch {
             return .RuntimeError;
         };
+        logDebug("Script finished.", .{});
 
         return .Ok;
     }
@@ -275,7 +282,7 @@ pub const VirtualMachine = struct {
         if (argCount != closure.function.arity) {
             return self.runtimeError("Expected {d} arguments but got {d}", .{ closure.function.arity, argCount });
         }
-        if (self.frame_count == FRAMES_MAX) {
+        if (self.frame_count == constants.frames_max) {
             return self.runtimeError("Stack overflow.", .{});
         }
         const frame = &self.frames[self.frame_count];
@@ -289,7 +296,7 @@ pub const VirtualMachine = struct {
         self.frame = &self.frames[self.frame_count - 1];
 
         while (true) {
-            if (comptime DEBUG_TRACE_EXECUTION) {
+            if (comptime constants.debug_trace_execution) {
                 std.debug.print("          ", .{});
                 for (0..self.stack_top) |index| {
                     std.debug.print("[ {f} ]", .{self.stack[index]});

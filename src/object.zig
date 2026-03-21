@@ -4,9 +4,7 @@ const chunk = @import("chunk.zig");
 const value = @import("value.zig");
 const memory = @import("memory.zig");
 const logging = @import("logging.zig");
-
-const DEBUG_STRESS_GC = true;
-const DEBUG_LOG_GC = true;
+const constants = @import("constants.zig");
 
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
     logging.log(fmt, args, .{
@@ -29,7 +27,7 @@ pub fn allocateObject(vm: *virtual_machine.VirtualMachine, T: type) !*T {
 
     vm.bytes_allocated += @sizeOf(T);
 
-    if (comptime DEBUG_STRESS_GC) {
+    if (comptime constants.debug_stress_gc) {
         try memory.collectGarbage(vm);
     }
 
@@ -47,7 +45,7 @@ pub fn allocateObject(vm: *virtual_machine.VirtualMachine, T: type) !*T {
 
     vm.objects = &object.obj;
 
-    if (comptime DEBUG_LOG_GC) {
+    if (comptime constants.debug_log_gc) {
         logDebug("0x{x} allocate {d} for {s}", .{ @intFromPtr(object), @sizeOf(T), @typeName(T) });
     }
 
@@ -156,7 +154,7 @@ pub const Obj = struct {
     }
 
     pub fn deinit(self: *@This(), vm: *virtual_machine.VirtualMachine) void {
-        if (comptime DEBUG_LOG_GC) {
+        if (comptime constants.debug_log_gc) {
             logDebug("0x{x} free type {s}", .{ @intFromPtr(self), self.getType() });
         }
 

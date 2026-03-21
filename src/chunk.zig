@@ -1,5 +1,12 @@
 const std = @import("std");
 const value = @import("value.zig");
+const logging = @import("logging.zig");
+
+fn logDebug(comptime fmt: []const u8, args: anytype) void {
+    logging.log(fmt, args, .{
+        .module = "Chunk",
+    });
+}
 
 pub const OpCode = enum(u8) {
     Return,
@@ -89,12 +96,11 @@ pub const Chunk = struct {
     }
 
     pub fn disassemble(self: *Chunk, name: []const u8) void {
-        std.debug.print("== {s} ==\n", .{name});
+        logDebug("== {s} ==", .{name});
         var offset: usize = 0;
         while (offset < self.code.items.len) {
             offset = self.disassembleInstruction(offset);
         }
-        std.debug.print("\n", .{});
     }
 
     pub fn disassembleInstruction(self: *Chunk, offset: usize) usize {
