@@ -534,6 +534,16 @@ test "vm tests" {
             \\assert result == 6
             ,
         },
+        .{
+            .description = "string concatenation",
+            .source =
+            \\let foo = "foo"
+            \\let bar = "bar"
+            \\let result = foo + bar
+            \\
+            \\assert result == "foobar"
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate vm tests", &test_cases, run);

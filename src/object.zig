@@ -104,9 +104,7 @@ fn allocateStringInternal(vm: *virtual_machine.VirtualMachine, chars: []const u8
     string.chars = chars;
     string.hash = hash;
     string.static_lifetime = static_lifetime;
-    // TODO: push string on to stack
     try vm.strings.put(vm.gpa, string, undefined);
-    // TODO: pop string from stack
     return &string.obj;
 }
 
@@ -194,43 +192,43 @@ pub const Obj = struct {
         }
     }
 
-    pub fn asFunction(self: *@This()) *ObjFunction {
+    pub inline fn asFunction(self: *@This()) *ObjFunction {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
-    pub fn asString(self: *@This()) *ObjString {
+    pub inline fn asString(self: *@This()) *ObjString {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
-    pub fn asNative(self: *@This()) *ObjNative {
+    pub inline fn asNative(self: *@This()) *ObjNative {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
-    pub fn asClosure(self: *@This()) *ObjClosure {
+    pub inline fn asClosure(self: *@This()) *ObjClosure {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
-    pub fn asUpvalue(self: *@This()) *ObjUpvalue {
+    pub inline fn asUpvalue(self: *@This()) *ObjUpvalue {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
-    pub fn isString(self: *@This()) bool {
+    pub inline fn isString(self: *@This()) bool {
         return self.type == .String;
     }
 
-    pub fn isFunction(self: *@This()) bool {
+    pub inline fn isFunction(self: *@This()) bool {
         return self.type == .Function;
     }
 
-    pub fn isNative(self: *@This()) bool {
+    pub inline fn isNative(self: *@This()) bool {
         return self.type == .NativeFn;
     }
 
-    pub fn isClosure(self: *@This()) bool {
+    pub inline fn isClosure(self: *@This()) bool {
         return self.type == .Closure;
     }
 
-    pub fn isUpvalue(self: *@This()) bool {
+    pub inline fn isUpvalue(self: *@This()) bool {
         return self.type == .Upvalue;
     }
 };
