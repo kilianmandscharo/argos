@@ -28,13 +28,7 @@ pub const Value = union(enum) {
     }
 
     pub fn getType(self: @This()) []const u8 {
-        return switch (self) {
-            .Float => "Float",
-            .Int => "Int",
-            .Bool => "Bool",
-            .Null => "Null",
-            .Obj => "Object",
-        };
+        return @tagName(self);
     }
 
     pub inline fn isObjType(self: @This(), expected_type: object.ObjType) bool {

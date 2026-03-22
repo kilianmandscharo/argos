@@ -901,9 +901,47 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
     compiler.indent -= 1;
 }
 
+fn list(compiler: *Compiler, can_assign: bool) !void {
+    _ = can_assign;
+
+    try compiler.consume(.LBrace, "Expect '{' after List keyword");
+
+    var count: usize = 0;
+    while (true) {
+        try compiler.chopNewlines();
+        if (try compiler.match(.Eof)) return compiler.errorAtCurrent("Reached EOF.");
+        if (try compiler.match(.RBrace)) break;
+        try compiler.expression();
+        count += 1;
+        switch (compiler.parser.current.type) {
+            .Comma, .NewLine => try compiler.parser.advance(),
+            .RBrace => {
+                try compiler.parser.advance();
+                break;
+            },
+            else => return compiler.errorAtCurrent("Unexpected token."),
+        }
+    }
+
+    try compiler.emitConstant(value.wrapObj(try object.allocateList(compiler.vm)));
+    try compiler.emitOpCode(.ListInit);
+    try compiler.emitU24(count);
+}
+
 fn call(compiler: *Compiler) !void {
     const arg_count = try argumentList(compiler);
     try compiler.emitBytes(.Call, arg_count);
+}
+
+fn listIndex(compiler: *Compiler) !void {
+    try compiler.expression();
+    try compiler.consume(.RBracket, "Expect ']' after index expression.");
+    if (try compiler.match(.Assign)) {
+        try compiler.expression();
+        try compiler.emitOpCode(.ListSet);
+    } else {
+        try compiler.emitOpCode(.ListGet);
+    }
 }
 
 fn argumentList(compiler: *Compiler) !u8 {
@@ -941,7 +979,7 @@ fn initRules() [token_count]ParseRule {
         table[index] = switch (tag) {
             .LParen => .{ .prefix = grouping, .infix = call, .precedence = .Call },
             .RParen => .{ .prefix = null, .infix = null, .precedence = null },
-            .LBracket => .{ .prefix = null, .infix = null, .precedence = .Index },
+            .LBracket => .{ .prefix = null, .infix = listIndex, .precedence = .Index },
             .RBracket => .{ .prefix = null, .infix = null, .precedence = null },
             .LBrace => .{ .prefix = null, .infix = null, .precedence = null },
             .RBrace => .{ .prefix = null, .infix = null, .precedence = null },
@@ -990,6 +1028,7 @@ fn initRules() [token_count]ParseRule {
             .Match => .{ .prefix = null, .infix = null, .precedence = null },
             .While => .{ .prefix = null, .infix = null, .precedence = null },
             .Fn => .{ .prefix = func, .infix = null, .precedence = null },
+            .List => .{ .prefix = list, .infix = null, .precedence = null },
             .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
     }

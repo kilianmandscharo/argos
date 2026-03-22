@@ -544,6 +544,37 @@ test "vm tests" {
             \\assert result == "foobar"
             ,
         },
+        .{
+            .description = "list index",
+            .source =
+            \\let foo = List{1, 2, 3, 4, 5}
+            \\let result = foo[0] + foo[-1]
+            \\
+            \\assert result == 6
+            ,
+        },
+        .{
+            .description = "list index assignment",
+            .source =
+            \\let foo = List{1, 2, 3, 4, 5}
+            \\foo[0] = 42
+            \\
+            \\assert foo[0] == 42
+            ,
+        },
+        .{
+            .description = "local list index assignment",
+            .source =
+            \\let foo = fn(index) {
+            \\    let l = List{1, 2, 3}
+            \\    return l[index]
+            \\} 
+            \\
+            \\let result = foo(1)
+            \\
+            \\assert result == 2
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate vm tests", &test_cases, run);

@@ -292,6 +292,15 @@ pub const VirtualMachine = struct {
         frame.slot = self.stack_top - argCount - 1;
     }
 
+    fn resolveListIndex(self: *VirtualMachine, len: usize, index: i64) !usize {
+        const signed_len = @as(i64, @intCast(len));
+        const resolved = if (index < 0) signed_len + index else index;
+        if (resolved < 0 or resolved >= signed_len) {
+            return self.runtimeError("Index {d} out of bounds", .{index});
+        }
+        return @intCast(resolved);
+    }
+
     pub fn run(self: *VirtualMachine) !void {
         self.frame = &self.frames[self.frame_count - 1];
 
@@ -454,6 +463,58 @@ pub const VirtualMachine = struct {
                 .CloseUpvalue => {
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);
                     _ = self.pop();
+                },
+                .ListInit => {
+                    const val = self.pop();
+                    const list = val.asObj().asList();
+                    const count = self.readU24();
+                    // TODO: iterating twice is not ideal
+                    for (self.stack_top - count..self.stack_top) |i| {
+                        try list.data.append(self.gpa, self.stack[i]);
+                    }
+                    for (0..count) |_| {
+                        _ = self.pop();
+                    }
+                    self.push(val);
+                },
+                .ListGet => {
+                    const index = self.pop();
+                    if (index != .Int) {
+                        return self.runtimeError(
+                            "Invalid index type in list index expression: {s}",
+                            .{index.getType()},
+                        );
+                    }
+                    const list = self.pop();
+                    if (!list.isObjType(.List)) {
+                        return self.runtimeError(
+                            "Invalid left side in index expression: {s}",
+                            .{list.getType()},
+                        );
+                    }
+                    const list_obj = list.asObj().asList();
+                    const list_index = try self.resolveListIndex(list_obj.data.items.len, index.Int);
+                    self.push(list_obj.data.items[list_index]);
+                },
+                .ListSet => {
+                    const val = self.pop();
+                    const index = self.pop();
+                    if (index != .Int) {
+                        return self.runtimeError(
+                            "Invalid index type in list index expression: {s}",
+                            .{index.getType()},
+                        );
+                    }
+                    const list = self.peek(0);
+                    if (!list.isObjType(.List)) {
+                        return self.runtimeError(
+                            "Invalid left side in index expression: {s}",
+                            .{list.getType()},
+                        );
+                    }
+                    const list_obj = list.asObj().asList();
+                    const list_index = try self.resolveListIndex(list_obj.data.items.len, index.Int);
+                    list_obj.data.items[list_index] = val;
                 },
                 .Return => {
                     const result = self.pop();

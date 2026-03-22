@@ -1,8 +1,7 @@
-let i = 0
-while (i < 2) {
-    let f = fn() { 
-        return 1 
+for (0..3) |i| {
+    let foo = fn() {
+        let l = List{"a", "b", "c"}
+        print l[i]
     }
-    f()
-    i = i + 1
+    foo()
 }

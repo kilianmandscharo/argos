@@ -97,7 +97,11 @@ fn blackenObj(vm: *virtual_machine.VirtualMachine, obj: *object.Obj) !void {
                 }
             }
         },
-        else => {},
+        .List => {
+            const list = obj.asList();
+            try markArray(vm, list.data.items);
+        },
+        .String, .NativeFn => {},
     }
 }
 

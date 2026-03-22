@@ -12,14 +12,6 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
     });
 }
 
-pub const ObjType = enum {
-    String,
-    Function,
-    NativeFn,
-    Closure,
-    Upvalue,
-};
-
 pub fn allocateObject(vm: *virtual_machine.VirtualMachine, T: type) !*T {
     if (!@hasField(T, "obj")) {
         @compileError("Object type must have field 'obj'");
@@ -50,6 +42,12 @@ pub fn allocateObject(vm: *virtual_machine.VirtualMachine, T: type) !*T {
     }
 
     return object;
+}
+
+pub fn allocateList(vm: *virtual_machine.VirtualMachine) !*Obj {
+    const list = try allocateObject(vm, ObjList);
+    list.data = .{};
+    return &list.obj;
 }
 
 pub fn allocateUpvalue(vm: *virtual_machine.VirtualMachine, slot: *value.Value) !*ObjUpvalue {
@@ -108,19 +106,22 @@ fn allocateStringInternal(vm: *virtual_machine.VirtualMachine, chars: []const u8
     return &string.obj;
 }
 
+pub const ObjType = enum {
+    String,
+    Function,
+    NativeFn,
+    Closure,
+    Upvalue,
+    List,
+};
+
 pub const Obj = struct {
     type: ObjType,
     is_marked: bool,
     next: ?*Obj,
 
     pub fn getType(self: *@This()) []const u8 {
-        return switch (self.type) {
-            .Function => "Function",
-            .NativeFn => "NativeFn",
-            .String => "String",
-            .Closure => "Closure",
-            .Upvalue => "Upvalue",
-        };
+        return @tagName(self.type);
     }
 
     pub fn format(
@@ -128,26 +129,12 @@ pub const Obj = struct {
         writer: *std.Io.Writer,
     ) std.Io.Writer.Error!void {
         switch (self.type) {
-            .String => {
-                const string = self.asString();
-                try string.format(writer);
-            },
-            .Function => {
-                const function = self.asFunction();
-                try function.format(writer);
-            },
-            .NativeFn => {
-                const native = self.asFunction();
-                try native.format(writer);
-            },
-            .Closure => {
-                const closure = self.asClosure();
-                try closure.format(writer);
-            },
-            .Upvalue => {
-                const upvalue = self.asUpvalue();
-                try upvalue.format(writer);
-            },
+            .String => try self.asString().format(writer),
+            .Function => try self.asFunction().format(writer),
+            .NativeFn => try self.asNative().format(writer),
+            .Closure => try self.asClosure().format(writer),
+            .Upvalue => try self.asUpvalue().format(writer),
+            .List => try self.asList().format(writer),
         }
     }
 
@@ -189,6 +176,12 @@ pub const Obj = struct {
                 gpa.destroy(upvalue_obj);
                 vm.bytes_allocated -= @sizeOf(ObjUpvalue);
             },
+            .List => {
+                const list_obj = self.asList();
+                list_obj.data.deinit(gpa);
+                gpa.destroy(list_obj);
+                vm.bytes_allocated -= @sizeOf(ObjList);
+            },
         }
     }
 
@@ -212,24 +205,8 @@ pub const Obj = struct {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
-    pub inline fn isString(self: *@This()) bool {
-        return self.type == .String;
-    }
-
-    pub inline fn isFunction(self: *@This()) bool {
-        return self.type == .Function;
-    }
-
-    pub inline fn isNative(self: *@This()) bool {
-        return self.type == .NativeFn;
-    }
-
-    pub inline fn isClosure(self: *@This()) bool {
-        return self.type == .Closure;
-    }
-
-    pub inline fn isUpvalue(self: *@This()) bool {
-        return self.type == .Upvalue;
+    pub inline fn asList(self: *@This()) *ObjList {
+        return @alignCast(@fieldParentPtr("obj", self));
     }
 };
 
@@ -314,5 +291,20 @@ pub const ObjUpvalue = struct {
     ) std.Io.Writer.Error!void {
         _ = self;
         try writer.print("upvalue", .{});
+    }
+};
+
+pub const ObjList = struct {
+    pub const KIND = ObjType.List;
+
+    obj: Obj = undefined,
+    data: std.ArrayList(value.Value),
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        _ = self;
+        try writer.print("<List>", .{});
     }
 };
