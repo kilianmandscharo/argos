@@ -713,7 +713,6 @@ pub const Compiler = struct {
         std.debug.print("[line {d}] Error", .{token.line});
         switch (token.type) {
             .Eof => std.debug.print(" at end", .{}),
-            .Error => {},
             else => std.debug.print(" at '{s}'", .{token.source[token.start .. token.start + token.length]}),
         }
         std.debug.print(": {s}\n", .{message});
@@ -1005,10 +1004,8 @@ fn initRules() [token_count]ParseRule {
             .Asterisk => .{ .prefix = null, .infix = binary, .precedence = .Product },
             .Percent => .{ .prefix = null, .infix = null, .precedence = .Product },
             .Return => .{ .prefix = null, .infix = null, .precedence = null },
-            .If => .{ .prefix = null, .infix = null, .precedence = null },
             .Else => .{ .prefix = null, .infix = null, .precedence = null },
             .For => .{ .prefix = null, .infix = null, .precedence = null },
-            .In => .{ .prefix = null, .infix = null, .precedence = null },
             .Dot => .{ .prefix = null, .infix = null, .precedence = .Index },
             .DotDot => .{ .prefix = null, .infix = null, .precedence = null },
             .Arrow => .{ .prefix = null, .infix = null, .precedence = null },
@@ -1029,6 +1026,7 @@ fn initRules() [token_count]ParseRule {
             .While => .{ .prefix = null, .infix = null, .precedence = null },
             .Fn => .{ .prefix = func, .infix = null, .precedence = null },
             .List => .{ .prefix = list, .infix = null, .precedence = null },
+            .Table => .{ .prefix = null, .infix = null, .precedence = null },
             .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
     }

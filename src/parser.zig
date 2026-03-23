@@ -68,7 +68,7 @@ pub const Parser = struct {
         return Statement{ .Print = expression };
     }
 
-    fn assertStatement(self: *Parser) !void {
+    fn assertStatement(self: *Parser) !Statement {
         self.log("assert statement", .{});
         defer self.log("end assert statement", .{});
 
@@ -77,6 +77,91 @@ pub const Parser = struct {
         try self.expectLineEnd();
 
         return Statement{ .Assert = expression };
+    }
+
+    fn matchStatement(self: *Parser) anyerror!void {
+        self.log("match statement", .{});
+        defer self.log("end match statement", .{});
+
+        var has_target = false;
+
+        if (self.check(.LParen)) {
+            has_target = true;
+            try self.parser.advance();
+            try self.expression();
+            try self.consume(.RParen, "Expect ')' after match target");
+        }
+
+        const instruction: chunk.OpCode = if (has_target) .JumpIfNotEq else .JumpIfFalse;
+
+        if (!self.check(.LBrace)) {
+            try self.expression();
+            try self.consume(.Arrow, "Expect '->' after match expression");
+
+            const then_jump = try self.emitJump(instruction);
+            try self.statement();
+            try self.patchJump(then_jump);
+            try self.emitOpCode(.Pop);
+
+            if (has_target) try self.emitOpCode(.Pop);
+
+            return;
+        }
+
+        try self.parser.advance();
+        try self.consume(.NewLine, "Expect new line after '{' in match block");
+
+        var else_jumps: std.ArrayList(usize) = .{};
+        errdefer else_jumps.deinit(self.gpa);
+
+        while (!self.check(.Eof) and !self.check(.RBrace)) {
+            try self.chopNewlines();
+
+            if (self.check(.Else)) break;
+
+            try self.expression();
+            try self.consume(.Arrow, "Expect '->' after match expression");
+
+            const then_jump = try self.emitJump(instruction);
+            try self.emitOpCode(.Pop);
+            try self.statement();
+            try else_jumps.append(self.gpa, try self.emitJump(.Jump));
+            try self.patchJump(then_jump);
+            try self.emitOpCode(.Pop);
+        }
+
+        // TODO: what if the else branch is not the last?
+        if (self.check(.Else)) {
+            try self.parser.advance();
+            try self.consume(.Arrow, "Expect '->' after else in match expression");
+            try self.statement();
+        }
+
+        for (else_jumps.items) |jump| {
+            try self.patchJump(jump);
+        }
+
+        if (has_target) try self.emitOpCode(.Pop);
+
+        try self.consume(.RBrace, "Expect '}' at the end of match block");
+        try self.consume(.NewLine, "Expect new line after match block");
+
+        else_jumps.deinit(self.gpa);
+    }
+
+    fn expressionStatement(self: *Parser) !Statement {
+        const expression = try self.parseExpression();
+        if (self.match(.Assign)) {
+            const target = switch (expression) {
+                .Identifier => |name| AssignTarget{ .Identifier = name },
+                .Index => |index| AssignTarget{ .Index = index },
+            };
+            const value = try self.parseExpression();
+            try self.expectLineEnd();
+            return Statement{ .Assignment = .{ .target = target, .expression = value } };
+        }
+        try self.expectLineEnd();
+        return Statement{ .Expression = expression };
     }
 
     fn returnStatement(self: *Parser) !void {
@@ -164,76 +249,6 @@ pub const Parser = struct {
         try self.endScope();
     }
 
-    fn matchStatement(self: *Parser) anyerror!void {
-        self.log("match statement", .{});
-        defer self.log("end match statement", .{});
-
-        var has_target = false;
-
-        if (self.check(.LParen)) {
-            has_target = true;
-            try self.parser.advance();
-            try self.expression();
-            try self.consume(.RParen, "Expect ')' after match target");
-        }
-
-        const instruction: chunk.OpCode = if (has_target) .JumpIfNotEq else .JumpIfFalse;
-
-        if (!self.check(.LBrace)) {
-            try self.expression();
-            try self.consume(.Arrow, "Expect '->' after match expression");
-
-            const then_jump = try self.emitJump(instruction);
-            try self.statement();
-            try self.patchJump(then_jump);
-            try self.emitOpCode(.Pop);
-
-            if (has_target) try self.emitOpCode(.Pop);
-
-            return;
-        }
-
-        try self.parser.advance();
-        try self.consume(.NewLine, "Expect new line after '{' in match block");
-
-        var else_jumps: std.ArrayList(usize) = .{};
-        errdefer else_jumps.deinit(self.gpa);
-
-        while (!self.check(.Eof) and !self.check(.RBrace)) {
-            try self.chopNewlines();
-
-            if (self.check(.Else)) break;
-
-            try self.expression();
-            try self.consume(.Arrow, "Expect '->' after match expression");
-
-            const then_jump = try self.emitJump(instruction);
-            try self.emitOpCode(.Pop);
-            try self.statement();
-            try else_jumps.append(self.gpa, try self.emitJump(.Jump));
-            try self.patchJump(then_jump);
-            try self.emitOpCode(.Pop);
-        }
-
-        // TODO: what if the else branch is not the last?
-        if (self.check(.Else)) {
-            try self.parser.advance();
-            try self.consume(.Arrow, "Expect '->' after else in match expression");
-            try self.statement();
-        }
-
-        for (else_jumps.items) |jump| {
-            try self.patchJump(jump);
-        }
-
-        if (has_target) try self.emitOpCode(.Pop);
-
-        try self.consume(.RBrace, "Expect '}' at the end of match block");
-        try self.consume(.NewLine, "Expect new line after match block");
-
-        else_jumps.deinit(self.gpa);
-    }
-
     fn blockStatement(self: *Compiler) anyerror!void {
         self.log("block statement", .{});
         defer self.log("end block statement", .{});
@@ -243,15 +258,6 @@ pub const Parser = struct {
         }
         try self.consume(.RBrace, "Expect '}' after block.");
         try self.consume(.NewLine, "Expect '\n' after block.");
-    }
-
-    fn expressionStatement(self: *Compiler) !void {
-        self.log("expression statement", .{});
-        defer self.log("end expression statement", .{});
-
-        try self.expression();
-        try self.expectLineEnd();
-        try self.emitOpCode(.Pop);
     }
 
     fn printDebug(self: *Parser, comptime fmt: []const u8, args: anytype, color: logging.LogColor) void {
@@ -314,7 +320,7 @@ pub const Parser = struct {
         return error.CompileError;
     }
 
-    fn parseExpression(self: *Parser, precedence: Precedence) !*const Expression {
+    fn parseExpression(self: *Parser) !*const Expression {
         return self.parsePrecedence(.Lowest);
     }
 
@@ -337,7 +343,7 @@ pub const Parser = struct {
                 try self.advance();
                 if (self.current.type == .Eof) return;
                 if (getRule(self.parser.previous.type).infix) |infixFn| {
-                    left = try infixFn(self);
+                    left = try infixFn(self, left);
                 }
             }
         } else {
@@ -753,45 +759,6 @@ pub const Parser = struct {
         self.peek_token = try self.lexer.next();
         self.printDebug("advanced to {f}\n", .{self.cur_token}, .None);
     }
-
-    fn getAndAdvance(self: *Parser) !Token {
-        const cur_token = self.cur_token;
-        try self.advance();
-        return cur_token;
-    }
-
-    fn expectToken(self: *Parser, expected_type: TokenType) !void {
-        if (self.cur_token.type != expected_type) {
-            return ParserError.UnexpectedTokenType;
-        }
-    }
-
-    fn advanceAndExpect(self: *Parser, expected_type: TokenType) !void {
-        try self.advance();
-        if (self.cur_token.type != expected_type) {
-            std.debug.print("expected: {any}, got: {any}\n", .{ expected_type, self.cur_token.type });
-            return ParserError.UnexpectedTokenType;
-        }
-    }
-
-    fn expectAndAdvance(self: *Parser, expected_type: TokenType) !void {
-        if (self.cur_token.type != expected_type) {
-            std.debug.print("expected: {any}, got: {any}\n", .{ expected_type, self.cur_token.type });
-            return ParserError.UnexpectedTokenType;
-        }
-        try self.advance();
-    }
-
-    pub fn printProgram(program: std.ArrayList(*const Expression), arena: std.mem.Allocator) ![]const u8 {
-        var buffer = std.ArrayList(u8).init(arena);
-        for (program.items, 0..) |expression, i| {
-            try std.fmt.format(buffer.writer(), "{f}", .{expression});
-            if (i < program.items.len - 1) {
-                try buffer.append('\n');
-            }
-        }
-        return buffer.items;
-    }
 };
 
 const Program = std.ArrayList(Statement);
@@ -827,8 +794,8 @@ const Assignment = struct {
 };
 
 const AssignTarget = union(enum) {
-    identifier: []const u8,
-    index: Index,
+    Identifier: []const u8,
+    Index: Index,
 };
 
 const For = struct {
@@ -893,7 +860,12 @@ const Call = struct {
 
 const FunctionArg = union(enum) {
     Positional: *const Expression,
-    Named: struct { name: []const u8, value: *const Expression },
+    Named: FunctionArgNamed,
+};
+
+const FunctionArgNamed = struct {
+    name: []const u8,
+    value: *const Expression,
 };
 
 const Range = struct {
@@ -944,9 +916,140 @@ const Precedence = enum(u8) {
     Index,
 };
 
+fn parseString(parser: *Parser) !Expression {
+    return Expression{ .String = parser.previous.?.toString() };
+}
+
+fn parseInteger(parser: *Parser) !Expression {
+    return Expression{ .Integer = try std.fmt.parseInt(i64, parser.previous.?.toString(), 10) };
+}
+
+fn parseFloat(parser: *Parser) !Expression {
+    return Expression{ .Float = try std.fmt.parseFloat(f64, parser.previous.?.toString()) };
+}
+
+fn parseLiteral(parser: *Parser) !Expression {
+    return switch (parser.previous.type) {
+        .True => try Expression{ .Boolean = true },
+        .False => try Expression{ .Boolean = false },
+        .Null => try Expression.Null,
+        else => unreachable,
+    };
+}
+
+fn parseIdentifier(parser: *Parser) !Expression {
+    return Expression{ .Identifier = parser.previous.?.toString() };
+}
+
+fn parseUnary(parser: *Parser) !Expression {
+    const operator = parser.previous.?.type;
+    try parser.advance();
+    const expression = try parser.parseExpression();
+    return Expression{ .Prefix = .{ .operator = operator, .expression = expression } };
+}
+
+fn parseList(parser: *Parser) !Expression {
+    _ = parser;
+}
+
+fn parseTable(parser: *Parser) !Expression {
+    _ = parser;
+}
+
+fn parseFunction(parser: *Parser) !Expression {
+    _ = parser;
+}
+
+fn parseGrouping(parser: *Parser) !Expression {
+    const expression = try parser.parseExpression();
+    try parser.consume(.RParen, "Expect ')' after expression");
+    return expression;
+}
+
+fn parseBinary(parser: *Parser, left: Expression) !Expression {
+    const operator = parser.previous.?.type;
+    try parser.advance();
+    const right = try parser.parsePrecedence(getRulePrecedence(operator));
+
+    const left_owned = try parser.arena.create(Expression);
+    left_owned.* = left;
+
+    return Expression{
+        .Infix = .{
+            .operator = operator,
+            .left = left_owned,
+            .right = right,
+        },
+    };
+}
+
+fn parseDotDot(parser: *Parser, left: Expression) !Expression {
+    try parser.advance();
+    const right = try parser.parseExpression();
+    const left_owned = try parser.arena.create(Expression);
+    left_owned.* = left;
+    return Expression{ .Range = .{ .left = left_owned, .right = right } };
+}
+
+fn parseCall(parser: *Parser, left: Expression) !Expression {
+    var args: std.ArrayList(FunctionArg) = .{};
+    while (true) {
+        try parser.chopNewlines();
+        if (try parser.match(.Eof)) return parser.errorAtCurrent("Reached EOF.");
+        if (try parser.match(.RParen)) break;
+
+        const expression = try parser.parseExpression();
+
+        if (try parser.match(.Assign)) {
+            if (expression != .Identifier) {
+                return parser.errorAtPrevious("Invalid left side in named argument.");
+            }
+            const right = try parser.parseExpression();
+            try args.append(parser.arena, FunctionArg{
+                .Named = FunctionArgNamed{ .name = expression.Identifier, .value = right },
+            });
+        } else {
+            try args.append(parser.arena, FunctionArg{ .Positional = expression });
+        }
+
+        try parser.advance();
+        if (try parser.match(.RParen)) break;
+        const token_type = parser.current.type;
+        try parser.advance();
+        try parser.chopNewlines();
+        if (!parser.check(.RParen) and token_type != .Comma) {
+            return parser.errorAtPrevious("Expected comma.");
+        }
+        if (try parser.match(.RParen)) break;
+    }
+
+    const left_owned = try parser.arena.create(Expression);
+    left_owned.* = left;
+
+    return Expression{ .Call = .{
+        .function = left_owned,
+        .args = args,
+    } };
+}
+
+fn parseIndex(parser: *Parser, left: Expression) !Expression {
+    const expression = try parser.parseExpression();
+    try parser.consume(.RBracket, "Expect ']' after index expression.");
+
+    const left_owned = try parser.arena.create(Expression);
+    left_owned.* = left;
+
+    return Expression{
+        .Index = .{
+            .left = left_owned,
+            .index = expression,
+        },
+    };
+}
+
 const ParseRule = struct {
-    prefix: ?*const fn (parser: *Parser) !Expression,
-    infix: ?*const fn (parser: *Parser, left: Expression) !Expression,
+    prefix: ?*const fn (parser: *Parser) anyerror!Expression,
+    infix: ?*const fn (parser: *Parser, left: Expression) anyerror!Expression,
     precedence: ?Precedence,
 };
 
@@ -961,58 +1064,57 @@ fn initRules() [token_count]ParseRule {
         const index = field.value;
         const tag = @as(scanner.TokenType, @enumFromInt(index));
         table[index] = switch (tag) {
-            .LParen => .{ .prefix = grouping, .infix = call, .precedence = .Call },
+            .LParen => .{ .prefix = parseGrouping, .infix = parseCall, .precedence = .Call },
             .RParen => .{ .prefix = null, .infix = null, .precedence = null },
-            .LBracket => .{ .prefix = null, .infix = listIndex, .precedence = .Index },
+            .LBracket => .{ .prefix = null, .infix = parseIndex, .precedence = .Index },
             .RBracket => .{ .prefix = null, .infix = null, .precedence = null },
             .LBrace => .{ .prefix = null, .infix = null, .precedence = null },
             .RBrace => .{ .prefix = null, .infix = null, .precedence = null },
             .Assign => .{ .prefix = null, .infix = null, .precedence = .Assign },
             .Comma => .{ .prefix = null, .infix = null, .precedence = null },
-            .String => .{ .prefix = string, .infix = null, .precedence = null },
-            .Float => .{ .prefix = float, .infix = null, .precedence = null },
-            .Int => .{ .prefix = integer, .infix = null, .precedence = null },
-            .True => .{ .prefix = literal, .infix = null, .precedence = null },
-            .False => .{ .prefix = literal, .infix = null, .precedence = null },
-            .Null => .{ .prefix = literal, .infix = null, .precedence = null },
-            .Identifier => .{ .prefix = variable, .infix = null, .precedence = null },
-            .Bang => .{ .prefix = unary, .infix = null, .precedence = null },
-            .Lt => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
-            .LtOrEq => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
-            .Gt => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
-            .GtOrEq => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
-            .Eq => .{ .prefix = null, .infix = binary, .precedence = .Equals },
-            .NotEq => .{ .prefix = null, .infix = binary, .precedence = .Equals },
-            .Plus => .{ .prefix = null, .infix = binary, .precedence = .Sum },
-            .Minus => .{ .prefix = unary, .infix = binary, .precedence = .Sum },
-            .Slash => .{ .prefix = null, .infix = binary, .precedence = .Product },
-            .Asterisk => .{ .prefix = null, .infix = binary, .precedence = .Product },
-            .Percent => .{ .prefix = null, .infix = null, .precedence = .Product },
+            .String => .{ .prefix = parseString, .infix = null, .precedence = null },
+            .Float => .{ .prefix = parseFloat, .infix = null, .precedence = null },
+            .Int => .{ .prefix = parseInteger, .infix = null, .precedence = null },
+            .True => .{ .prefix = parseLiteral, .infix = null, .precedence = null },
+            .False => .{ .prefix = parseLiteral, .infix = null, .precedence = null },
+            .Null => .{ .prefix = parseLiteral, .infix = null, .precedence = null },
+            .Identifier => .{ .prefix = parseIdentifier, .infix = null, .precedence = null },
+            .Bang => .{ .prefix = parseUnary, .infix = null, .precedence = null },
+            .Lt => .{ .prefix = null, .infix = parseBinary, .precedence = .LessGreater },
+            .LtOrEq => .{ .prefix = null, .infix = parseBinary, .precedence = .LessGreater },
+            .Gt => .{ .prefix = null, .infix = parseBinary, .precedence = .LessGreater },
+            .GtOrEq => .{ .prefix = null, .infix = parseBinary, .precedence = .LessGreater },
+            .Eq => .{ .prefix = null, .infix = parseBinary, .precedence = .Equals },
+            .NotEq => .{ .prefix = null, .infix = parseBinary, .precedence = .Equals },
+            .Plus => .{ .prefix = null, .infix = parseBinary, .precedence = .Sum },
+            .Minus => .{ .prefix = parseUnary, .infix = parseBinary, .precedence = .Sum },
+            .Slash => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
+            .Asterisk => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
+            .Percent => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
             .Return => .{ .prefix = null, .infix = null, .precedence = null },
-            .If => .{ .prefix = null, .infix = null, .precedence = null },
             .Else => .{ .prefix = null, .infix = null, .precedence = null },
             .For => .{ .prefix = null, .infix = null, .precedence = null },
-            .In => .{ .prefix = null, .infix = null, .precedence = null },
             .Dot => .{ .prefix = null, .infix = null, .precedence = .Index },
-            .DotDot => .{ .prefix = null, .infix = null, .precedence = null },
+            .DotDot => .{ .prefix = null, .infix = parseDotDot, .precedence = null },
             .Arrow => .{ .prefix = null, .infix = null, .precedence = null },
             .NewLine => .{ .prefix = null, .infix = null, .precedence = null },
             .Eof => .{ .prefix = null, .infix = null, .precedence = null },
-            .And => .{ .prefix = null, .infix = logicalAnd, .precedence = .LogicalAnd },
-            .Or => .{ .prefix = null, .infix = logicalOr, .precedence = .LogicalOr },
+            .And => .{ .prefix = null, .infix = parseBinary, .precedence = .LogicalAnd },
+            .Or => .{ .prefix = null, .infix = parseBinary, .precedence = .LogicalOr },
             .Pipe => .{ .prefix = null, .infix = null, .precedence = .BitwiseOr },
-            .Ampersand => .{ .prefix = null, .infix = null, .precedence = .BitwiseAnd },
-            .Caret => .{ .prefix = null, .infix = null, .precedence = .BitwiseXor },
-            .Tilde => .{ .prefix = null, .infix = null, .precedence = .Prefix },
-            .LeftShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
-            .RightShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
+            .Ampersand => .{ .prefix = null, .infix = parseBinary, .precedence = .BitwiseAnd },
+            .Caret => .{ .prefix = null, .infix = parseBinary, .precedence = .BitwiseXor },
+            .Tilde => .{ .prefix = null, .infix = parseBinary, .precedence = .Prefix },
+            .LeftShift => .{ .prefix = null, .infix = parseBinary, .precedence = .Shift },
+            .RightShift => .{ .prefix = null, .infix = parseBinary, .precedence = .Shift },
             .Print => .{ .prefix = null, .infix = null, .precedence = null },
             .Assert => .{ .prefix = null, .infix = null, .precedence = null },
             .Let => .{ .prefix = null, .infix = null, .precedence = null },
             .Match => .{ .prefix = null, .infix = null, .precedence = null },
             .While => .{ .prefix = null, .infix = null, .precedence = null },
-            .Fn => .{ .prefix = func, .infix = null, .precedence = null },
-            .List => .{ .prefix = list, .infix = null, .precedence = null },
+            .Fn => .{ .prefix = parseFunction, .infix = null, .precedence = null },
+            .List => .{ .prefix = parseList, .infix = null, .precedence = null },
+            .Table => .{ .prefix = parseTable, .infix = null, .precedence = null },
             .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
     }

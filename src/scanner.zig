@@ -32,10 +32,8 @@ pub const TokenType = enum {
     Percent,
 
     Return,
-    If,
     Else,
     For,
-    In,
     Dot,
     DotDot,
     Arrow,
@@ -59,6 +57,7 @@ pub const TokenType = enum {
     While,
     Fn,
     List,
+    Table,
 
     Error,
 };
@@ -255,21 +254,13 @@ pub const Scanner = struct {
             'n' => return self.checkKeyword(1, "ull", .Null),
             'r' => return self.checkKeyword(1, "eturn", .Return),
             't' => return self.checkKeyword(1, "rue", .True),
+            'T' => return self.checkKeyword(1, "able", .Table),
             'f' => {
                 if (self.current - self.start > 1) {
                     switch (self.source[self.start + 1]) {
                         'o' => return self.checkKeyword(2, "r", .For),
                         'a' => return self.checkKeyword(2, "lse", .False),
                         'n' => return self.checkKeyword(2, "", .Fn),
-                        else => return .Identifier,
-                    }
-                }
-            },
-            'i' => {
-                if (self.current - self.start > 1) {
-                    switch (self.source[self.start + 1]) {
-                        'f' => return self.checkKeyword(2, "", .If),
-                        'n' => return self.checkKeyword(2, "", .In),
                         else => return .Identifier,
                     }
                 }
