@@ -59,7 +59,9 @@ pub const TokenType = enum {
     List,
     Table,
 
-    Error,
+    pub fn toString(self: @This()) []const u8 {
+        return @tagName(self);
+    }
 };
 
 pub const Token = struct {
@@ -107,14 +109,9 @@ pub const Scanner = struct {
         };
     }
 
-    pub fn errorToken(self: *Scanner, message: []const u8) Token {
-        return Token{
-            .source = message,
-            .type = .Error,
-            .start = 0,
-            .length = message.len,
-            .line = self.line,
-        };
+    fn scannerError(self: *Scanner, message: []const u8) error{ScannerError} {
+        std.debug.print("Scanner error at line {d}: {s}\n", .{ self.line, message });
+        return error.ScannerError;
     }
 
     pub fn advance(self: *Scanner) u8 {
@@ -158,7 +155,7 @@ pub const Scanner = struct {
         }
     }
 
-    pub fn next(self: *Scanner) Token {
+    pub fn next(self: *Scanner) !Token {
         self.chopWhiteSpace();
         self.start = self.current;
 
@@ -198,16 +195,16 @@ pub const Scanner = struct {
                 if (Scanner.isAlpha(char)) {
                     return self.makeIdentifier();
                 }
-                return self.errorToken("Unexpected character.");
+                return self.scannerError("Unexpected character.");
             },
         }
     }
 
-    fn makeString(self: *Scanner) Token {
+    fn makeString(self: *Scanner) !Token {
         while (self.peek() != '"' and !self.isAtEnd()) {
             _ = self.advance();
         }
-        if (self.isAtEnd()) return self.errorToken("Unterminated string.");
+        if (self.isAtEnd()) return self.scannerError("Unterminated string.");
         _ = self.advance();
         return self.makeToken(.String);
     }

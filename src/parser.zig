@@ -3,8 +3,15 @@ const logging = @import("logging.zig");
 const scanner = @import("scanner.zig");
 
 fn createAst(arena: std.mem.Allocator, source: []const u8) !Program {
-    const parser = Parser.init(arena, source);
+    var scan = scanner.Scanner.init(source);
+    var parser = try Parser.init(arena, &scan);
     return try parser.parseProgram();
+}
+
+fn printProgram(program: Program) void {
+    for (program.items) |statement| {
+        std.debug.print("{f}\n", .{statement});
+    }
 }
 
 pub const Parser = struct {
@@ -15,21 +22,30 @@ pub const Parser = struct {
     debug_indent: usize = 0,
 
     pub fn init(arena: std.mem.Allocator, s: *scanner.Scanner) !Parser {
-        const current = s.next();
+        const current = try s.next();
         if (current.type == .Eof) {
             return error.NoTokens;
         }
         return Parser{
-            .scanner = scanner,
+            .scanner = s,
             .current = current,
             .previous = null,
             .arena = arena,
         };
     }
 
+    fn log(self: *Parser, comptime fmt: []const u8, args: anytype) void {
+        logging.log(fmt, args, .{
+            .messageLevel = .Debug,
+            .currentLevel = .Debug,
+            .indent = self.debug_indent,
+            .module = "Parser",
+        });
+    }
+
     pub fn parseProgram(self: *Parser) !Program {
         var statements: std.ArrayList(Statement) = .{};
-        while (self.cur_token.type != .Eof) {
+        while (self.current.type != .Eof) {
             try self.chopNewlines();
             const statement = try self.parseStatement();
             try statements.append(self.arena, statement);
@@ -37,7 +53,7 @@ pub const Parser = struct {
         return statements;
     }
 
-    fn parseStatement(self: *Parser) !Statement {
+    fn parseStatement(self: *Parser) anyerror!Statement {
         try self.chopNewlines();
         if (try self.match(.Print)) {
             return try self.printStatement();
@@ -51,6 +67,8 @@ pub const Parser = struct {
             return try self.returnStatement();
         } else if (try self.match(.LBrace)) {
             return try self.blockStatement();
+        } else if (try self.match(.Let)) {
+            return try self.varDeclaration();
         } else {
             return try self.expressionStatement();
         }
@@ -103,13 +121,13 @@ pub const Parser = struct {
 
         try self.consume(.Pipe, "Expect '|' after loop range");
         const capture = try self.parseExpression();
-        if (capture != .Identifier) {
+        if (capture.* != .Identifier) {
             return self.errorAtPrevious("Expect identifier in loop capture");
         }
         var index: ?[]const u8 = null;
         if (!self.check(.Pipe)) {
             const second_capture = try self.parseExpression();
-            if (second_capture != .Identifier) {
+            if (second_capture.* != .Identifier) {
                 return self.errorAtPrevious("Expect identifier in loop capture");
             }
             index = second_capture.Identifier;
@@ -135,7 +153,9 @@ pub const Parser = struct {
         defer self.log("end return statement", .{});
 
         if (self.isLineEnd()) {
-            return Statement{ .Return = .Null };
+            const expression = try self.arena.create(Expression);
+            expression.* = Expression.Null;
+            return Statement{ .Return = expression };
         } else {
             const expression = try self.parseExpression();
             try self.expectLineEnd();
@@ -158,12 +178,46 @@ pub const Parser = struct {
         return Statement{ .Block = statements };
     }
 
+    fn varDeclaration(self: *Parser) !Statement {
+        self.log("var declaration", .{});
+        defer self.log("end var declaration", .{});
+
+        const target = try self.parseExpression();
+        if (target.* != .Identifier) {
+            return self.errorAtPrevious("Expect identifier after 'let'.");
+        }
+
+        if (try self.match(.Assign)) {
+            const value = try self.parseExpression();
+            try self.advance();
+            try self.expectLineEnd();
+            return Statement{
+                .VarDeclaration = .{
+                    .name = target.Identifier,
+                    .expression = value,
+                },
+            };
+        }
+
+        try self.expectLineEnd();
+        const nullExpression = try self.arena.create(Expression);
+        nullExpression.* = .Null;
+
+        return Statement{
+            .VarDeclaration = .{
+                .name = target.Identifier,
+                .expression = nullExpression,
+            },
+        };
+    }
+
     fn expressionStatement(self: *Parser) !Statement {
         const expression = try self.parseExpression();
-        if (self.match(.Assign)) {
-            const target = switch (expression) {
+        if (try self.match(.Assign)) {
+            const target = switch (expression.*) {
                 .Identifier => |name| AssignTarget{ .Identifier = name },
                 .Index => |index| AssignTarget{ .Index = index },
+                else => return self.errorAtPrevious("Invalid assign target."),
             };
             const value = try self.parseExpression();
             try self.expectLineEnd();
@@ -181,6 +235,7 @@ pub const Parser = struct {
         try self.advance();
 
         self.log("expression on {s}", .{self.previous.?.toString()});
+        self.debug_indent += 1;
 
         if (getRule(self.previous.?.type).prefix) |prefixFn| {
             var left = try prefixFn(self);
@@ -189,26 +244,26 @@ pub const Parser = struct {
             defer {
                 left_owned.* = left;
                 self.debug_indent -= 1;
-                self.printDebug("parsed {s}\n", .{left_owned.getType()}, .Blue);
+                self.log("parsed {s}", .{@tagName(left_owned.*)});
             }
 
             while (@intFromEnum(precedence) < getRulePrecedenceValue(self.current.type)) {
                 try self.advance();
-                if (self.current.type == .Eof) return;
+                if (self.current.type == .Eof) break;
                 if (getRule(self.previous.?.type).infix) |infixFn| {
                     left = try infixFn(self, left);
                 }
             }
+
+            return left_owned;
         } else {
             return self.errorAtPrevious("Expect expression.");
         }
-
-        self.log("end expression", .{});
     }
 
-    fn advance(self: *Parser) void {
+    fn advance(self: *Parser) !void {
         self.previous = self.current;
-        self.current = self.scanner.next();
+        self.current = try self.scanner.next();
     }
 
     fn chopNewlines(self: *Parser) !void {
@@ -217,19 +272,9 @@ pub const Parser = struct {
         }
     }
 
-    fn printDebug(self: *Parser, comptime fmt: []const u8, args: anytype, color: logging.LogColor) void {
-        logging.log(fmt, args, .{
-            .messageLevel = .Debug,
-            .currentLevel = .Debug,
-            .color = color,
-            .indent = self.debug_indent,
-            .module = "Parser",
-        });
-    }
-
     fn consume(self: *Parser, expected: scanner.TokenType, message: []const u8) !void {
         if (self.check(expected)) {
-            try self.parser.advance();
+            try self.advance();
             return;
         }
         return self.errorAtCurrent(message);
@@ -263,18 +308,17 @@ pub const Parser = struct {
     }
 
     fn errorAtPrevious(self: *Parser, message: []const u8) anyerror {
-        return errorAt(&self.previous, message);
+        return errorAt(&self.previous.?, message);
     }
 
     fn errorAt(token: *scanner.Token, message: []const u8) anyerror {
         std.debug.print("[line {d}] Error", .{token.line});
         switch (token.type) {
             .Eof => std.debug.print(" at end", .{}),
-            .Error => {},
             else => std.debug.print(" at '{s}'", .{token.source[token.start .. token.start + token.length]}),
         }
         std.debug.print(": {s}\n", .{message});
-        return error.CompileError;
+        return error.ParserError;
     }
 };
 
@@ -291,13 +335,31 @@ const Statement = union(enum) {
     Assert: *const Expression,
     Print: *const Expression,
     Expression: *const Expression,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        switch (self) {
+            .VarDeclaration => |val| try writer.print("VarDeclaration({s} = {f})", .{ val.name, val.expression }),
+            .FuncDeclaration => |_| try writer.print("FuncDeclaration", .{}),
+            .Block => try writer.print("Block", .{}),
+            .Assignment => try writer.print("Assignment", .{}),
+            .For => try writer.print("For", .{}),
+            .While => try writer.print("While", .{}),
+            .Return => try writer.print("Return", .{}),
+            .Assert => try writer.print("Assert", .{}),
+            .Print => try writer.print("Print", .{}),
+            .Expression => try writer.print("Expression", .{}),
+        }
+    }
 };
 
 const Block = std.ArrayList(Statement);
 
 const VarDeclaration = struct {
     name: []const u8,
-    expression: ?*const Expression,
+    expression: *const Expression,
 };
 
 const FuncDeclaration = struct {
@@ -343,6 +405,29 @@ const Expression = union(enum) {
     Index: Index,
     Match: Match,
     Null,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        switch (self) {
+            .Identifier => |val| try writer.print("Identifier({s})", .{val}),
+            .String => |val| try writer.print("String(\"{s}\")", .{val}),
+            .Integer => |val| try writer.print("Integer({d})", .{val}),
+            .Float => |val| try writer.print("Float({d})", .{val}),
+            .Boolean => |val| try writer.print("Boolean({})", .{val}),
+            .Infix => |val| try writer.print("Infix({f} {s} {f})", .{ val.left, val.operator.toString(), val.right }),
+            .Prefix => |val| try writer.print("Prefix({s} {f})", .{ val.operator.toString(), val.expression }),
+            .Function => |_| try writer.print("Fn", .{}),
+            .Call => |_| try writer.print("Call", .{}),
+            .Range => |_| try writer.print("Range", .{}),
+            .List => |_| try writer.print("List", .{}),
+            .Table => |_| try writer.print("Table", .{}),
+            .Index => |_| try writer.print("Index", .{}),
+            .Match => |_| try writer.print("Match", .{}),
+            .Null => try writer.print("Null", .{}),
+        }
+    }
 };
 
 const Infix = struct {
@@ -418,7 +503,6 @@ const MatchArm = struct {
 
 const Precedence = enum(u8) {
     Lowest = 1,
-    Assign,
     LogicalOr,
     LogicalAnd,
     BitwiseOr,
@@ -447,10 +531,10 @@ fn parseFloat(parser: *Parser) !Expression {
 }
 
 fn parseLiteral(parser: *Parser) !Expression {
-    return switch (parser.previous.type) {
-        .True => try Expression{ .Boolean = true },
-        .False => try Expression{ .Boolean = false },
-        .Null => try Expression.Null,
+    return switch (parser.previous.?.type) {
+        .True => Expression{ .Boolean = true },
+        .False => Expression{ .Boolean = false },
+        .Null => Expression.Null,
         else => unreachable,
     };
 }
@@ -468,26 +552,29 @@ fn parseUnary(parser: *Parser) !Expression {
 
 fn parseList(parser: *Parser) !Expression {
     _ = parser;
+    return .Null;
 }
 
 fn parseTable(parser: *Parser) !Expression {
     _ = parser;
+    return .Null;
 }
 
 fn parseFunction(parser: *Parser) !Expression {
     _ = parser;
+    return .Null;
 }
 
 fn parseGrouping(parser: *Parser) !Expression {
     const expression = try parser.parseExpression();
     try parser.consume(.RParen, "Expect ')' after expression");
-    return expression;
+    return expression.*;
 }
 
 fn parseMatch(self: *Parser) !Expression {
     var target: ?*const Expression = null;
 
-    if (self.match(.LParen)) {
+    if (try self.match(.LParen)) {
         target = try self.parseExpression();
         try self.consume(.RParen, "Expect ')' after match target");
     }
@@ -531,7 +618,6 @@ fn parseMatch(self: *Parser) !Expression {
 
 fn parseBinary(parser: *Parser, left: Expression) !Expression {
     const operator = parser.previous.?.type;
-    try parser.advance();
     const right = try parser.parsePrecedence(getRulePrecedence(operator));
 
     const left_owned = try parser.arena.create(Expression);
@@ -551,7 +637,7 @@ fn parseDotDot(parser: *Parser, left: Expression) !Expression {
     const right = try parser.parseExpression();
     const left_owned = try parser.arena.create(Expression);
     left_owned.* = left;
-    return Expression{ .Range = .{ .left = left_owned, .right = right } };
+    return Expression{ .Range = .{ .start = left_owned, .end = right } };
 }
 
 fn parseCall(parser: *Parser, left: Expression) !Expression {
@@ -564,7 +650,7 @@ fn parseCall(parser: *Parser, left: Expression) !Expression {
         const expression = try parser.parseExpression();
 
         if (try parser.match(.Assign)) {
-            if (expression != .Identifier) {
+            if (expression.* != .Identifier) {
                 return parser.errorAtPrevious("Invalid left side in named argument.");
             }
             const right = try parser.parseExpression();
@@ -633,7 +719,7 @@ fn initRules() [token_count]ParseRule {
             .RBracket => .{ .prefix = null, .infix = null, .precedence = null },
             .LBrace => .{ .prefix = null, .infix = null, .precedence = null },
             .RBrace => .{ .prefix = null, .infix = null, .precedence = null },
-            .Assign => .{ .prefix = null, .infix = null, .precedence = .Assign },
+            .Assign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Comma => .{ .prefix = null, .infix = null, .precedence = null },
             .String => .{ .prefix = parseString, .infix = null, .precedence = null },
             .Float => .{ .prefix = parseFloat, .infix = null, .precedence = null },
@@ -678,7 +764,6 @@ fn initRules() [token_count]ParseRule {
             .Fn => .{ .prefix = parseFunction, .infix = null, .precedence = null },
             .List => .{ .prefix = parseList, .infix = null, .precedence = null },
             .Table => .{ .prefix = parseTable, .infix = null, .precedence = null },
-            .Error => .{ .prefix = null, .infix = null, .precedence = null },
         };
     }
 
@@ -698,4 +783,16 @@ fn getRulePrecedence(token_type: scanner.TokenType) Precedence {
         return precedence;
     }
     return Precedence.Lowest;
+}
+
+test "parser" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const source =
+        \\ let x = 5 / 2
+    ;
+
+    const ast = try createAst(arena.allocator(), source);
+    printProgram(ast);
 }
