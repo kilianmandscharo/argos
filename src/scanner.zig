@@ -185,8 +185,8 @@ pub const Scanner = struct {
             },
             '-' => return if (self.match('>')) self.makeToken(.Arrow) else self.makeToken(.Minus),
             '!' => return if (self.match('=')) self.makeToken(.NotEq) else self.makeToken(.Bang),
-            '<' => return if (self.match('=')) self.makeToken(.LtOrEq) else self.makeToken(.Lt),
-            '>' => return if (self.match('=')) self.makeToken(.GtOrEq) else self.makeToken(.Gt),
+            '<' => return self.scanLess(),
+            '>' => return self.scanGreater(),
             '=' => return if (self.match('=')) self.makeToken(.Eq) else self.makeToken(.Assign),
             '.' => return if (self.match('.')) self.makeToken(.DotDot) else self.makeToken(.Dot),
             '0'...'9' => return self.makeNumber(),
@@ -198,6 +198,18 @@ pub const Scanner = struct {
                 return self.scannerError("Unexpected character.");
             },
         }
+    }
+
+    fn scanLess(self: *Scanner) !Token {
+        if (self.match('=')) return self.makeToken(.LtOrEq);
+        if (self.match('<')) return self.makeToken(.LeftShift);
+        return self.makeToken(.Lt);
+    }
+
+    fn scanGreater(self: *Scanner) !Token {
+        if (self.match('=')) return self.makeToken(.GtOrEq);
+        if (self.match('>')) return self.makeToken(.RightShift);
+        return self.makeToken(.Gt);
     }
 
     fn makeString(self: *Scanner) !Token {
@@ -214,11 +226,9 @@ pub const Scanner = struct {
             _ = self.advance();
         }
         if (self.peek() != '.' or self.peekNext() == '.') return self.makeToken(.Int);
-        if (std.ascii.isDigit(self.peekNext())) {
+        _ = self.advance();
+        while (std.ascii.isDigit(self.peek()) and !self.isAtEnd()) {
             _ = self.advance();
-            while (std.ascii.isDigit(self.peek())) {
-                _ = self.advance();
-            }
         }
         return self.makeToken(.Float);
     }

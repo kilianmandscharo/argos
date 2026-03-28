@@ -73,7 +73,7 @@ pub fn runTestsWithArena(comptime T: type, name: []const u8, test_cases: []const
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
 
-        std.debug.print("--- running '{s}' ---\n", .{test_case.description});
+        std.debug.print("⏳ running '{s}'...\n", .{test_case.description});
 
         const result = run(arena.allocator(), test_case);
 

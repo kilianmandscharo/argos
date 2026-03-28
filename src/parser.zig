@@ -1,6 +1,7 @@
 const std = @import("std");
 const logging = @import("logging.zig");
 const scanner = @import("scanner.zig");
+const test_utils = @import("test_utils.zig");
 
 fn createAst(arena: std.mem.Allocator, source: []const u8) !Program {
     var scan = scanner.Scanner.init(source);
@@ -324,7 +325,7 @@ pub const Parser = struct {
 
 const Program = std.ArrayList(Statement);
 
-const Statement = union(enum) {
+pub const Statement = union(enum) {
     VarDeclaration: VarDeclaration,
     FuncDeclaration: FuncDeclaration,
     Block: Block,
@@ -389,7 +390,7 @@ const While = struct {
     body: Block,
 };
 
-const Expression = union(enum) {
+pub const Expression = union(enum) {
     Identifier: []const u8,
     String: []const u8,
     Integer: i64,
@@ -519,7 +520,8 @@ const Precedence = enum(u8) {
 };
 
 fn parseString(parser: *Parser) !Expression {
-    return Expression{ .String = parser.previous.?.toString() };
+    const s = parser.previous.?.toString();
+    return Expression{ .String = s[1 .. s.len - 1] };
 }
 
 fn parseInteger(parser: *Parser) !Expression {
@@ -545,7 +547,6 @@ fn parseIdentifier(parser: *Parser) !Expression {
 
 fn parseUnary(parser: *Parser) !Expression {
     const operator = parser.previous.?.type;
-    try parser.advance();
     const expression = try parser.parseExpression();
     return Expression{ .Prefix = .{ .operator = operator, .expression = expression } };
 }
@@ -735,7 +736,7 @@ fn initRules() [token_count]ParseRule {
             .GtOrEq => .{ .prefix = null, .infix = parseBinary, .precedence = .LessGreater },
             .Eq => .{ .prefix = null, .infix = parseBinary, .precedence = .Equals },
             .NotEq => .{ .prefix = null, .infix = parseBinary, .precedence = .Equals },
-            .Plus => .{ .prefix = null, .infix = parseBinary, .precedence = .Sum },
+            .Plus => .{ .prefix = parseUnary, .infix = parseBinary, .precedence = .Sum },
             .Minus => .{ .prefix = parseUnary, .infix = parseBinary, .precedence = .Sum },
             .Slash => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
             .Asterisk => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
@@ -750,10 +751,10 @@ fn initRules() [token_count]ParseRule {
             .Eof => .{ .prefix = null, .infix = null, .precedence = null },
             .And => .{ .prefix = null, .infix = parseBinary, .precedence = .LogicalAnd },
             .Or => .{ .prefix = null, .infix = parseBinary, .precedence = .LogicalOr },
-            .Pipe => .{ .prefix = null, .infix = null, .precedence = .BitwiseOr },
+            .Pipe => .{ .prefix = null, .infix = parseBinary, .precedence = .BitwiseOr },
             .Ampersand => .{ .prefix = null, .infix = parseBinary, .precedence = .BitwiseAnd },
             .Caret => .{ .prefix = null, .infix = parseBinary, .precedence = .BitwiseXor },
-            .Tilde => .{ .prefix = null, .infix = parseBinary, .precedence = .Prefix },
+            .Tilde => .{ .prefix = parseUnary, .infix = null, .precedence = .Prefix },
             .LeftShift => .{ .prefix = null, .infix = parseBinary, .precedence = .Shift },
             .RightShift => .{ .prefix = null, .infix = parseBinary, .precedence = .Shift },
             .Print => .{ .prefix = null, .infix = null, .precedence = null },
@@ -785,14 +786,689 @@ fn getRulePrecedence(token_type: scanner.TokenType) Precedence {
     return Precedence.Lowest;
 }
 
-test "parser" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+fn expectStatement(expected: Statement, actual: Statement) anyerror!void {
+    try expectTag(expected, actual);
 
-    const source =
-        \\ let x = 5 / 2
-    ;
+    switch (expected) {
+        .VarDeclaration => |stmt| {
+            try std.testing.expectEqualStrings(stmt.name, actual.VarDeclaration.name);
+            try expectExpression(stmt.expression.*, actual.VarDeclaration.expression.*);
+        },
+        .FuncDeclaration => |stmt| {
+            try std.testing.expectEqualStrings(stmt.name, actual.FuncDeclaration.name);
+            try expectExpression(
+                Expression{ .Function = stmt.expression.* },
+                Expression{ .Function = actual.FuncDeclaration.expression.* },
+            );
+        },
+        .Block => |stmt| {
+            for (0..stmt.items.len) |i| {
+                try expectStatement(stmt.items[i], actual.Block.items[i]);
+            }
+        },
+        .Assignment => |stmt| {
+            try expectTag(stmt.target, actual.Assignment.target);
+            if (stmt.target == .Identifier) {
+                try std.testing.expectEqualStrings(stmt.target.Identifier, actual.Assignment.target.Identifier);
+            } else {
+                try expectExpression(stmt.target.Index.left.*, actual.Assignment.target.Index.left.*);
+                try expectExpression(stmt.target.Index.index.*, actual.Assignment.target.Index.index.*);
+            }
+            try expectExpression(stmt.expression.*, actual.Assignment.expression.*);
+        },
+        .For => |stmt| {
+            try expectExpression(stmt.expression.*, actual.For.expression.*);
+            try std.testing.expectEqualStrings(stmt.capture, actual.For.capture);
+            if (stmt.index) |index| {
+                try std.testing.expectEqualStrings(index, actual.For.index.?);
+            }
+            for (0..stmt.body.items.len) |i| {
+                try expectStatement(stmt.body.items[i], actual.For.body.items[i]);
+            }
+        },
+        .While => |stmt| {
+            try expectExpression(stmt.expression.*, actual.While.expression.*);
+            for (0..stmt.body.items.len) |i| {
+                try expectStatement(stmt.body.items[i], actual.While.body.items[i]);
+            }
+        },
+        .Return => |stmt| {
+            try expectExpression(stmt.*, actual.Return.*);
+        },
+        .Assert => |stmt| {
+            try expectExpression(stmt.*, actual.Assert.*);
+        },
+        .Print => |stmt| {
+            try expectExpression(stmt.*, actual.Print.*);
+        },
+        .Expression => |stmt| {
+            try expectExpression(stmt.*, actual.Expression.*);
+        },
+    }
+}
 
-    const ast = try createAst(arena.allocator(), source);
-    printProgram(ast);
+fn expectTag(expected: anytype, actual: anytype) !void {
+    try std.testing.expectEqual(std.meta.activeTag(expected), std.meta.activeTag(actual));
+}
+
+fn expectExpression(expected: Expression, actual: Expression) !void {
+    try expectTag(expected, actual);
+
+    switch (expected) {
+        .Identifier => |ident| try std.testing.expectEqualStrings(ident, actual.Identifier),
+        .String => |string| try std.testing.expectEqualStrings(string, actual.String),
+        .Prefix => |expr| {
+            try std.testing.expectEqual(expr.operator, actual.Prefix.operator);
+            try expectExpression(expr.expression.*, actual.Prefix.expression.*);
+        },
+        .Infix => |expr| {
+            try std.testing.expectEqual(expr.operator, actual.Infix.operator);
+            try expectExpression(expr.left.*, actual.Infix.left.*);
+            try expectExpression(expr.right.*, actual.Infix.right.*);
+        },
+        .Function => |expr| {
+            try std.testing.expectEqual(expr.params.items.len, actual.Function.params.items.len);
+            for (0..expr.params.items.len) |i| {
+                const first = expr.params.items[i];
+                const second = actual.Function.params.items[i];
+                try expectTag(first, second);
+                if (first == .Positional) {
+                    try std.testing.expectEqualStrings(first.Positional, second.Positional);
+                } else {
+                    try std.testing.expectEqualStrings(first.Default.name, second.Default.name);
+                    try expectExpression(first.Default.value.*, second.Default.value.*);
+                }
+            }
+            try expectTag(expr.body, actual.Function.body);
+            if (expr.body == .Expression) {
+                try expectExpression(expr.body.Expression.*, actual.Function.body.Expression.*);
+            } else {
+                for (0..expr.body.Block.items.len) |i| {
+                    try expectStatement(expr.body.Block.items[i], actual.Function.body.Block.items[i]);
+                }
+            }
+        },
+        .Range => |expr| {
+            try expectExpression(expr.start.*, actual.Range.start.*);
+            try expectExpression(expr.end.*, actual.Range.end.*);
+        },
+        .Call => |expr| {
+            try expectExpression(expr.function.*, actual.Call.function.*);
+            try std.testing.expectEqual(expr.args.items.len, actual.Call.args.items.len);
+            for (0..expr.args.items.len) |i| {
+                const first = expr.args.items[i];
+                const second = actual.Call.args.items[i];
+                try expectTag(first, second);
+                if (first == .Positional) {
+                    try expectExpression(first.Positional.*, second.Positional.*);
+                } else {
+                    try std.testing.expectEqualStrings(first.Named.name, second.Named.name);
+                    try expectExpression(first.Named.value.*, second.Named.value.*);
+                }
+            }
+        },
+        .List => |expr| {
+            try std.testing.expectEqual(expr.items.len, actual.List.items.len);
+            for (expr.items, 0..) |item, i| {
+                try expectExpression(item.*, actual.List.items[i].*);
+            }
+        },
+        .Table => |expr| {
+            try std.testing.expectEqual(expr.items.len, actual.Table.items.len);
+            for (expr.items, 0..) |item, i| {
+                try expectExpression(item.key.*, actual.Table.items[i].key.*);
+                try expectExpression(item.value.*, actual.Table.items[i].value.*);
+            }
+        },
+        .Index => |expr| {
+            try expectExpression(expr.left.*, actual.Index.left.*);
+            try expectExpression(expr.index.*, actual.Index.index.*);
+        },
+        .Match => |expr| {
+            if (expr.target) |target| {
+                try expectExpression(target.*, actual.Match.target.?.*);
+            }
+            try expectTag(expr.body, actual.Match.body);
+            if (expr.body == .Single) {
+                try expectExpression(expr.body.Single.pattern.*, actual.Match.body.Single.pattern.*);
+                try expectStatement(expr.body.Single.body, actual.Match.body.Single.body);
+            } else {
+                try std.testing.expectEqual(expr.body.Multiple.items.len, actual.Match.body.Multiple.items.len);
+                for (0..expr.body.Multiple.items.len) |i| {
+                    const first = expr.body.Multiple.items[i];
+                    const second = actual.Match.body.Multiple.items[i];
+                    try expectExpression(first.pattern.*, second.pattern.*);
+                    try expectStatement(first.body, second.body);
+                }
+            }
+        },
+        else => try std.testing.expectEqual(expected, actual),
+    }
+}
+
+const ExpressionTestCase = struct {
+    description: []const u8,
+    input: []const u8,
+    expected_expression: Expression,
+};
+
+const runExpressionTest = struct {
+    fn runTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) anyerror!void {
+        const ast = try createAst(arena, test_case.input);
+        try std.testing.expectEqual(ast.items.len, 1);
+        try std.testing.expect(ast.items[0] == .Expression);
+        try expectExpression(test_case.expected_expression, ast.items[0].Expression.*);
+    }
+}.runTest;
+
+test "expressions" {
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "should parse identifier",
+            .input =
+            \\foo
+            ,
+            .expected_expression = Expression{ .Identifier = "foo" },
+        },
+        .{
+            .description = "should parse string literal",
+            .input =
+            \\"foo"
+            ,
+            .expected_expression = Expression{ .String = "foo" },
+        },
+        .{
+            .description = "should parse integer literal",
+            .input =
+            \\666
+            ,
+            .expected_expression = Expression{ .Integer = 666 },
+        },
+        .{
+            .description = "should parse float literal",
+            .input =
+            \\3.1415
+            ,
+            .expected_expression = Expression{ .Float = 3.1415 },
+        },
+        .{
+            .description = "should parse true",
+            .input =
+            \\true
+            ,
+            .expected_expression = Expression{ .Boolean = true },
+        },
+        .{
+            .description = "should parse false",
+            .input =
+            \\false
+            ,
+            .expected_expression = Expression{ .Boolean = false },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse expressions",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "prefix expressions" {
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "should parse bang operator with true",
+            .input = "!true",
+            .expected_expression = Expression{
+                .Prefix = Prefix{
+                    .expression = &Expression{
+                        .Boolean = true,
+                    },
+                    .operator = .Bang,
+                },
+            },
+        },
+        .{
+            .description = "should parse bang operator with false",
+            .input = "!false",
+            .expected_expression = Expression{
+                .Prefix = Prefix{
+                    .expression = &Expression{
+                        .Boolean = false,
+                    },
+                    .operator = .Bang,
+                },
+            },
+        },
+        .{
+            .description = "should parse tilde operator with false",
+            .input = "~false",
+            .expected_expression = Expression{
+                .Prefix = Prefix{
+                    .expression = &Expression{
+                        .Boolean = false,
+                    },
+                    .operator = .Tilde,
+                },
+            },
+        },
+        .{
+            .description = "should parse plus operator with integer",
+            .input = "+5",
+            .expected_expression = Expression{
+                .Prefix = Prefix{
+                    .expression = &Expression{
+                        .Integer = 5,
+                    },
+                    .operator = .Plus,
+                },
+            },
+        },
+        .{
+            .description = "should parse minus operator with integer",
+            .input = "-2",
+            .expected_expression = Expression{
+                .Prefix = Prefix{
+                    .expression = &Expression{
+                        .Integer = 2,
+                    },
+                    .operator = .Minus,
+                },
+            },
+        },
+        .{
+            .description = "should parse tilde operator with integer",
+            .input = "~5",
+            .expected_expression = Expression{
+                .Prefix = Prefix{
+                    .expression = &Expression{
+                        .Integer = 5,
+                    },
+                    .operator = .Tilde,
+                },
+            },
+        },
+        .{
+            .description = "should parse plus operator with float",
+            .input = "+5.41",
+            .expected_expression = Expression{
+                .Prefix = Prefix{
+                    .expression = &Expression{
+                        .Float = 5.41,
+                    },
+                    .operator = .Plus,
+                },
+            },
+        },
+        .{
+            .description = "should parse minus operator with float",
+            .input = "-2.1234",
+            .expected_expression = Expression{
+                .Prefix = Prefix{
+                    .expression = &Expression{
+                        .Float = 2.1234,
+                    },
+                    .operator = .Minus,
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse prefix expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "infix expression" {
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "should parse integer addition",
+            .input = "1 + 1",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 1 },
+                    .right = &Expression{ .Integer = 1 },
+                    .operator = .Plus,
+                },
+            },
+        },
+        .{
+            .description = "should parse float addition",
+            .input = "1.1 + 1.35",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Float = 1.1 },
+                    .right = &Expression{ .Float = 1.35 },
+                    .operator = .Plus,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer subtraction",
+            .input = "40 - 22",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 40 },
+                    .right = &Expression{ .Integer = 22 },
+                    .operator = .Minus,
+                },
+            },
+        },
+        .{
+            .description = "should parse float subtraction",
+            .input = "40.54 - 22.33",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Float = 40.54 },
+                    .right = &Expression{ .Float = 22.33 },
+                    .operator = .Minus,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer multiplication",
+            .input = "5 * 66",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 5 },
+                    .right = &Expression{ .Integer = 66 },
+                    .operator = .Asterisk,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer mod",
+            .input = "33 % 2",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 33 },
+                    .right = &Expression{ .Integer = 2 },
+                    .operator = .Percent,
+                },
+            },
+        },
+        .{
+            .description = "should preserve order of operations without parens",
+            .input = "3 * 4 / 3",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{
+                        .Infix = Infix{
+                            .left = &Expression{
+                                .Integer = 3,
+                            },
+                            .right = &Expression{
+                                .Integer = 4,
+                            },
+                            .operator = .Asterisk,
+                        },
+                    },
+                    .right = &Expression{ .Integer = 3 },
+                    .operator = .Slash,
+                },
+            },
+        },
+        .{
+            .description = "should respect parentheses in first pos",
+            .input = "(3 * 4) / 3",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{
+                        .Infix = Infix{
+                            .left = &Expression{
+                                .Integer = 3,
+                            },
+                            .right = &Expression{
+                                .Integer = 4,
+                            },
+                            .operator = .Asterisk,
+                        },
+                    },
+                    .right = &Expression{ .Integer = 3 },
+                    .operator = .Slash,
+                },
+            },
+        },
+        .{
+            .description = "should respect parentheses in second pos",
+            .input = "3 * (4 / 3)",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 3 },
+                    .right = &Expression{
+                        .Infix = Infix{
+                            .left = &Expression{
+                                .Integer = 4,
+                            },
+                            .right = &Expression{
+                                .Integer = 3,
+                            },
+                            .operator = .Slash,
+                        },
+                    },
+                    .operator = .Asterisk,
+                },
+            },
+        },
+        .{
+            .description = "should parse float multiplication",
+            .input = "5.3 * 66.5",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Float = 5.3 },
+                    .right = &Expression{ .Float = 66.5 },
+                    .operator = .Asterisk,
+                },
+            },
+        },
+        .{
+            .description = "should parse float mod",
+            .input = "1.1 % 5.3",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Float = 1.1 },
+                    .right = &Expression{ .Float = 5.3 },
+                    .operator = .Percent,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer division",
+            .input = "6 / 2",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 6 },
+                    .right = &Expression{ .Integer = 2 },
+                    .operator = .Slash,
+                },
+            },
+        },
+        .{
+            .description = "should parse float division",
+            .input = "6.55 / 2.413",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Float = 6.55 },
+                    .right = &Expression{ .Float = 2.413 },
+                    .operator = .Slash,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer less than",
+            .input = "1 < 5",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 1 },
+                    .right = &Expression{ .Integer = 5 },
+                    .operator = .Lt,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer less than or equal",
+            .input = "1 <= 5",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 1 },
+                    .right = &Expression{ .Integer = 5 },
+                    .operator = .LtOrEq,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer greater than",
+            .input = "1 > 5",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 1 },
+                    .right = &Expression{ .Integer = 5 },
+                    .operator = .Gt,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer greater than or equal",
+            .input = "1 >= 5",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 1 },
+                    .right = &Expression{ .Integer = 5 },
+                    .operator = .GtOrEq,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer equals",
+            .input = "3 == 3",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 3 },
+                    .right = &Expression{ .Integer = 3 },
+                    .operator = .Eq,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer does not equal",
+            .input = "3 != 3",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 3 },
+                    .right = &Expression{ .Integer = 3 },
+                    .operator = .NotEq,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer bitwise or",
+            .input = "3 | 3",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 3 },
+                    .right = &Expression{ .Integer = 3 },
+                    .operator = .Pipe,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer bitwise and",
+            .input = "3 & 3",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 3 },
+                    .right = &Expression{ .Integer = 3 },
+                    .operator = .Ampersand,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer bitwise xor",
+            .input = "3 ^ 3",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 3 },
+                    .right = &Expression{ .Integer = 3 },
+                    .operator = .Caret,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer shift left",
+            .input = "3 << 3",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 3 },
+                    .right = &Expression{ .Integer = 3 },
+                    .operator = .LeftShift,
+                },
+            },
+        },
+        .{
+            .description = "should parse integer shift right",
+            .input = "3 >> 3",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Integer = 3 },
+                    .right = &Expression{ .Integer = 3 },
+                    .operator = .RightShift,
+                },
+            },
+        },
+        .{
+            .description = "should parse boolean equals",
+            .input = "true == false",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Boolean = true },
+                    .right = &Expression{ .Boolean = false },
+                    .operator = .Eq,
+                },
+            },
+        },
+        .{
+            .description = "should parse boolean does not equal",
+            .input = "true != false",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Boolean = true },
+                    .right = &Expression{ .Boolean = false },
+                    .operator = .NotEq,
+                },
+            },
+        },
+        .{
+            .description = "should parse boolean logical or",
+            .input = "true or false",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Boolean = true },
+                    .right = &Expression{ .Boolean = false },
+                    .operator = .Or,
+                },
+            },
+        },
+        .{
+            .description = "should parse boolean logical and",
+            .input = "true and false",
+            .expected_expression = Expression{
+                .Infix = Infix{
+                    .left = &Expression{ .Boolean = true },
+                    .right = &Expression{ .Boolean = false },
+                    .operator = .And,
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse infix expression",
+        &test_cases,
+        runExpressionTest,
+    );
 }
