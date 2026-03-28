@@ -1,4 +1,5 @@
 const std = @import("std");
+const test_utils = @import("test_utils.zig");
 
 pub const TokenType = enum {
     LParen,
@@ -71,8 +72,9 @@ pub const Token = struct {
     length: usize,
     line: usize,
 
-    pub fn toString(self: *Token) []const u8 {
+    pub fn toString(self: Token) []const u8 {
         if (self.type == .NewLine) return "<newline>";
+        if (self.type == .Eof) return "EOF";
         return self.source[self.start .. self.start + self.length];
     }
 
@@ -287,3 +289,154 @@ pub const Scanner = struct {
         return if (matches) token_type else .Identifier;
     }
 };
+
+const runTests = test_utils.runTests;
+
+fn assertTokenEquals(expected_type: TokenType, literal: []const u8, got: Token) !void {
+    std.testing.expect(expected_type == got.type) catch |err| {
+        std.debug.print("expected {any}, got {any}\n", .{ expected_type, got.type });
+        return err;
+    };
+    try std.testing.expectEqualStrings(literal, got.toString());
+}
+
+test "scanner" {
+    const TestCase = struct {
+        description: []const u8,
+        input: []const u8,
+    };
+
+    const run = struct {
+        fn runTest(test_case: TestCase) anyerror!void {
+            var scanner = Scanner.init(test_case.input);
+
+            try assertTokenEquals(.Identifier, "a", try scanner.next());
+            try assertTokenEquals(.Assign, "=", try scanner.next());
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Identifier, "b", try scanner.next());
+            try assertTokenEquals(.Assign, "=", try scanner.next());
+            try assertTokenEquals(.LParen, "(", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.Plus, "+", try scanner.next());
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.RParen, ")", try scanner.next());
+            try assertTokenEquals(.Slash, "/", try scanner.next());
+            try assertTokenEquals(.Int, "3", try scanner.next());
+            try assertTokenEquals(.Asterisk, "*", try scanner.next());
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.Minus, "-", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.True, "true", try scanner.next());
+            try assertTokenEquals(.Eq, "==", try scanner.next());
+            try assertTokenEquals(.True, "true", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.False, "false", try scanner.next());
+            try assertTokenEquals(.NotEq, "!=", try scanner.next());
+            try assertTokenEquals(.True, "true", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.Lt, "<", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.Gt, ">", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Bang, "!", try scanner.next());
+            try assertTokenEquals(.True, "true", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.LtOrEq, "<=", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.GtOrEq, ">=", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.LeftShift, "<<", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.RightShift, ">>", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.True, "true", try scanner.next());
+            try assertTokenEquals(.Or, "or", try scanner.next());
+            try assertTokenEquals(.False, "false", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.True, "true", try scanner.next());
+            try assertTokenEquals(.And, "and", try scanner.next());
+            try assertTokenEquals(.False, "false", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.Ampersand, "&", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.Pipe, "|", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.Caret, "^", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.Tilde, "~", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+            try assertTokenEquals(.NewLine, "<newline>", try scanner.next());
+
+            try assertTokenEquals(.Int, "1", try scanner.next());
+            try assertTokenEquals(.Percent, "%", try scanner.next());
+            try assertTokenEquals(.Int, "5", try scanner.next());
+
+            try assertTokenEquals(.Eof, "EOF", try scanner.next());
+        }
+    }.runTest;
+
+    const test_cases = [_]TestCase{
+        .{
+            .description = "tokenize",
+            .input =
+            \\a = 1
+            \\b = (5 + 1) / 3 * 1 - 5
+            \\true == true
+            \\false != true
+            \\1 < 5
+            \\1 > 5
+            \\!true
+            \\1 <= 5
+            \\1 >= 5
+            \\1 << 5
+            \\1 >> 5
+            \\true or false
+            \\true and false
+            \\1 & 5
+            \\1 | 5
+            \\1 ^ 5
+            \\1 ~ 5
+            \\1 % 5
+            ,
+        },
+    };
+
+    try runTests(TestCase, "tokenize", &test_cases, run);
+}

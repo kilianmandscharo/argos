@@ -504,6 +504,7 @@ const MatchArm = struct {
 
 const Precedence = enum(u8) {
     Lowest = 1,
+    Range,
     LogicalOr,
     LogicalAnd,
     BitwiseOr,
@@ -634,7 +635,6 @@ fn parseBinary(parser: *Parser, left: Expression) !Expression {
 }
 
 fn parseDotDot(parser: *Parser, left: Expression) !Expression {
-    try parser.advance();
     const right = try parser.parseExpression();
     const left_owned = try parser.arena.create(Expression);
     left_owned.* = left;
@@ -745,7 +745,7 @@ fn initRules() [token_count]ParseRule {
             .Else => .{ .prefix = null, .infix = null, .precedence = null },
             .For => .{ .prefix = null, .infix = null, .precedence = null },
             .Dot => .{ .prefix = null, .infix = null, .precedence = .Index },
-            .DotDot => .{ .prefix = null, .infix = parseDotDot, .precedence = null },
+            .DotDot => .{ .prefix = null, .infix = parseDotDot, .precedence = .Range },
             .Arrow => .{ .prefix = null, .infix = null, .precedence = null },
             .NewLine => .{ .prefix = null, .infix = null, .precedence = null },
             .Eof => .{ .prefix = null, .infix = null, .precedence = null },
@@ -1468,6 +1468,92 @@ test "infix expression" {
     try test_utils.runTestsWithArena(
         ExpressionTestCase,
         "parse infix expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "range expression" {
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "two integers",
+            .input =
+            \\0..10
+            ,
+            .expected_expression = Expression{
+                .Range = Range{
+                    .start = &Expression{
+                        .Integer = 0,
+                    },
+                    .end = &Expression{
+                        .Integer = 10,
+                    },
+                },
+            },
+        },
+        .{
+            .description = "two infix expressions",
+            .input =
+            \\2 + 3..50 - 10
+            ,
+            .expected_expression = Expression{
+                .Range = Range{
+                    .start = &Expression{
+                        .Infix = Infix{
+                            .operator = .Plus,
+                            .left = &Expression{
+                                .Integer = 2,
+                            },
+                            .right = &Expression{
+                                .Integer = 3,
+                            },
+                        },
+                    },
+                    .end = &Expression{
+                        .Infix = Infix{
+                            .operator = .Minus,
+                            .left = &Expression{
+                                .Integer = 50,
+                            },
+                            .right = &Expression{
+                                .Integer = 10,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .description = "two function calls",
+            .input =
+            \\start()..end()
+            ,
+            .expected_expression = Expression{
+                .Range = Range{
+                    .start = &Expression{
+                        .Call = Call{
+                            .args = .{},
+                            .function = &Expression{
+                                .Identifier = "start",
+                            },
+                        },
+                    },
+                    .end = &Expression{
+                        .Call = Call{
+                            .args = .{},
+                            .function = &Expression{
+                                .Identifier = "end",
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse range expression",
         &test_cases,
         runExpressionTest,
     );
