@@ -33,7 +33,7 @@ pub fn runTests(comptime T: type, name: []const u8, test_cases: []const T, run: 
     var failed: usize = 0;
 
     for (test_cases) |test_case| {
-        std.debug.print("--- running '{s}' ---\n", .{test_case.description});
+        std.debug.print("⏳ running '{s}'...\n", .{test_case.description});
 
         const result = run(test_case);
 

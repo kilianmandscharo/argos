@@ -21,6 +21,7 @@ pub const Parser = struct {
     scanner: *scanner.Scanner,
     arena: std.mem.Allocator,
     debug_indent: usize = 0,
+    ctx: struct { parse_loop_capture: bool },
 
     pub fn init(arena: std.mem.Allocator, s: *scanner.Scanner) !Parser {
         const current = try s.next();
@@ -32,6 +33,7 @@ pub const Parser = struct {
             .current = current,
             .previous = null,
             .arena = arena,
+            .ctx = .{ .parse_loop_capture = false },
         };
     }
 
@@ -81,7 +83,9 @@ pub const Parser = struct {
 
         try self.consume(.LParen, "Expect '(' after print.");
         const expression = try self.parseExpression();
-        try self.expectLineEnd();
+        try self.consume(.RParen, "Expect ')' after print expression.");
+
+        _ = try self.match(.NewLine);
 
         return Statement{ .Print = expression };
     }
@@ -90,9 +94,11 @@ pub const Parser = struct {
         self.log("assert statement", .{});
         defer self.log("end assert statement", .{});
 
-        try self.consume(.LParen, "Expect '(' after print.");
+        try self.consume(.LParen, "Expect '(' after assert.");
         const expression = try self.parseExpression();
-        try self.expectLineEnd();
+        try self.consume(.RParen, "Expect ')' after assert expression.");
+
+        _ = try self.match(.NewLine);
 
         return Statement{ .Assert = expression };
     }
@@ -104,8 +110,8 @@ pub const Parser = struct {
         try self.consume(.LParen, "Expect '(' after 'while'");
         const expression = try self.parseExpression();
         try self.consume(.RParen, "Expect ')' after condition");
+        try self.consume(.LBrace, "Expect '{' after while condition");
         const body = try self.blockStatement();
-        try self.consume(.NewLine, "Expect new line after while block");
 
         return Statement{
             .While = .{ .expression = expression, .body = body.Block },
@@ -121,6 +127,8 @@ pub const Parser = struct {
         try self.consume(.RParen, "Expect ')' after range");
 
         try self.consume(.Pipe, "Expect '|' after loop range");
+        self.ctx.parse_loop_capture = true;
+
         const capture = try self.parseExpression();
         if (capture.* != .Identifier) {
             return self.errorAtPrevious("Expect identifier in loop capture");
@@ -133,11 +141,12 @@ pub const Parser = struct {
             }
             index = second_capture.Identifier;
         }
-        try self.consume(.Pipe, "Expect '|' after for loop capture");
 
-        try self.consume(.RBrace, "Expect '{' after loop capture.");
+        try self.consume(.Pipe, "Expect '|' after for loop capture");
+        self.ctx.parse_loop_capture = false;
+
+        try self.consume(.LBrace, "Expect '{' after loop capture.");
         const body = try self.blockStatement();
-        try self.consume(.NewLine, "Expect new line after for block");
 
         return Statement{
             .For = .{
@@ -168,13 +177,13 @@ pub const Parser = struct {
         self.log("block statement", .{});
         defer self.log("end block statement", .{});
 
+        try self.chopNewlines();
         var statements: std.ArrayList(Statement) = .{};
         while (!self.check(.RBrace) and !self.check(.Eof)) {
             try statements.append(self.arena, try self.parseStatement());
-            try self.expectLineEnd();
         }
         try self.consume(.RBrace, "Expect '}' after block.");
-        try self.consume(.NewLine, "Expect '\n' after block.");
+        try self.expectLineEnd();
 
         return Statement{ .Block = statements };
     }
@@ -190,7 +199,6 @@ pub const Parser = struct {
 
         if (try self.match(.Assign)) {
             const value = try self.parseExpression();
-            try self.advance();
             try self.expectLineEnd();
             return Statement{
                 .VarDeclaration = .{
@@ -203,7 +211,6 @@ pub const Parser = struct {
         try self.expectLineEnd();
         const nullExpression = try self.arena.create(Expression);
         nullExpression.* = .Null;
-
         return Statement{
             .VarDeclaration = .{
                 .name = target.Identifier,
@@ -248,7 +255,7 @@ pub const Parser = struct {
                 self.log("parsed {s}", .{@tagName(left_owned.*)});
             }
 
-            while (@intFromEnum(precedence) < getRulePrecedenceValue(self.current.type)) {
+            while (@intFromEnum(precedence) < getRulePrecedenceValue(self, self.current.type)) {
                 try self.advance();
                 if (self.current.type == .Eof) break;
                 if (getRule(self.previous.?.type).infix) |infixFn| {
@@ -327,7 +334,6 @@ const Program = std.ArrayList(Statement);
 
 pub const Statement = union(enum) {
     VarDeclaration: VarDeclaration,
-    FuncDeclaration: FuncDeclaration,
     Block: Block,
     Assignment: Assignment,
     For: For,
@@ -343,7 +349,6 @@ pub const Statement = union(enum) {
     ) std.Io.Writer.Error!void {
         switch (self) {
             .VarDeclaration => |val| try writer.print("VarDeclaration({s} = {f})", .{ val.name, val.expression }),
-            .FuncDeclaration => |_| try writer.print("FuncDeclaration", .{}),
             .Block => try writer.print("Block", .{}),
             .Assignment => try writer.print("Assignment", .{}),
             .For => try writer.print("For", .{}),
@@ -361,11 +366,6 @@ const Block = std.ArrayList(Statement);
 const VarDeclaration = struct {
     name: []const u8,
     expression: *const Expression,
-};
-
-const FuncDeclaration = struct {
-    name: []const u8,
-    expression: *const Function,
 };
 
 const Assignment = struct {
@@ -620,7 +620,7 @@ fn parseMatch(self: *Parser) !Expression {
 
 fn parseBinary(parser: *Parser, left: Expression) !Expression {
     const operator = parser.previous.?.type;
-    const right = try parser.parsePrecedence(getRulePrecedence(operator));
+    const right = try parser.parsePrecedence(getRulePrecedence(parser, operator));
 
     const left_owned = try parser.arena.create(Expression);
     left_owned.* = left;
@@ -775,11 +775,12 @@ fn getRule(token_type: scanner.TokenType) *const ParseRule {
     return &rules[@intFromEnum(token_type)];
 }
 
-fn getRulePrecedenceValue(token_type: scanner.TokenType) usize {
-    return @intFromEnum(getRulePrecedence(token_type));
+fn getRulePrecedenceValue(parser: *Parser, token_type: scanner.TokenType) usize {
+    return @intFromEnum(getRulePrecedence(parser, token_type));
 }
 
-fn getRulePrecedence(token_type: scanner.TokenType) Precedence {
+fn getRulePrecedence(parser: *Parser, token_type: scanner.TokenType) Precedence {
+    if (token_type == .Pipe and parser.ctx.parse_loop_capture) return .Lowest;
     if (getRule(token_type).precedence) |precedence| {
         return precedence;
     }
@@ -793,13 +794,6 @@ fn expectStatement(expected: Statement, actual: Statement) anyerror!void {
         .VarDeclaration => |stmt| {
             try std.testing.expectEqualStrings(stmt.name, actual.VarDeclaration.name);
             try expectExpression(stmt.expression.*, actual.VarDeclaration.expression.*);
-        },
-        .FuncDeclaration => |stmt| {
-            try std.testing.expectEqualStrings(stmt.name, actual.FuncDeclaration.name);
-            try expectExpression(
-                Expression{ .Function = stmt.expression.* },
-                Expression{ .Function = actual.FuncDeclaration.expression.* },
-            );
         },
         .Block => |stmt| {
             for (0..stmt.items.len) |i| {
@@ -946,20 +940,268 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
     }
 }
 
+const StatementTestCase = struct {
+    description: []const u8,
+    input: []const u8,
+    expected_statement: Statement,
+};
+
+fn runStatementTest(arena: std.mem.Allocator, test_case: StatementTestCase) anyerror!void {
+    const ast = try createAst(arena, test_case.input);
+    try std.testing.expectEqual(ast.items.len, 1);
+    try expectStatement(test_case.expected_statement, ast.items[0]);
+}
+
+test "statements" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]StatementTestCase{
+        .{
+            .description = "var declaration",
+            .input =
+            \\let foo = 5
+            ,
+            .expected_statement = Statement{
+                .VarDeclaration = .{
+                    .name = "foo",
+                    .expression = &Expression{ .Integer = 5 },
+                },
+            },
+        },
+        .{
+            .description = "var declaration empty",
+            .input =
+            \\let foo
+            ,
+            .expected_statement = Statement{
+                .VarDeclaration = .{
+                    .name = "foo",
+                    .expression = &Expression{ .Null = {} },
+                },
+            },
+        },
+        .{
+            .description = "assignment to identifier",
+            .input =
+            \\foo = 5
+            ,
+            .expected_statement = Statement{
+                .Assignment = .{
+                    .target = .{ .Identifier = "foo" },
+                    .expression = &Expression{ .Integer = 5 },
+                },
+            },
+        },
+        .{
+            .description = "assignment to index",
+            .input =
+            \\foo[0] = 5
+            ,
+            .expected_statement = Statement{
+                .Assignment = .{
+                    .target = .{
+                        .Index = .{
+                            .left = &Expression{ .Identifier = "foo" },
+                            .index = &Expression{ .Integer = 0 },
+                        },
+                    },
+                    .expression = &Expression{ .Integer = 5 },
+                },
+            },
+        },
+        .{
+            .description = "return",
+            .input =
+            \\return 5
+            ,
+            .expected_statement = Statement{
+                .Return = &Expression{ .Integer = 5 },
+            },
+        },
+        .{
+            .description = "return empty",
+            .input =
+            \\return
+            ,
+            .expected_statement = Statement{
+                .Return = &Expression{ .Null = {} },
+            },
+        },
+        .{
+            .description = "print",
+            .input =
+            \\print(5)
+            ,
+            .expected_statement = Statement{
+                .Print = &Expression{ .Integer = 5 },
+            },
+        },
+        .{
+            .description = "assert",
+            .input =
+            \\assert(5)
+            ,
+            .expected_statement = Statement{
+                .Assert = &Expression{ .Integer = 5 },
+            },
+        },
+        .{
+            .description = "expression",
+            .input =
+            \\5 + 5
+            ,
+            .expected_statement = Statement{
+                .Expression = &Expression{
+                    .Infix = .{
+                        .left = &Expression{ .Integer = 5 },
+                        .right = &Expression{ .Integer = 5 },
+                        .operator = .Plus,
+                    },
+                },
+            },
+        },
+        .{
+            .description = "block",
+            .input =
+            \\{
+            \\    let foo = 5
+            \\    foo + 2
+            \\}
+            ,
+            .expected_statement = Statement{
+                .Block = try test_utils.list(Statement, arena.allocator(), &.{
+                    Statement{
+                        .VarDeclaration = .{
+                            .name = "foo",
+                            .expression = &Expression{ .Integer = 5 },
+                        },
+                    },
+                    Statement{
+                        .Expression = &Expression{
+                            .Infix = .{
+                                .left = &Expression{ .Identifier = "foo" },
+                                .right = &Expression{ .Integer = 2 },
+                                .operator = .Plus,
+                            },
+                        },
+                    },
+                }),
+            },
+        },
+        .{
+            .description = "block single line",
+            .input =
+            \\{ print(1) }
+            ,
+            .expected_statement = Statement{
+                .Block = try test_utils.list(Statement, arena.allocator(), &.{
+                    Statement{
+                        .Print = &Expression{ .Integer = 1 },
+                    },
+                }),
+            },
+        },
+        .{
+            .description = "block empty",
+            .input =
+            \\{}
+            ,
+            .expected_statement = Statement{
+                .Block = .{},
+            },
+        },
+        .{
+            .description = "block empty multiple lines",
+            .input =
+            \\{
+            \\
+            \\}
+            ,
+            .expected_statement = Statement{
+                .Block = .{},
+            },
+        },
+        .{
+            .description = "while",
+            .input =
+            \\while(foo < 5) {
+            \\    foo = foo + 1
+            \\}
+            ,
+            .expected_statement = Statement{
+                .While = .{
+                    .expression = &Expression{
+                        .Infix = .{
+                            .left = &Expression{ .Identifier = "foo" },
+                            .right = &Expression{ .Integer = 5 },
+                            .operator = .Lt,
+                        },
+                    },
+                    .body = try test_utils.list(Statement, arena.allocator(), &.{
+                        Statement{
+                            .Assignment = .{
+                                .target = .{ .Identifier = "foo" },
+                                .expression = &Expression{
+                                    .Infix = .{
+                                        .left = &Expression{ .Identifier = "foo" },
+                                        .right = &Expression{ .Integer = 1 },
+                                        .operator = .Plus,
+                                    },
+                                },
+                            },
+                        },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "for",
+            .input =
+            \\for(0..5) |i| {
+            \\    print(i)
+            \\}
+            ,
+            .expected_statement = Statement{
+                .For = .{
+                    .expression = &Expression{
+                        .Range = .{
+                            .start = &Expression{ .Integer = 0 },
+                            .end = &Expression{ .Integer = 5 },
+                        },
+                    },
+                    .capture = "i",
+                    .index = null,
+                    .body = try test_utils.list(Statement, arena.allocator(), &.{
+                        Statement{
+                            .Print = &Expression{ .Identifier = "i" },
+                        },
+                    }),
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        StatementTestCase,
+        "parse statements",
+        &test_cases,
+        runStatementTest,
+    );
+}
+
 const ExpressionTestCase = struct {
     description: []const u8,
     input: []const u8,
     expected_expression: Expression,
 };
 
-const runExpressionTest = struct {
-    fn runTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) anyerror!void {
-        const ast = try createAst(arena, test_case.input);
-        try std.testing.expectEqual(ast.items.len, 1);
-        try std.testing.expect(ast.items[0] == .Expression);
-        try expectExpression(test_case.expected_expression, ast.items[0].Expression.*);
-    }
-}.runTest;
+fn runExpressionTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) anyerror!void {
+    const ast = try createAst(arena, test_case.input);
+    try std.testing.expectEqual(ast.items.len, 1);
+    try std.testing.expect(ast.items[0] == .Expression);
+    try expectExpression(test_case.expected_expression, ast.items[0].Expression.*);
+}
 
 test "expressions" {
     const test_cases = [_]ExpressionTestCase{
@@ -1558,3 +1800,33 @@ test "range expression" {
         runExpressionTest,
     );
 }
+
+// test "function literal" {
+//     const test_cases = [_]ExpressionTestCase{
+//         .{
+//             .description = "two integers",
+//             .input =
+//             \\fn() {
+//             \\
+//             \\}
+//             ,
+//             .expected_expression = Expression{
+//                 .Range = Range{
+//                     .start = &Expression{
+//                         .Integer = 0,
+//                     },
+//                     .end = &Expression{
+//                         .Integer = 10,
+//                     },
+//                 },
+//             },
+//         },
+//     };
+//
+//     try test_utils.runTestsWithArena(
+//         ExpressionTestCase,
+//         "parse function literal",
+//         &test_cases,
+//         runExpressionTest,
+//     );
+// }
