@@ -479,7 +479,12 @@ const FunctionBody = union(enum) {
 
 const FunctionParam = union(enum) {
     Positional: []const u8,
-    Default: struct { name: []const u8, value: *const Expression },
+    Default: FunctionParamDefault,
+};
+
+const FunctionParamDefault = struct {
+    name: []const u8,
+    value: *const Expression,
 };
 
 const Call = struct {
@@ -609,8 +614,45 @@ fn parseTable(parser: *Parser) !Expression {
 }
 
 fn parseFunction(parser: *Parser) !Expression {
-    _ = parser;
-    return .Null;
+    try parser.consume(.LParen, "Expect '(' after 'fn'.");
+    const params = try parser.parseCommaSeparated(
+        FunctionParam,
+        struct {
+            fn parse(p: *Parser) !FunctionParam {
+                const expression = try p.parseExpression();
+                if (try p.match(.Assign)) {
+                    if (expression.* != .Identifier) {
+                        return p.errorAtPrevious("Invalid left side in default param.");
+                    }
+                    const right = try p.parseExpression();
+                    return FunctionParam{
+                        .Default = .{ .name = expression.Identifier, .value = right },
+                    };
+                } else {
+                    if (expression.* != .Identifier) {
+                        return p.errorAtPrevious("Invalid function param.");
+                    }
+                    return FunctionParam{ .Positional = expression.Identifier };
+                }
+            }
+        }.parse,
+        .RParen,
+    );
+
+    if (try parser.match(.LBrace)) {
+        const body = try parser.blockStatement();
+        return Expression{
+            .Function = .{ .params = params, .body = .{ .Block = body.Block } },
+        };
+    }
+
+    const body = try parser.parseExpression();
+    return Expression{
+        .Function = .{
+            .params = params,
+            .body = .{ .Expression = body },
+        },
+    };
 }
 
 fn parseGrouping(parser: *Parser) !Expression {
@@ -688,44 +730,36 @@ fn parseDotDot(parser: *Parser, left: Expression) !Expression {
 }
 
 fn parseCall(parser: *Parser, left: Expression) !Expression {
-    var args: std.ArrayList(FunctionArg) = .{};
-    while (true) {
-        try parser.chopNewlines();
-        if (try parser.match(.Eof)) return parser.errorAtCurrent("Reached EOF.");
-        if (try parser.match(.RParen)) break;
-
-        const expression = try parser.parseExpression();
-
-        if (try parser.match(.Assign)) {
-            if (expression.* != .Identifier) {
-                return parser.errorAtPrevious("Invalid left side in named argument.");
+    const args = try parser.parseCommaSeparated(
+        FunctionArg,
+        struct {
+            fn parse(p: *Parser) !FunctionArg {
+                const expression = try p.parseExpression();
+                if (try p.match(.Assign)) {
+                    if (expression.* != .Identifier) {
+                        return p.errorAtPrevious("Invalid left side in named argument.");
+                    }
+                    const right = try p.parseExpression();
+                    return FunctionArg{
+                        .Named = FunctionArgNamed{ .name = expression.Identifier, .value = right },
+                    };
+                } else {
+                    return FunctionArg{ .Positional = expression };
+                }
             }
-            const right = try parser.parseExpression();
-            try args.append(parser.arena, FunctionArg{
-                .Named = FunctionArgNamed{ .name = expression.Identifier, .value = right },
-            });
-        } else {
-            try args.append(parser.arena, FunctionArg{ .Positional = expression });
-        }
-
-        try parser.advance();
-        if (try parser.match(.RParen)) break;
-        const token_type = parser.current.type;
-        try parser.advance();
-        try parser.chopNewlines();
-        if (!parser.check(.RParen) and token_type != .Comma) {
-            return parser.errorAtPrevious("Expected comma.");
-        }
-        if (try parser.match(.RParen)) break;
-    }
+        }.parse,
+        .RParen,
+    );
 
     const left_owned = try parser.arena.create(Expression);
     left_owned.* = left;
 
-    return Expression{ .Call = .{
-        .function = left_owned,
-        .args = args,
-    } };
+    return Expression{
+        .Call = .{
+            .function = left_owned,
+            .args = args,
+        },
+    };
 }
 
 fn parseIndex(parser: *Parser, left: Expression) !Expression {
@@ -2235,32 +2269,228 @@ test "table literal" {
     );
 }
 
-// test "function literal" {
-//     const test_cases = [_]ExpressionTestCase{
-//         .{
-//             .description = "two integers",
-//             .input =
-//             \\fn() {
-//             \\
-//             \\}
-//             ,
-//             .expected_expression = Expression{
-//                 .Range = Range{
-//                     .start = &Expression{
-//                         .Integer = 0,
-//                     },
-//                     .end = &Expression{
-//                         .Integer = 10,
-//                     },
-//                 },
-//             },
-//         },
-//     };
-//
-//     try test_utils.runTestsWithArena(
-//         ExpressionTestCase,
-//         "parse function literal",
-//         &test_cases,
-//         runExpressionTest,
-//     );
-// }
+test "function call" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "no args",
+            .input =
+            \\test()
+            ,
+            .expected_expression = Expression{
+                .Call = Call{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = .{},
+                },
+            },
+        },
+        .{
+            .description = "with args one line",
+            .input =
+            \\test(1, 2)
+            ,
+            .expected_expression = Expression{
+                .Call = Call{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = try test_utils.list(FunctionArg, arena.allocator(), &.{
+                        .{ .Positional = &Expression{ .Integer = 1 } },
+                        .{ .Positional = &Expression{ .Integer = 2 } },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "with args one line trailing comma",
+            .input =
+            \\test(1, 2,)
+            ,
+            .expected_expression = Expression{
+                .Call = Call{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = try test_utils.list(FunctionArg, arena.allocator(), &.{
+                        .{ .Positional = &Expression{ .Integer = 1 } },
+                        .{ .Positional = &Expression{ .Integer = 2 } },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "with args multiple lines",
+            .input =
+            \\test(
+            \\    1, 
+            \\    2
+            \\)
+            ,
+            .expected_expression = Expression{
+                .Call = Call{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = try test_utils.list(FunctionArg, arena.allocator(), &.{
+                        .{ .Positional = &Expression{ .Integer = 1 } },
+                        .{ .Positional = &Expression{ .Integer = 2 } },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "with args multiple lines trailing comma",
+            .input =
+            \\test(
+            \\    1, 
+            \\    2,
+            \\)
+            ,
+            .expected_expression = Expression{
+                .Call = Call{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = try test_utils.list(FunctionArg, arena.allocator(), &.{
+                        .{ .Positional = &Expression{ .Integer = 1 } },
+                        .{ .Positional = &Expression{ .Integer = 2 } },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "with named args",
+            .input =
+            \\test(
+            \\    1, 
+            \\    c=2,
+            \\    b=3,
+            \\)
+            ,
+            .expected_expression = Expression{
+                .Call = Call{
+                    .function = &Expression{
+                        .Identifier = "test",
+                    },
+                    .args = try test_utils.list(FunctionArg, arena.allocator(), &.{
+                        .{ .Positional = &Expression{ .Integer = 1 } },
+                        .{ .Named = .{ .name = "c", .value = &Expression{ .Integer = 2 } } },
+                        .{ .Named = .{ .name = "b", .value = &Expression{ .Integer = 3 } } },
+                    }),
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse function call",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "function literal" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "empty",
+            .input =
+            \\fn() {
+            \\
+            \\}
+            ,
+            .expected_expression = Expression{
+                .Function = .{ .params = .{}, .body = .{ .Block = .{} } },
+            },
+        },
+        .{
+            .description = "with block",
+            .input =
+            \\fn(a, b) {
+            \\    return a + b
+            \\}
+            ,
+            .expected_expression = Expression{
+                .Function = .{
+                    .params = try test_utils.list(FunctionParam, arena.allocator(), &.{
+                        .{ .Positional = "a" },
+                        .{ .Positional = "b" },
+                    }),
+                    .body = .{
+                        .Block = try test_utils.list(Statement, arena.allocator(), &.{
+                            .{
+                                .Return = &Expression{
+                                    .Infix = .{
+                                        .left = &Expression{ .Identifier = "a" },
+                                        .operator = .Plus,
+                                        .right = &Expression{ .Identifier = "b" },
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            },
+        },
+        .{
+            .description = "with expression",
+            .input =
+            \\fn(a, b) a + b
+            ,
+            .expected_expression = Expression{
+                .Function = .{
+                    .params = try test_utils.list(FunctionParam, arena.allocator(), &.{
+                        .{ .Positional = "a" },
+                        .{ .Positional = "b" },
+                    }),
+                    .body = .{
+                        .Expression = &Expression{
+                            .Infix = .{
+                                .left = &Expression{ .Identifier = "a" },
+                                .operator = .Plus,
+                                .right = &Expression{ .Identifier = "b" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .description = "with default args",
+            .input =
+            \\fn(a = 11, b = 12) a + b
+            ,
+            .expected_expression = Expression{
+                .Function = .{
+                    .params = try test_utils.list(FunctionParam, arena.allocator(), &.{
+                        .{ .Default = .{ .name = "a", .value = &Expression{ .Integer = 11 } } },
+                        .{ .Default = .{ .name = "b", .value = &Expression{ .Integer = 12 } } },
+                    }),
+                    .body = .{
+                        .Expression = &Expression{
+                            .Infix = .{
+                                .left = &Expression{ .Identifier = "a" },
+                                .operator = .Plus,
+                                .right = &Expression{ .Identifier = "b" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse function literal",
+        &test_cases,
+        runExpressionTest,
+    );
+}
