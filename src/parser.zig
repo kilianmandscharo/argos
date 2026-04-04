@@ -269,6 +269,25 @@ pub const Parser = struct {
         }
     }
 
+    fn parseCommaSeparated(self: *Parser, T: type, parseFn: *const fn (p: *Parser) anyerror!T, delimiter: scanner.TokenType) !std.ArrayList(T) {
+        var items: std.ArrayList(T) = .{};
+        var expectComma = false;
+
+        while (!try self.match(delimiter)) {
+            try self.chopNewlines();
+
+            if (try self.match(.Eof)) return self.errorAtCurrent("Reached EOF.");
+            if (try self.match(delimiter)) break;
+
+            if (expectComma) return self.errorAtPrevious("Expected comma.");
+
+            try items.append(self.arena, try parseFn(self));
+            if (!try self.match(.Comma)) expectComma = true;
+        }
+
+        return items;
+    }
+
     fn advance(self: *Parser) !void {
         self.previous = self.current;
         self.current = try self.scanner.next();
@@ -323,7 +342,7 @@ pub const Parser = struct {
         std.debug.print("[line {d}] Error", .{token.line});
         switch (token.type) {
             .Eof => std.debug.print(" at end", .{}),
-            else => std.debug.print(" at '{s}'", .{token.source[token.start .. token.start + token.length]}),
+            else => std.debug.print(" at '{s}'", .{token.toString()}),
         }
         std.debug.print(": {s}\n", .{message});
         return error.ParserError;
@@ -356,7 +375,7 @@ pub const Statement = union(enum) {
             .Return => try writer.print("Return", .{}),
             .Assert => try writer.print("Assert", .{}),
             .Print => try writer.print("Print", .{}),
-            .Expression => try writer.print("Expression", .{}),
+            .Expression => |val| try writer.print("Expression {f}", .{val}),
         }
     }
 };
@@ -422,7 +441,13 @@ pub const Expression = union(enum) {
             .Function => |_| try writer.print("Fn", .{}),
             .Call => |_| try writer.print("Call", .{}),
             .Range => |_| try writer.print("Range", .{}),
-            .List => |_| try writer.print("List", .{}),
+            .List => |val| {
+                try writer.print("List(", .{});
+                for (val.items) |item| {
+                    try writer.print("{f},", .{item});
+                }
+                try writer.print(")", .{});
+            },
             .Table => |_| try writer.print("Table", .{}),
             .Index => |_| try writer.print("Index", .{}),
             .Match => |_| try writer.print("Match", .{}),
@@ -553,13 +578,34 @@ fn parseUnary(parser: *Parser) !Expression {
 }
 
 fn parseList(parser: *Parser) !Expression {
-    _ = parser;
-    return .Null;
+    try parser.consume(.LBrace, "Expect '{' after 'List'.");
+    const items = try parser.parseCommaSeparated(
+        *const Expression,
+        struct {
+            fn parse(p: *Parser) !*const Expression {
+                return try p.parseExpression();
+            }
+        }.parse,
+        .RBrace,
+    );
+    return Expression{ .List = items };
 }
 
 fn parseTable(parser: *Parser) !Expression {
-    _ = parser;
-    return .Null;
+    try parser.consume(.LBrace, "Expect '{' after 'Table'.");
+    const items = try parser.parseCommaSeparated(
+        TablePair,
+        struct {
+            fn parse(p: *Parser) !TablePair {
+                const key = try p.parseExpression();
+                try p.consume(.Assign, "Expect '=' after table key.");
+                const value = try p.parseExpression();
+                return TablePair{ .key = key, .value = value };
+            }
+        }.parse,
+        .RBrace,
+    );
+    return Expression{ .Table = items };
 }
 
 fn parseFunction(parser: *Parser) !Expression {
@@ -1193,14 +1239,21 @@ test "statements" {
 const ExpressionTestCase = struct {
     description: []const u8,
     input: []const u8,
-    expected_expression: Expression,
+    expected_expression: ?Expression = null,
+    expect_error: bool = false,
 };
 
 fn runExpressionTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) anyerror!void {
-    const ast = try createAst(arena, test_case.input);
-    try std.testing.expectEqual(ast.items.len, 1);
-    try std.testing.expect(ast.items[0] == .Expression);
-    try expectExpression(test_case.expected_expression, ast.items[0].Expression.*);
+    const result = createAst(arena, test_case.input);
+
+    if (test_case.expect_error) {
+        try std.testing.expectError(error.ParserError, result);
+    } else {
+        const ast = try result;
+        try std.testing.expectEqual(ast.items.len, 1);
+        try std.testing.expect(ast.items[0] == .Expression);
+        try expectExpression(test_case.expected_expression.?, ast.items[0].Expression.*);
+    }
 }
 
 test "expressions" {
@@ -1796,6 +1849,387 @@ test "range expression" {
     try test_utils.runTestsWithArena(
         ExpressionTestCase,
         "parse range expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "list literal" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "empty list",
+            .input =
+            \\List{}
+            ,
+            .expected_expression = Expression{
+                .List = .{},
+            },
+        },
+        .{
+            .description = "empty list with new line",
+            .input =
+            \\List{
+            \\
+            \\}
+            ,
+            .expected_expression = Expression{
+                .List = .{},
+            },
+        },
+        .{
+            .description = "list one line",
+            .input =
+            \\List{1, 2}
+            ,
+            .expected_expression = Expression{
+                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
+                    &Expression{ .Integer = 1 },
+                    &Expression{ .Integer = 2 },
+                }),
+            },
+        },
+        .{
+            .description = "list one line trailing comma",
+            .input =
+            \\List{1, 2,}
+            ,
+            .expected_expression = Expression{
+                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
+                    &Expression{ .Integer = 1 },
+                    &Expression{ .Integer = 2 },
+                }),
+            },
+        },
+        .{
+            .description = "list multiple lines",
+            .input =
+            \\List{ 
+            \\    1,
+            \\    2
+            \\}
+            ,
+            .expected_expression = Expression{
+                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
+                    &Expression{ .Integer = 1 },
+                    &Expression{ .Integer = 2 },
+                }),
+            },
+        },
+        .{
+            .description = "list multiple lines trailing comma",
+            .input =
+            \\List{ 
+            \\    1,
+            \\    2,
+            \\}
+            ,
+            .expected_expression = Expression{
+                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
+                    &Expression{ .Integer = 1 },
+                    &Expression{ .Integer = 2 },
+                }),
+            },
+        },
+        .{
+            .description = "list multiple lines whitespace",
+            .input =
+            \\List{ 
+            \\
+            \\    1,
+            \\
+            \\    2
+            \\
+            \\}
+            ,
+            .expected_expression = Expression{
+                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
+                    &Expression{ .Integer = 1 },
+                    &Expression{ .Integer = 2 },
+                }),
+            },
+        },
+        .{
+            .description = "list multiple lines trailing comma whitespace",
+            .input =
+            \\List{ 
+            \\
+            \\    1,
+            \\
+            \\    2,
+            \\
+            \\}
+            ,
+            .expected_expression = Expression{
+                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
+                    &Expression{ .Integer = 1 },
+                    &Expression{ .Integer = 2 },
+                }),
+            },
+        },
+        .{
+            .description = "list of lists",
+            .input =
+            \\List{ 
+            \\    1,
+            \\    2,
+            \\}
+            ,
+            .expected_expression = Expression{
+                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
+                    &Expression{ .Integer = 1 },
+                    &Expression{ .Integer = 2 },
+                }),
+            },
+        },
+        .{
+            .description = "eof",
+            .input =
+            \\List{ 1, 2,
+            ,
+            .expect_error = true,
+        },
+        .{
+            .description = "expect comma",
+            .input =
+            \\List{ 1 2 }
+            ,
+            .expect_error = true,
+        },
+        .{
+            .description = "expect comma multiple lines",
+            .input =
+            \\List{ 
+            \\    1 
+            \\    2 
+            \\}
+            ,
+            .expect_error = true,
+        },
+        .{
+            .description = "list of lists",
+            .input =
+            \\List{ 
+            \\    List{1, 2},
+            \\    List{3, 4},
+            \\}
+            ,
+            .expected_expression = Expression{
+                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
+                    &Expression{ .List = try test_utils.list(
+                        *const Expression,
+                        arena.allocator(),
+                        &.{
+                            &Expression{ .Integer = 1 },
+                            &Expression{ .Integer = 2 },
+                        },
+                    ) },
+                    &Expression{ .List = try test_utils.list(
+                        *const Expression,
+                        arena.allocator(),
+                        &.{
+                            &Expression{ .Integer = 3 },
+                            &Expression{ .Integer = 4 },
+                        },
+                    ) },
+                }),
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse list literal",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "table literal" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "empty table",
+            .input =
+            \\Table{}
+            ,
+            .expected_expression = Expression{
+                .Table = .{},
+            },
+        },
+        .{
+            .description = "empty table with new line",
+            .input =
+            \\Table{
+            \\
+            \\}
+            ,
+            .expected_expression = Expression{
+                .Table = .{},
+            },
+        },
+        .{
+            .description = "table one line",
+            .input =
+            \\Table{"a" = 1, "b" = 2}
+            ,
+            .expected_expression = Expression{
+                .Table = try test_utils.list(TablePair, arena.allocator(), &.{
+                    TablePair{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
+                    TablePair{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+                }),
+            },
+        },
+        .{
+            .description = "table one line trailing comma",
+            .input =
+            \\Table{"a" = 1, "b" = 2,}
+            ,
+            .expected_expression = Expression{
+                .Table = try test_utils.list(TablePair, arena.allocator(), &.{
+                    TablePair{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
+                    TablePair{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+                }),
+            },
+        },
+        .{
+            .description = "table multiple lines",
+            .input =
+            \\Table{
+            \\    "a" = 1, 
+            \\    "b" = 2
+            \\}
+            ,
+            .expected_expression = Expression{
+                .Table = try test_utils.list(TablePair, arena.allocator(), &.{
+                    TablePair{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
+                    TablePair{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+                }),
+            },
+        },
+        .{
+            .description = "table multiple lines trailing comma",
+            .input =
+            \\Table{
+            \\    "a" = 1, 
+            \\    "b" = 2,
+            \\}
+            ,
+            .expected_expression = Expression{
+                .Table = try test_utils.list(TablePair, arena.allocator(), &.{
+                    TablePair{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
+                    TablePair{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+                }),
+            },
+        },
+        .{
+            .description = "table multiple lines whitespace",
+            .input =
+            \\Table{
+            \\
+            \\    "a" = 1, 
+            \\
+            \\    "b" = 2
+            \\
+            \\}
+            ,
+            .expected_expression = Expression{
+                .Table = try test_utils.list(TablePair, arena.allocator(), &.{
+                    TablePair{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
+                    TablePair{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+                }),
+            },
+        },
+        .{
+            .description = "table multiple lines trailing comma whitespace",
+            .input =
+            \\Table{
+            \\
+            \\    "a" = 1, 
+            \\
+            \\    "b" = 2,
+            \\
+            \\}
+            ,
+            .expected_expression = Expression{
+                .Table = try test_utils.list(TablePair, arena.allocator(), &.{
+                    TablePair{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
+                    TablePair{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+                }),
+            },
+        },
+        .{
+            .description = "eof",
+            .input =
+            \\Table{"a" = 1, "b" = 2
+            ,
+            .expect_error = true,
+        },
+        .{
+            .description = "expect comma",
+            .input =
+            \\Table{"a" = 1 "b" = 2}
+            ,
+            .expect_error = true,
+        },
+        .{
+            .description = "expect comma multiple lines",
+            .input =
+            \\Table{
+            \\    "a" = 1 
+            \\    "b" = 2
+            \\}
+            ,
+            .expect_error = true,
+        },
+        .{
+            .description = "table of tables",
+            .input =
+            \\Table{
+            \\    "a" = Table{"a" = 1, "b" = 2},
+            \\    "b" = Table{"a" = 3, "b" = 4},
+            \\}
+            ,
+            .expected_expression = Expression{
+                .Table = try test_utils.list(TablePair, arena.allocator(), &.{
+                    .{
+                        .key = &Expression{ .String = "a" },
+                        .value = &Expression{
+                            .Table = try test_utils.list(
+                                TablePair,
+                                arena.allocator(),
+                                &.{
+                                    TablePair{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
+                                    TablePair{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+                                },
+                            ),
+                        },
+                    },
+                    .{
+                        .key = &Expression{ .String = "b" },
+                        .value = &Expression{
+                            .Table = try test_utils.list(
+                                TablePair,
+                                arena.allocator(),
+                                &.{
+                                    TablePair{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 3 } },
+                                    TablePair{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 4 } },
+                                },
+                            ),
+                        },
+                    },
+                }),
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse table literal",
         &test_cases,
         runExpressionTest,
     );
