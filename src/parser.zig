@@ -2494,3 +2494,27 @@ test "function literal" {
         runExpressionTest,
     );
 }
+
+test "index expression" {
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "index",
+            .input =
+            \\a[2]
+            ,
+            .expected_expression = .{
+                .Index = .{
+                    .left = &.{ .Identifier = "a" },
+                    .index = &.{ .Integer = 2 },
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse index expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
