@@ -33,7 +33,6 @@ pub const TokenType = enum {
     Percent,
 
     Return,
-    Else,
     For,
     Dot,
     DotDot,
@@ -259,7 +258,6 @@ pub const Scanner = struct {
             'm' => return self.checkKeyword(1, "atch", .Match),
             'p' => return self.checkKeyword(1, "rint", .Print),
             'o' => return self.checkKeyword(1, "r", .Or),
-            'e' => return self.checkKeyword(1, "lse", .Else),
             'n' => return self.checkKeyword(1, "ull", .Null),
             'r' => return self.checkKeyword(1, "eturn", .Return),
             't' => return self.checkKeyword(1, "rue", .True),

@@ -60,21 +60,26 @@ pub const Parser = struct {
         try self.chopNewlines();
         if (try self.match(.Print)) {
             return try self.printStatement();
-        } else if (try self.match(.Assert)) {
-            return try self.assertStatement();
-        } else if (try self.match(.While)) {
-            return try self.whileStatement();
-        } else if (try self.match(.For)) {
-            return try self.forStatement();
-        } else if (try self.match(.Return)) {
-            return try self.returnStatement();
-        } else if (try self.match(.LBrace)) {
-            return try self.blockStatement();
-        } else if (try self.match(.Let)) {
-            return try self.varDeclaration();
-        } else {
-            return try self.expressionStatement();
         }
+        if (try self.match(.Assert)) {
+            return try self.assertStatement();
+        }
+        if (try self.match(.While)) {
+            return try self.whileStatement();
+        }
+        if (try self.match(.For)) {
+            return try self.forStatement();
+        }
+        if (try self.match(.Return)) {
+            return try self.returnStatement();
+        }
+        if (try self.match(.LBrace)) {
+            return try self.blockStatement();
+        }
+        if (try self.match(.Let)) {
+            return try self.varDeclaration();
+        }
+        return try self.expressionStatement();
     }
 
     fn printStatement(self: *Parser) !Statement {
@@ -107,10 +112,10 @@ pub const Parser = struct {
         self.log("while statement", .{});
         defer self.log("end while statement", .{});
 
-        try self.consume(.LParen, "Expect '(' after 'while'");
+        try self.consume(.LParen, "Expect '(' after 'while'.");
         const expression = try self.parseExpression();
-        try self.consume(.RParen, "Expect ')' after condition");
-        try self.consume(.LBrace, "Expect '{' after while condition");
+        try self.consume(.RParen, "Expect ')' after condition.");
+        try self.consume(.LBrace, "Expect '{' after while condition.");
         const body = try self.blockStatement();
 
         return Statement{
@@ -122,27 +127,33 @@ pub const Parser = struct {
         self.log("for statement", .{});
         defer self.log("end for statement", .{});
 
-        try self.consume(.LParen, "Expect '(' after 'for'");
+        try self.consume(.LParen, "Expect '(' after 'for'.");
         const expression = try self.parseExpression();
-        try self.consume(.RParen, "Expect ')' after range");
+        try self.consume(.RParen, "Expect ')' after range.");
 
-        try self.consume(.Pipe, "Expect '|' after loop range");
+        try self.consume(.Pipe, "Expect '|' after loop range.");
         self.ctx.parse_loop_capture = true;
 
         const capture = try self.parseExpression();
         if (capture.* != .Identifier) {
-            return self.errorAtPrevious("Expect identifier in loop capture");
+            return self.errorAtPrevious("Expect identifier in loop capture.");
         }
+
         var index: ?[]const u8 = null;
+
         if (!self.check(.Pipe)) {
+            if (!try self.match(.Comma)) {
+                return self.errorAtCurrent("Expected comma.");
+            }
+
             const second_capture = try self.parseExpression();
             if (second_capture.* != .Identifier) {
-                return self.errorAtPrevious("Expect identifier in loop capture");
+                return self.errorAtPrevious("Expect identifier in loop capture.");
             }
             index = second_capture.Identifier;
         }
 
-        try self.consume(.Pipe, "Expect '|' after for loop capture");
+        try self.consume(.Pipe, "Expect '|' after for loop capture.");
         self.ctx.parse_loop_capture = false;
 
         try self.consume(.LBrace, "Expect '{' after loop capture.");
@@ -349,7 +360,7 @@ pub const Parser = struct {
     }
 };
 
-const Program = std.ArrayList(Statement);
+pub const Program = std.ArrayList(Statement);
 
 pub const Statement = union(enum) {
     VarDeclaration: VarDeclaration,
@@ -657,7 +668,7 @@ fn parseFunction(parser: *Parser) !Expression {
 
 fn parseGrouping(parser: *Parser) !Expression {
     const expression = try parser.parseExpression();
-    try parser.consume(.RParen, "Expect ')' after expression");
+    try parser.consume(.RParen, "Expect ')' after expression.");
     return expression.*;
 }
 
@@ -666,12 +677,12 @@ fn parseMatch(self: *Parser) !Expression {
 
     if (try self.match(.LParen)) {
         target = try self.parseExpression();
-        try self.consume(.RParen, "Expect ')' after match target");
+        try self.consume(.RParen, "Expect ')' after match target.");
     }
 
     if (!self.check(.LBrace)) {
         const pattern = try self.parseExpression();
-        try self.consume(.Arrow, "Expect '->' after match pattern");
+        try self.consume(.Arrow, "Expect '->' after match pattern.");
         const body = try self.parseStatement();
         return Expression{
             .Match = .{
@@ -684,7 +695,7 @@ fn parseMatch(self: *Parser) !Expression {
     }
 
     try self.advance();
-    try self.consume(.NewLine, "Expect new line after '{' in match block");
+    try self.consume(.NewLine, "Expect new line after '{' in match block.");
 
     var arms: std.ArrayList(MatchArm) = .{};
 
@@ -692,14 +703,14 @@ fn parseMatch(self: *Parser) !Expression {
         try self.chopNewlines();
 
         const pattern = try self.parseExpression();
-        try self.consume(.Arrow, "Expect '->' after match pattern");
+        try self.consume(.Arrow, "Expect '->' after match pattern.");
         const body = try self.parseStatement();
 
         try arms.append(self.arena, .{ .pattern = pattern, .body = body });
     }
 
-    try self.consume(.RBrace, "Expect '}' at the end of match block");
-    try self.consume(.NewLine, "Expect new line after match block");
+    try self.consume(.RBrace, "Expect '}' at the end of match block.");
+    try self.expectLineEnd();
 
     return Expression{
         .Match = .{ .target = target, .body = .{ .Multiple = arms } },
@@ -822,7 +833,6 @@ fn initRules() [token_count]ParseRule {
             .Asterisk => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
             .Percent => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
             .Return => .{ .prefix = null, .infix = null, .precedence = null },
-            .Else => .{ .prefix = null, .infix = null, .precedence = null },
             .For => .{ .prefix = null, .infix = null, .precedence = null },
             .Dot => .{ .prefix = null, .infix = null, .precedence = .Index },
             .DotDot => .{ .prefix = null, .infix = parseDotDot, .precedence = .Range },
@@ -895,6 +905,8 @@ fn expectStatement(expected: Statement, actual: Statement) anyerror!void {
             try std.testing.expectEqualStrings(stmt.capture, actual.For.capture);
             if (stmt.index) |index| {
                 try std.testing.expectEqualStrings(index, actual.For.index.?);
+            } else {
+                try std.testing.expect(actual.For.index == null);
             }
             for (0..stmt.body.items.len) |i| {
                 try expectStatement(stmt.body.items[i], actual.For.body.items[i]);
@@ -1001,6 +1013,8 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
         .Match => |expr| {
             if (expr.target) |target| {
                 try expectExpression(target.*, actual.Match.target.?.*);
+            } else {
+                try std.testing.expect(actual.Match.target == null);
             }
             try expectTag(expr.body, actual.Match.body);
             if (expr.body == .Single) {
@@ -1023,13 +1037,20 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
 const StatementTestCase = struct {
     description: []const u8,
     input: []const u8,
-    expected_statement: Statement,
+    expected_statement: ?Statement = null,
+    expect_error: bool = false,
 };
 
 fn runStatementTest(arena: std.mem.Allocator, test_case: StatementTestCase) anyerror!void {
-    const ast = try createAst(arena, test_case.input);
-    try std.testing.expectEqual(ast.items.len, 1);
-    try expectStatement(test_case.expected_statement, ast.items[0]);
+    const result = createAst(arena, test_case.input);
+
+    if (test_case.expect_error) {
+        try std.testing.expectError(error.ParserError, result);
+    } else {
+        const ast = try result;
+        try std.testing.expectEqual(ast.items.len, 1);
+        try expectStatement(test_case.expected_statement.?, ast.items[0]);
+    }
 }
 
 test "statements" {
@@ -1259,6 +1280,37 @@ test "statements" {
                     }),
                 },
             },
+        },
+        .{
+            .description = "for with index",
+            .input =
+            \\for(foo) |item, i| {
+            \\    print(i)
+            \\}
+            ,
+            .expected_statement = Statement{
+                .For = .{
+                    .expression = &Expression{
+                        .Identifier = "foo",
+                    },
+                    .capture = "item",
+                    .index = "i",
+                    .body = try test_utils.list(Statement, arena.allocator(), &.{
+                        Statement{
+                            .Print = &Expression{ .Identifier = "i" },
+                        },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "bad capture",
+            .input =
+            \\for(foo) |item i| {
+            \\    print(i)
+            \\}
+            ,
+            .expect_error = true,
         },
     };
 
@@ -2514,6 +2566,92 @@ test "index expression" {
     try test_utils.runTestsWithArena(
         ExpressionTestCase,
         "parse index expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "match expression" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "single arm",
+            .input =
+            \\match(foo) true -> return "bar"
+            ,
+            .expected_expression = .{
+                .Match = .{
+                    .target = &.{ .Identifier = "foo" },
+                    .body = .{
+                        .Single = .{
+                            .pattern = &.{ .Boolean = true },
+                            .body = .{ .Return = &.{ .String = "bar" } },
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .description = "single arm no target",
+            .input =
+            \\match foo < 10 -> return "bar"
+            ,
+            .expected_expression = .{
+                .Match = .{
+                    .target = null,
+                    .body = .{
+                        .Single = .{
+                            .pattern = &.{
+                                .Infix = .{
+                                    .left = &.{ .Identifier = "foo" },
+                                    .right = &.{ .Integer = 10 },
+                                    .operator = .Lt,
+                                },
+                            },
+                            .body = .{ .Return = &.{ .String = "bar" } },
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .description = "multiple arms",
+            .input =
+            \\match(foo) {
+            \\     1 ->    print("a")
+            \\     2 ->    print("b")
+            \\     _ ->    print("c")
+            \\}
+            ,
+            .expected_expression = .{
+                .Match = .{
+                    .target = &.{ .Identifier = "foo" },
+                    .body = .{
+                        .Multiple = try test_utils.list(MatchArm, arena.allocator(), &.{
+                            .{
+                                .pattern = &.{ .Integer = 1 },
+                                .body = .{ .Print = &.{ .String = "a" } },
+                            },
+                            .{
+                                .pattern = &.{ .Integer = 2 },
+                                .body = .{ .Print = &.{ .String = "b" } },
+                            },
+                            .{
+                                .pattern = &.{ .Identifier = "_" },
+                                .body = .{ .Print = &.{ .String = "c" } },
+                            },
+                        }),
+                    },
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse match expression",
         &test_cases,
         runExpressionTest,
     );
