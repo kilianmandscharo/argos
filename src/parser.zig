@@ -2518,3 +2518,140 @@ test "index expression" {
         runExpressionTest,
     );
 }
+
+test "parse program" {
+    const ProgramTestCase = struct {
+        description: []const u8,
+        input: []const u8,
+        expected: Program,
+    };
+
+    const run = struct {
+        fn runTest(arena: std.mem.Allocator, test_case: ProgramTestCase) anyerror!void {
+            const program = try createAst(arena, test_case.input);
+            try std.testing.expectEqual(test_case.expected.items.len, program.items.len);
+            for (0..program.items.len) |i| {
+                try expectStatement(test_case.expected.items[i], program.items[i]);
+            }
+        }
+    }.runTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const test_cases = [_]ProgramTestCase{
+        .{
+            .description = "fibonacci",
+            .input =
+            \\let fib = fn(n) {
+            \\    let a = 0
+            \\    let b = 1
+            \\    for (0..n) |_| {
+            \\        let tmp = b
+            \\        b = a + b
+            \\        a = tmp
+            \\    }
+            \\    return a
+            \\}
+            \\
+            \\print(fib(30))
+            ,
+            .expected = try test_utils.list(Statement, arena.allocator(), &.{
+                .{
+                    .VarDeclaration = .{
+                        .name = "fib",
+                        .expression = &.{
+                            .Function = .{
+                                .params = try test_utils.list(FunctionParam, arena.allocator(), &.{
+                                    .{ .Positional = "n" },
+                                }),
+                                .body = .{
+                                    .Block = try test_utils.list(Statement, arena.allocator(), &.{
+                                        .{
+                                            .VarDeclaration = .{
+                                                .name = "a",
+                                                .expression = &.{ .Integer = 0 },
+                                            },
+                                        },
+                                        .{
+                                            .VarDeclaration = .{
+                                                .name = "b",
+                                                .expression = &.{ .Integer = 1 },
+                                            },
+                                        },
+                                        .{
+                                            .For = .{
+                                                .expression = &.{
+                                                    .Range = .{
+                                                        .start = &.{ .Integer = 0 },
+                                                        .end = &.{ .Identifier = "n" },
+                                                    },
+                                                },
+                                                .capture = "_",
+                                                .index = null,
+                                                .body = try test_utils.list(Statement, arena.allocator(), &.{
+                                                    .{
+                                                        .VarDeclaration = .{
+                                                            .name = "tmp",
+                                                            .expression = &.{ .Identifier = "b" },
+                                                        },
+                                                    },
+                                                    .{
+                                                        .Assignment = .{
+                                                            .target = .{ .Identifier = "b" },
+                                                            .expression = &.{
+                                                                .Infix = .{
+                                                                    .left = &.{
+                                                                        .Identifier = "a",
+                                                                    },
+                                                                    .right = &.{
+                                                                        .Identifier = "b",
+                                                                    },
+                                                                    .operator = .Plus,
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                    .{
+                                                        .Assignment = .{
+                                                            .target = .{ .Identifier = "a" },
+                                                            .expression = &.{
+                                                                .Identifier = "tmp",
+                                                            },
+                                                        },
+                                                    },
+                                                }),
+                                            },
+                                        },
+                                        .{
+                                            .Return = &.{ .Identifier = "a" },
+                                        },
+                                    }),
+                                },
+                            },
+                        },
+                    },
+                },
+                .{
+                    .Print = &.{
+                        .Call = .{
+                            .function = &.{ .Identifier = "fib" },
+                            .args = try test_utils.list(FunctionArg, arena.allocator(), &.{
+                                .{
+                                    .Positional = &.{ .Integer = 30 },
+                                },
+                            }),
+                        },
+                    },
+                },
+            }),
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ProgramTestCase,
+        "parse program",
+        &test_cases,
+        run,
+    );
+}
