@@ -97,6 +97,13 @@ pub fn copyStaticString(vm: *virtual_machine.VirtualMachine, chars: []const u8) 
     return obj;
 }
 
+pub fn copyString(vm: *virtual_machine.VirtualMachine, chars: []const u8) !*Obj {
+    const hash = std.hash.Wyhash.hash(0, chars);
+    const interned = vm.findString(chars, hash);
+    const obj = interned orelse try allocateString(vm, chars, hash);
+    return obj;
+}
+
 fn allocateStringInternal(vm: *virtual_machine.VirtualMachine, chars: []const u8, hash: u64, static_lifetime: bool) !*Obj {
     const string = try allocateObject(vm, ObjString);
     string.chars = chars;
@@ -113,6 +120,7 @@ pub const ObjType = enum {
     Closure,
     Upvalue,
     List,
+    // Table, TODO: implement
 };
 
 pub const Obj = struct {

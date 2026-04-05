@@ -7,6 +7,7 @@ const virtual_machine = @import("vm.zig");
 const logging = @import("logging.zig");
 const memory = @import("memory.zig");
 const constants = @import("constants.zig");
+const parser = @import("parser.zig");
 
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
     logging.log(fmt, args, .{
@@ -65,7 +66,6 @@ pub const Compiler = struct {
     scope_depth: u32,
     function: ?*object.ObjFunction,
     type: FunctionType,
-    current_var: ?scanner.Token,
     enclosing: ?*Compiler,
     upvalues: [UINT8_COUNT]Upvalue,
     indent: usize,
@@ -87,20 +87,18 @@ pub const Compiler = struct {
         self: *Compiler,
         vm: *virtual_machine.VirtualMachine,
         gpa: std.mem.Allocator,
-        parser: *Parser,
+        p: *Parser,
         func_type: FunctionType,
         enclosing: ?*Compiler,
-        current_var: ?scanner.Token,
         indent: usize,
     ) !void {
-        self.parser = parser;
+        self.parser = p;
         self.gpa = gpa;
         self.vm = vm;
         self.locals = undefined;
         self.scope_depth = 0;
         self.local_count = 0;
         self.type = func_type;
-        self.current_var = null;
         self.enclosing = enclosing;
         self.upvalues = undefined;
         self.indent = indent;
@@ -118,16 +116,6 @@ pub const Compiler = struct {
         local.name.source = "";
         local.name.start = 0;
         local.name.length = 0;
-
-        if (func_type != .Script) {
-            if (current_var) |curr| {
-                const start = curr.start;
-                const end = start + curr.length;
-                const slice = curr.source[start..end];
-                const obj = try object.copyStaticString(vm, slice);
-                self.function.?.name = obj.asString();
-            }
-        }
     }
 
     fn getFunctionName(self: *Compiler) []const u8 {
@@ -174,46 +162,6 @@ pub const Compiler = struct {
         try self.emitOpCode(.Return);
     }
 
-    fn parsePrecedence(self: *Compiler, precedence: Precedence) !void {
-        try self.parser.advance();
-
-        self.log("expression on {s}", .{self.parser.previous.toString()});
-
-        if (getRule(self.parser.previous.type).prefix) |prefixFn| {
-            const can_assign = @intFromEnum(precedence) < @intFromEnum(Precedence.Assign);
-            try prefixFn(self, can_assign);
-
-            while (@intFromEnum(precedence) < getRulePrecedenceValue(self.parser.current.type)) {
-                try self.parser.advance();
-                if (self.parser.current.type == .Eof) return;
-                if (getRule(self.parser.previous.type).infix) |infixFn| {
-                    try infixFn(self);
-                }
-            }
-
-            if (!can_assign and try self.match(.Assign)) {
-                return self.errorAtPrevious("Invalid assignment target.");
-            }
-        } else {
-            return self.errorAtPrevious("Expect expression.");
-        }
-
-        self.log("end expression", .{});
-    }
-
-    fn isLineEnd(self: *Compiler) bool {
-        const token_type = self.parser.current.type;
-        return token_type == .NewLine or token_type == .Eof;
-    }
-
-    fn expectLineEnd(self: *Compiler) !void {
-        if (self.isLineEnd()) {
-            try self.parser.advance();
-            return;
-        }
-        return self.errorAtCurrent("Expected line end.");
-    }
-
     fn declaration(self: *Compiler) !void {
         try self.chopNewlines();
         if (try self.match(.Let)) {
@@ -241,7 +189,6 @@ pub const Compiler = struct {
     }
 
     fn defineVariable(self: *Compiler, global: usize) !void {
-        self.current_var = null;
         if (self.scope_depth > 0) {
             self.markInitialized();
             return;
@@ -257,7 +204,6 @@ pub const Compiler = struct {
 
     fn parseVariable(self: *Compiler, message: []const u8) !usize {
         try self.consume(.Identifier, message);
-        self.current_var = self.parser.previous;
 
         try self.declareVariable();
         if (self.scope_depth > 0) return 0;
@@ -324,41 +270,6 @@ pub const Compiler = struct {
         } else {
             try self.expressionStatement();
         }
-    }
-
-    fn returnStatement(self: *Compiler) !void {
-        self.log("return statement", .{});
-        defer self.log("end return statement", .{});
-
-        if (self.type == .Script) {
-            return self.errorAtPrevious("Can't return from top-level code.");
-        }
-        if (self.isLineEnd()) {
-            try self.parser.advance();
-            try self.emitReturn();
-        } else {
-            try self.expression();
-            try self.expectLineEnd();
-            try self.emitOpCode(.Return);
-        }
-    }
-
-    fn whileStatement(self: *Compiler) anyerror!void {
-        self.log("while statement", .{});
-        defer self.log("end while statement", .{});
-
-        const loop_start = self.currentChunk().code.items.len;
-        try self.consume(.LParen, "Expect '(' after 'while'");
-        try self.expression();
-        try self.consume(.RParen, "Expect ')' after condition");
-
-        const exit_jump = try self.emitJump(.JumpIfFalse);
-        try self.emitOpCode(.Pop);
-        try self.statement();
-        try self.emitLoop(loop_start);
-
-        try self.patchJump(exit_jump);
-        try self.emitOpCode(.Pop);
     }
 
     fn forStatement(self: *Compiler) anyerror!void {
@@ -605,37 +516,6 @@ pub const Compiler = struct {
         return std.mem.eql(u8, a_string, b_string);
     }
 
-    fn printStatement(self: *Compiler) !void {
-        self.log("print statement", .{});
-        defer self.log("end print statement", .{});
-
-        try self.expression();
-        try self.expectLineEnd();
-        try self.emitOpCode(.Print);
-    }
-
-    fn assertStatement(self: *Compiler) !void {
-        self.log("assert statement", .{});
-        defer self.log("end assert statement", .{});
-
-        try self.expression();
-        try self.expectLineEnd();
-        try self.emitOpCode(.Assert);
-    }
-
-    fn expressionStatement(self: *Compiler) !void {
-        self.log("expression statement", .{});
-        defer self.log("end expression statement", .{});
-
-        try self.expression();
-        try self.expectLineEnd();
-        try self.emitOpCode(.Pop);
-    }
-
-    fn expression(self: *Compiler) !void {
-        try self.parsePrecedence(.Lowest);
-    }
-
     fn emitConstant(self: *Compiler, val: value.Value) !void {
         try self.currentChunk().writeConstant(self.gpa, val, self.parser.previous.line);
     }
@@ -718,32 +598,133 @@ pub const Compiler = struct {
         std.debug.print(": {s}\n", .{message});
         return error.CompileError;
     }
-};
 
-fn binary(compiler: *Compiler) !void {
-    const operator_type = compiler.parser.previous.type;
-    try compiler.parsePrecedence(getRulePrecedence(operator_type));
+    fn compileStatement(self: *Compiler, stmt: parser.Statement) !void {
+        switch (stmt) {
+            .VarDeclaration => {},
+            .Block => |val| {
+                for (val.items) |item| {
+                    try compileStatement(item);
+                }
+            },
+            .Assignment => {},
+            .For => {},
+            .While => |val| {
+                const loop_start = self.currentChunk().code.items.len;
+                try self.compileExpression(val.expression);
 
-    switch (operator_type) {
-        .Plus => try compiler.emitOpCode(.Add),
-        .Minus => try compiler.emitOpCode(.Subtract),
-        .Asterisk => try compiler.emitOpCode(.Multiply),
-        .Slash => try compiler.emitOpCode(.Divide),
-        .Eq => try compiler.emitOpCode(.Equal),
-        .NotEq => try compiler.emitOpCodes(.Equal, .Not),
-        .Gt => try compiler.emitOpCode(.Greater),
-        .GtOrEq => try compiler.emitOpCodes(.Less, .Not),
-        .Lt => try compiler.emitOpCode(.Less),
-        .LtOrEq => try compiler.emitOpCodes(.Greater, .Not),
-        else => unreachable,
+                const exit_jump = try self.emitJump(.JumpIfFalse);
+                try self.emitOpCode(.Pop);
+
+                for (val.body.items) |item| {
+                    try compileStatement(item);
+                }
+
+                try self.emitLoop(loop_start);
+
+                try self.patchJump(exit_jump);
+                try self.emitOpCode(.Pop);
+            },
+            .Return => |val| {
+                if (self.type == .Script) {
+                    return self.errorAtPrevious("Can't return from top-level code.");
+                }
+                try self.compileExpression(val);
+                try self.emitOpCode(.Return);
+            },
+            .Assert => |val| {
+                try self.compileExpression(val);
+                try self.emitOpCode(.Assert);
+            },
+            .Print => |val| {
+                try self.compileExpression(val);
+                try self.emitOpCode(.Print);
+            },
+            .Expression => |val| {
+                try self.compileExpression(val);
+                try self.emitOpCode(.Pop);
+            },
+        }
     }
-}
 
-fn grouping(compiler: *Compiler, can_assign: bool) !void {
-    _ = can_assign;
-    try compiler.expression();
-    try compiler.consume(.RParen, "Expect ')' after expression");
-}
+    fn compileExpression(self: *Compiler, expr: *const parser.Expression) !void {
+        switch (expr.*) {
+            .Identifier => {},
+            .String => |val| {
+                try self.emitConstant(value.wrapObj(try object.copyString(self.vm, val)));
+            },
+            .Integer => |val| {
+                try self.emitConstant(value.wrapInt(val));
+            },
+            .Float => |val| {
+                try self.emitConstant(value.wrapFloat(val));
+            },
+            .Boolean => |val| {
+                if (val) try self.emitOpCode(.True) else try self.emitOpCode(.False);
+            },
+            .Infix => |val| {
+                try self.compileExpression(val.left);
+                try self.compileExpression(val.right);
+                switch (val.operator) {
+                    .Plus => try self.emitOpCode(.Add),
+                    .Minus => try self.emitOpCode(.Subtract),
+                    .Asterisk => try self.emitOpCode(.Multiply),
+                    .Slash => try self.emitOpCode(.Divide),
+                    .Eq => try self.emitOpCode(.Equal),
+                    .NotEq => try self.emitOpCodes(.Equal, .Not),
+                    .Gt => try self.emitOpCode(.Greater),
+                    .GtOrEq => try self.emitOpCodes(.Less, .Not),
+                    .Lt => try self.emitOpCode(.Less),
+                    .LtOrEq => try self.emitOpCodes(.Greater, .Not),
+                    else => unreachable,
+                }
+            },
+            .Prefix => |val| {
+                try self.compileExpression(val.expression);
+                switch (val.operator) {
+                    .Minus => try self.emitOpCode(.Negate),
+                    .Bang => try self.emitOpCode(.Not),
+                    else => unreachable,
+                }
+            },
+            .Function => {},
+            .Call => |val| {
+                const count = val.args.items.len;
+                if (count == 255) {
+                    return self.errorAtPrevious("Can't have more than 255 arguments");
+                }
+                for (val.args.items) |arg| {
+                    switch (arg) {
+                        .Positional => |positional| try self.compileExpression(positional),
+                        .Named => unreachable,
+                    }
+                }
+                try self.emitBytes(.Call, count);
+            },
+            .Range => {},
+            .List => |val| {
+                var index = val.items.len;
+                while (index > 0) {
+                    index -= 1;
+                    try self.compileExpression(val.items[index]);
+                }
+                try self.emitConstant(value.wrapObj(try object.allocateList(self.vm)));
+                try self.emitOpCode(.ListInit);
+                try self.emitU24(val.items.len);
+            },
+            .Table => {},
+            .Index => |val| {
+                try self.compileExpression(val.left);
+                try self.compileExpression(val.index);
+                try self.emitOpCode(.ListGet);
+            },
+            .Match => {},
+            .Null => {
+                try self.emitOpCode(.Null);
+            },
+        }
+    }
+};
 
 fn unary(compiler: *Compiler, can_assign: bool) !void {
     _ = can_assign;
@@ -754,36 +735,6 @@ fn unary(compiler: *Compiler, can_assign: bool) !void {
         .Bang => try compiler.emitOpCode(.Not),
         else => unreachable,
     }
-}
-
-fn float(compiler: *Compiler, can_assign: bool) !void {
-    _ = can_assign;
-    const val = try std.fmt.parseFloat(f64, compiler.parser.previous.toString());
-    try compiler.emitConstant(value.wrapFloat(val));
-}
-
-fn integer(compiler: *Compiler, can_assign: bool) !void {
-    _ = can_assign;
-    const val = try std.fmt.parseInt(i64, compiler.parser.previous.toString(), 10);
-    try compiler.emitConstant(value.wrapInt(val));
-}
-
-fn literal(compiler: *Compiler, can_assign: bool) !void {
-    _ = can_assign;
-    switch (compiler.parser.previous.type) {
-        .False => try compiler.emitOpCode(.False),
-        .Null => try compiler.emitOpCode(.Null),
-        .True => try compiler.emitOpCode(.True),
-        else => unreachable,
-    }
-}
-
-fn string(compiler: *Compiler, can_assign: bool) !void {
-    _ = can_assign;
-    const start = compiler.parser.previous.start + 1;
-    const end = start + compiler.parser.previous.length - 2;
-    const slice = compiler.parser.previous.source[start..end];
-    try compiler.emitConstant(value.wrapObj(try object.copyStaticString(compiler.vm, slice)));
 }
 
 fn variable(compiler: *Compiler, can_assign: bool) !void {
@@ -862,7 +813,6 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
         compiler.parser,
         .Function,
         compiler,
-        compiler.current_var,
         compiler.indent,
     );
 
@@ -898,153 +848,4 @@ fn func(compiler: *Compiler, can_assign: bool) !void {
     }
 
     compiler.indent -= 1;
-}
-
-fn list(compiler: *Compiler, can_assign: bool) !void {
-    _ = can_assign;
-
-    try compiler.consume(.LBrace, "Expect '{' after List keyword");
-
-    var count: usize = 0;
-    while (true) {
-        try compiler.chopNewlines();
-        if (try compiler.match(.Eof)) return compiler.errorAtCurrent("Reached EOF.");
-        if (try compiler.match(.RBrace)) break;
-        try compiler.expression();
-        count += 1;
-        switch (compiler.parser.current.type) {
-            .Comma, .NewLine => try compiler.parser.advance(),
-            .RBrace => {
-                try compiler.parser.advance();
-                break;
-            },
-            else => return compiler.errorAtCurrent("Unexpected token."),
-        }
-    }
-
-    try compiler.emitConstant(value.wrapObj(try object.allocateList(compiler.vm)));
-    try compiler.emitOpCode(.ListInit);
-    try compiler.emitU24(count);
-}
-
-fn call(compiler: *Compiler) !void {
-    const arg_count = try argumentList(compiler);
-    try compiler.emitBytes(.Call, arg_count);
-}
-
-fn listIndex(compiler: *Compiler) !void {
-    try compiler.expression();
-    try compiler.consume(.RBracket, "Expect ']' after index expression.");
-    if (try compiler.match(.Assign)) {
-        try compiler.expression();
-        try compiler.emitOpCode(.ListSet);
-    } else {
-        try compiler.emitOpCode(.ListGet);
-    }
-}
-
-fn argumentList(compiler: *Compiler) !u8 {
-    var count: u8 = 0;
-    if (!compiler.check(.RParen)) {
-        while (true) {
-            if (count == 255) {
-                return compiler.errorAtPrevious("Can't have more than 255 arguments");
-            }
-            try compiler.expression();
-            count += 1;
-            if (!try compiler.match(.Comma)) break;
-        }
-    }
-    try compiler.consume(.RParen, "Expect ')' after arguments.");
-    return count;
-}
-
-const ParseRule = struct {
-    prefix: ?*const fn (compiler: *Compiler, can_assign: bool) anyerror!void,
-    infix: ?*const fn (compiler: *Compiler) anyerror!void,
-    precedence: ?Precedence,
-};
-
-const token_count = @typeInfo(scanner.TokenType).@"enum".fields.len;
-
-const rules: [token_count]ParseRule = initRules();
-
-fn initRules() [token_count]ParseRule {
-    var table: [token_count]ParseRule = undefined;
-
-    inline for (@typeInfo(scanner.TokenType).@"enum".fields) |field| {
-        const index = field.value;
-        const tag = @as(scanner.TokenType, @enumFromInt(index));
-        table[index] = switch (tag) {
-            .LParen => .{ .prefix = grouping, .infix = call, .precedence = .Call },
-            .RParen => .{ .prefix = null, .infix = null, .precedence = null },
-            .LBracket => .{ .prefix = null, .infix = listIndex, .precedence = .Index },
-            .RBracket => .{ .prefix = null, .infix = null, .precedence = null },
-            .LBrace => .{ .prefix = null, .infix = null, .precedence = null },
-            .RBrace => .{ .prefix = null, .infix = null, .precedence = null },
-            .Assign => .{ .prefix = null, .infix = null, .precedence = .Assign },
-            .Comma => .{ .prefix = null, .infix = null, .precedence = null },
-            .String => .{ .prefix = string, .infix = null, .precedence = null },
-            .Float => .{ .prefix = float, .infix = null, .precedence = null },
-            .Int => .{ .prefix = integer, .infix = null, .precedence = null },
-            .True => .{ .prefix = literal, .infix = null, .precedence = null },
-            .False => .{ .prefix = literal, .infix = null, .precedence = null },
-            .Null => .{ .prefix = literal, .infix = null, .precedence = null },
-            .Identifier => .{ .prefix = variable, .infix = null, .precedence = null },
-            .Bang => .{ .prefix = unary, .infix = null, .precedence = null },
-            .Lt => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
-            .LtOrEq => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
-            .Gt => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
-            .GtOrEq => .{ .prefix = null, .infix = binary, .precedence = .LessGreater },
-            .Eq => .{ .prefix = null, .infix = binary, .precedence = .Equals },
-            .NotEq => .{ .prefix = null, .infix = binary, .precedence = .Equals },
-            .Plus => .{ .prefix = null, .infix = binary, .precedence = .Sum },
-            .Minus => .{ .prefix = unary, .infix = binary, .precedence = .Sum },
-            .Slash => .{ .prefix = null, .infix = binary, .precedence = .Product },
-            .Asterisk => .{ .prefix = null, .infix = binary, .precedence = .Product },
-            .Percent => .{ .prefix = null, .infix = null, .precedence = .Product },
-            .Return => .{ .prefix = null, .infix = null, .precedence = null },
-            .Else => .{ .prefix = null, .infix = null, .precedence = null },
-            .For => .{ .prefix = null, .infix = null, .precedence = null },
-            .Dot => .{ .prefix = null, .infix = null, .precedence = .Index },
-            .DotDot => .{ .prefix = null, .infix = null, .precedence = null },
-            .Arrow => .{ .prefix = null, .infix = null, .precedence = null },
-            .NewLine => .{ .prefix = null, .infix = null, .precedence = null },
-            .Eof => .{ .prefix = null, .infix = null, .precedence = null },
-            .And => .{ .prefix = null, .infix = logicalAnd, .precedence = .LogicalAnd },
-            .Or => .{ .prefix = null, .infix = logicalOr, .precedence = .LogicalOr },
-            .Pipe => .{ .prefix = null, .infix = null, .precedence = .BitwiseOr },
-            .Ampersand => .{ .prefix = null, .infix = null, .precedence = .BitwiseAnd },
-            .Caret => .{ .prefix = null, .infix = null, .precedence = .BitwiseXor },
-            .Tilde => .{ .prefix = null, .infix = null, .precedence = .Prefix },
-            .LeftShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
-            .RightShift => .{ .prefix = null, .infix = null, .precedence = .Shift },
-            .Print => .{ .prefix = null, .infix = null, .precedence = null },
-            .Assert => .{ .prefix = null, .infix = null, .precedence = null },
-            .Let => .{ .prefix = null, .infix = null, .precedence = null },
-            .Match => .{ .prefix = null, .infix = null, .precedence = null },
-            .While => .{ .prefix = null, .infix = null, .precedence = null },
-            .Fn => .{ .prefix = func, .infix = null, .precedence = null },
-            .List => .{ .prefix = list, .infix = null, .precedence = null },
-            .Table => .{ .prefix = null, .infix = null, .precedence = null },
-            .Error => .{ .prefix = null, .infix = null, .precedence = null },
-        };
-    }
-
-    return table;
-}
-
-fn getRule(token_type: scanner.TokenType) *const ParseRule {
-    return &rules[@intFromEnum(token_type)];
-}
-
-fn getRulePrecedenceValue(token_type: scanner.TokenType) usize {
-    return @intFromEnum(getRulePrecedence(token_type));
-}
-
-fn getRulePrecedence(token_type: scanner.TokenType) Precedence {
-    if (getRule(token_type).precedence) |precedence| {
-        return precedence;
-    }
-    return Precedence.Lowest;
 }

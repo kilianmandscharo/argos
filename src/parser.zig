@@ -115,6 +115,7 @@ pub const Parser = struct {
         try self.consume(.LParen, "Expect '(' after 'while'.");
         const expression = try self.parseExpression();
         try self.consume(.RParen, "Expect ')' after condition.");
+        // TODO: allow all statements here
         try self.consume(.LBrace, "Expect '{' after while condition.");
         const body = try self.blockStatement();
 
