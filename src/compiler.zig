@@ -376,6 +376,7 @@ pub const Compiler = struct {
             .Assignment => |val| {
                 switch (val.target) {
                     .Identifier => |name| {
+                        try self.compileExpression(val.expression);
                         if (try self.resolveLocal(name)) |local| {
                             try self.emitOpCode(.SetLocal);
                             try self.emitU24(local);
