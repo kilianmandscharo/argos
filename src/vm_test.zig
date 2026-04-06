@@ -427,77 +427,77 @@ test "vm tests" {
             \\assert(a == 5)
             ,
         },
-        // .{
-        //     .description = "logical and true",
-        //     .source =
-        //     \\let a = true and true
-        //     \\
-        //     \\assert a == true
-        //     ,
-        // },
-        // .{
-        //     .description = "logical and false",
-        //     .source =
-        //     \\let a = false and true
-        //     \\
-        //     \\assert a == false
-        //     ,
-        // },
-        // .{
-        //     .description = "logical and false on right hand side",
-        //     .source =
-        //     \\let a = true and false
-        //     \\
-        //     \\assert a == false
-        //     ,
-        // },
-        // .{
-        //     .description = "logical or false",
-        //     .source =
-        //     \\let a = false or false
-        //     \\
-        //     \\assert a == false
-        //     ,
-        // },
-        // .{
-        //     .description = "logical or true both",
-        //     .source =
-        //     \\let a = true or true
-        //     \\
-        //     \\assert a == true
-        //     ,
-        // },
-        // .{
-        //     .description = "logical or true left",
-        //     .source =
-        //     \\let a = true or false
-        //     \\
-        //     \\assert a == true
-        //     ,
-        // },
-        // .{
-        //     .description = "logical or true right",
-        //     .source =
-        //     \\let a = false or true
-        //     \\
-        //     \\assert a == true
-        //     ,
-        // },
-        // .{
-        //     .description = "while loop",
-        //     .source =
-        //     \\let a = 10
-        //     \\let b = 0
-        //     \\
-        //     \\while (a > 0) {
-        //     \\    a = a - 1
-        //     \\    b = b + 1
-        //     \\}
-        //     \\
-        //     \\assert a == 0
-        //     \\assert b == 10
-        //     ,
-        // },
+        .{
+            .description = "logical and true",
+            .source =
+            \\let a = true and true
+            \\
+            \\assert(a == true)
+            ,
+        },
+        .{
+            .description = "logical and false",
+            .source =
+            \\let a = false and true
+            \\
+            \\assert(a == false)
+            ,
+        },
+        .{
+            .description = "logical and false on right hand side",
+            .source =
+            \\let a = true and false
+            \\
+            \\assert(a == false)
+            ,
+        },
+        .{
+            .description = "logical or false",
+            .source =
+            \\let a = false or false
+            \\
+            \\assert(a == false)
+            ,
+        },
+        .{
+            .description = "logical or true both",
+            .source =
+            \\let a = true or true
+            \\
+            \\assert(a == true)
+            ,
+        },
+        .{
+            .description = "logical or true left",
+            .source =
+            \\let a = true or false
+            \\
+            \\assert(a == true)
+            ,
+        },
+        .{
+            .description = "logical or true right",
+            .source =
+            \\let a = false or true
+            \\
+            \\assert(a == true)
+            ,
+        },
+        .{
+            .description = "while loop",
+            .source =
+            \\let a = 10
+            \\let b = 0
+            \\
+            \\while (a > 0) {
+            \\    a = a - 1
+            \\    b = b + 1
+            \\}
+            \\
+            \\assert(a == 0)
+            \\assert(b == 10)
+            ,
+        },
         // .{
         //     .description = "for loop",
         //     .source =
@@ -510,8 +510,8 @@ test "vm tests" {
         //     \\    b = b + c
         //     \\}
         //     \\
-        //     \\assert a == 3
-        //     \\assert b == 3
+        //     \\assert(a == 3)
+        //     \\assert(b == 3)
         //     ,
         // },
         // .{
