@@ -49,6 +49,7 @@ pub const Compiler = struct {
     enclosing: ?*Compiler,
     upvalues: [UINT8_COUNT]Upvalue,
     indent: usize,
+    ctx: struct { suppress_pop: bool },
 
     const Local = struct {
         name: []const u8,
@@ -81,6 +82,7 @@ pub const Compiler = struct {
         self.upvalues = undefined;
         self.indent = indent;
         self.function = null;
+        self.ctx = .{ .suppress_pop = false };
 
         // Set current_compiler BEFORE any allocations that could trigger GC
         vm.current_compiler = self;
@@ -369,9 +371,11 @@ pub const Compiler = struct {
                 try self.defineVariable(global);
             },
             .Block => |val| {
+                self.beginScope();
                 for (val.items) |item| {
                     try self.compileStatement(item);
                 }
+                try self.endScope();
             },
             .Assignment => |val| {
                 switch (val.target) {
@@ -470,7 +474,9 @@ pub const Compiler = struct {
             },
             .Expression => |val| {
                 try self.compileExpression(val);
-                try self.emitOpCode(.Pop);
+                if (!self.ctx.suppress_pop) {
+                    try self.emitOpCode(.Pop);
+                }
             },
         }
     }
@@ -628,33 +634,52 @@ pub const Compiler = struct {
                 const has_target = val.target != null;
                 const instruction: chunk.OpCode = if (has_target) .JumpIfNotEq else .JumpIfFalse;
 
+                if (val.target) |target| {
+                    try self.compileExpression(target);
+                }
+
                 if (val.body == .Single) {
                     try self.compileExpression(val.body.Single.pattern);
 
                     const then_jump = try self.emitJump(instruction);
 
-                    try self.compileStatement(val.body.Single.body);
-                    try self.patchJump(then_jump);
                     try self.emitOpCode(.Pop);
-
                     if (has_target) try self.emitOpCode(.Pop);
+                    try self.compileMatchArmBody(val.body.Single.body);
+
+                    const end_jump = try self.emitJump(.Jump);
+
+                    try self.patchJump(then_jump);
+
+                    try self.emitOpCode(.Pop);
+                    if (has_target) try self.emitOpCode(.Pop);
+
+                    try self.emitOpCode(.Null);
+
+                    try self.patchJump(end_jump);
+
                     return;
                 }
 
-                var else_jumps: std.ArrayList(usize) = .{};
-                errdefer else_jumps.deinit(self.gpa);
+                var end_jumps: std.ArrayList(usize) = .{};
+                errdefer end_jumps.deinit(self.gpa);
 
                 const arms = val.body.Multiple.items;
-
                 for (arms) |arm| {
                     if (arm.pattern.* == .Identifier and std.mem.eql(u8, arm.pattern.Identifier, "_")) {
                         break;
                     }
+
                     try self.compileExpression(arm.pattern);
+
                     const then_jump = try self.emitJump(instruction);
+
                     try self.emitOpCode(.Pop);
-                    try self.compileStatement(val.body.Single.body);
-                    try else_jumps.append(self.gpa, try self.emitJump(.Jump));
+                    if (has_target) try self.emitOpCode(.Pop);
+                    try self.compileMatchArmBody(arm.body);
+
+                    try end_jumps.append(self.gpa, try self.emitJump(.Jump));
+
                     try self.patchJump(then_jump);
                     try self.emitOpCode(.Pop);
                 }
@@ -667,19 +692,34 @@ pub const Compiler = struct {
                     }
                 }
                 if (else_arm) |arm| {
-                    try self.compileStatement(arm.body);
+                    if (has_target) try self.emitOpCode(.Pop);
+                    try self.compileMatchArmBody(arm.body);
+                } else {
+                    if (has_target) try self.emitOpCode(.Pop);
+                    try self.emitOpCode(.Null);
                 }
 
-                for (else_jumps.items) |jump| {
+                for (end_jumps.items) |jump| {
                     try self.patchJump(jump);
                 }
 
-                if (has_target) try self.emitOpCode(.Pop);
-                else_jumps.deinit(self.gpa);
+                end_jumps.deinit(self.gpa);
             },
             .Null => {
                 try self.emitOpCode(.Null);
             },
+        }
+    }
+
+    fn compileMatchArmBody(self: *Compiler, body: parser.Statement) !void {
+        self.ctx.suppress_pop = true;
+        defer self.ctx.suppress_pop = false;
+
+        try self.compileStatement(body);
+
+        switch (body) {
+            .Expression => {},
+            else => try self.emitOpCode(.Null),
         }
     }
 };

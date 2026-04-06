@@ -398,7 +398,7 @@ pub const VirtualMachine = struct {
                 .SetGlobal => {
                     const name = self.readString();
                     if (self.globals.getPtr(name)) |val_ptr| {
-                        val_ptr.* = self.peek(0);
+                        val_ptr.* = self.pop();
                     } else {
                         return self.runtimeError("Undefined variable '{s}'", .{name.chars});
                     }
@@ -409,7 +409,7 @@ pub const VirtualMachine = struct {
                 },
                 .SetLocal => {
                     const slot = self.readU24();
-                    self.setSlot(slot, self.peek(0));
+                    self.setSlot(slot, self.pop());
                 },
                 .JumpIfFalse => {
                     const offset = self.readU16();
@@ -462,7 +462,7 @@ pub const VirtualMachine = struct {
                 },
                 .SetUpvalue => {
                     const slot = self.readByte();
-                    self.frame.closure.upvalues[slot].?.location.* = self.peek(0);
+                    self.frame.closure.upvalues[slot].?.location.* = self.pop();
                 },
                 .CloseUpvalue => {
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);

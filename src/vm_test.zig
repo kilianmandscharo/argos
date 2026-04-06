@@ -20,6 +20,14 @@ test "vm tests" {
 
             const result = try vm.interpret(test_case.source);
             try std.testing.expect(result == .Ok);
+
+            if (vm.stack_top != 0) {
+                std.debug.print("Stack not empty at end of program! {d} values remaining\n", .{vm.stack_top});
+                for (0..vm.stack_top) |i| {
+                    std.debug.print("  [{d}] {f}\n", .{ i, vm.stack[i] });
+                }
+                return error.StackNotEmpty;
+            }
         }
     }.runTest;
 
@@ -44,316 +52,381 @@ test "vm tests" {
             \\assert(c == 6)
             ,
         },
-        // .{
-        //     .description = "local variable declaration",
-        //     .source =
-        //     \\let a = 6
-        //     \\
-        //     \\{
-        //     \\    let b = 7
-        //     \\    a = a + b
-        //     \\}
-        //     \\
-        //     \\assert(a == 13)
-        //     ,
-        // },
-        // .{
-        //     .description = "local variable assignment",
-        //     .source =
-        //     \\let a = 6
-        //     \\
-        //     \\{
-        //     \\    let b = 7
-        //     \\    b = 5
-        //     \\    a = a + b
-        //     \\}
-        //     \\
-        //     \\assert(a == 11)
-        //     ,
-        // },
-        // .{
-        //     .description = "local variable declaration nested",
-        //     .source =
-        //     \\let a = 6
-        //     \\
-        //     \\{
-        //     \\    let b = 7
-        //     \\    a = a + b
-        //     \\
-        //     \\    {
-        //     \\        let c = 7
-        //     \\        a = a + c
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(a == 20)
-        //     ,
-        // },
-        // .{
-        //     .description = "local variable assignment nested",
-        //     .source =
-        //     \\let a = 6
-        //     \\
-        //     \\{
-        //     \\    let b = 7
-        //     \\    a = a + b
-        //     \\
-        //     \\    {
-        //     \\        let c = 7
-        //     \\        c = 2
-        //     \\        b = 2
-        //     \\        a = a + b + c
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(a == 17)
-        //     ,
-        // },
-        // .{
-        //     .description = "shadowing",
-        //     .source =
-        //     \\let a = 6
-        //     \\
-        //     \\{
-        //     \\    let a = 10
-        //     \\    let b = 10
-        //     \\    a = a + b
-        //     \\}
-        //     \\
-        //     \\assert(a == 6)
-        //     ,
-        // },
-        // .{
-        //     .description = "shadowing nested",
-        //     .source =
-        //     \\let a = 6
-        //     \\let d = 6
-        //     \\let e = 6
-        //     \\
-        //     \\{
-        //     \\    let a = 10
-        //     \\    let b = 10
-        //     \\    a = 9
-        //     \\    b = 9
-        //     \\
-        //     \\    {
-        //     \\        let a = 3
-        //     \\        let b = 3
-        //     \\        let c = 3
-        //     \\        a = 2
-        //     \\        b = 2
-        //     \\        c = 2
-        //     \\        a = a + b + c
-        //     \\        e = e + a
-        //     \\    }
-        //     \\
-        //     \\    a = a + b
-        //     \\    d = a + b
-        //     \\}
-        //     \\
-        //     \\assert(a == 6)
-        //     \\assert(d == 27)
-        //     \\assert(e == 12)
-        //     ,
-        // },
-        // .{
-        //     .description = "match one liner true",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match (a) 5 -> a = 1
-        //     \\
-        //     \\assert a == 1
-        //     ,
-        // },
-        // .{
-        //     .description = "match one liner false",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match (a) 4 -> a = 1
-        //     \\
-        //     \\assert a == 5
-        //     ,
-        // },
-        // .{
-        //     .description = "match first branch",
-        //     .source =
-        //     \\let a = true
-        //     \\let b
-        //     \\
-        //     \\match (a) {
-        //     \\    true -> {
-        //     \\        b = 1
-        //     \\    }
-        //     \\    false -> {
-        //     \\        b = 2
-        //     \\    }
-        //     \\    else -> {
-        //     \\        b = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert b == 1
-        //     ,
-        // },
-        // .{
-        //     .description = "match second branch",
-        //     .source =
-        //     \\let a = false
-        //     \\let b
-        //     \\
-        //     \\match (a) {
-        //     \\    true -> {
-        //     \\        b = 1
-        //     \\    }
-        //     \\    false -> {
-        //     \\        b = 2
-        //     \\    }
-        //     \\    else -> {
-        //     \\        b = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert b == 2
-        //     ,
-        // },
-        // .{
-        //     .description = "match else branch",
-        //     .source =
-        //     \\let a = "foo"
-        //     \\let b
-        //     \\
-        //     \\match (a) {
-        //     \\    true -> {
-        //     \\        b = 1
-        //     \\    }
-        //     \\    false -> {
-        //     \\        b = 2
-        //     \\    }
-        //     \\    else -> {
-        //     \\        b = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert b == 3
-        //     ,
-        // },
-        // .{
-        //     .description = "no match",
-        //     .source =
-        //     \\let a = "foo"
-        //     \\let b
-        //     \\
-        //     \\match (a) {
-        //     \\    true -> {
-        //     \\        b = 1
-        //     \\    }
-        //     \\    false -> {
-        //     \\        b = 2
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert b == null
-        //     ,
-        // },
-        // .{
-        //     .description = "match one liner no target true",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match true -> a = 1
-        //     \\
-        //     \\assert a == 1
-        //     ,
-        // },
-        // .{
-        //     .description = "match one liner no target false",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match false -> a = 1
-        //     \\
-        //     \\assert a == 5
-        //     ,
-        // },
-        // .{
-        //     .description = "match first branch no target",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match {
-        //     \\    5 < 10 -> {
-        //     \\        a = 1
-        //     \\    }
-        //     \\    3 < 11 -> {
-        //     \\        a = 2
-        //     \\    }
-        //     \\    else -> {
-        //     \\        a = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert a == 1
-        //     ,
-        // },
-        // .{
-        //     .description = "match second branch no target",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match {
-        //     \\    5 > 10 -> {
-        //     \\        a = 1
-        //     \\    }
-        //     \\    3 < 11 -> {
-        //     \\        a = 2
-        //     \\    }
-        //     \\    else -> {
-        //     \\        a = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert a == 2
-        //     ,
-        // },
-        // .{
-        //     .description = "match else branch",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match {
-        //     \\    5 > 10 -> {
-        //     \\        a = 1
-        //     \\    }
-        //     \\    3 > 11 -> {
-        //     \\        a = 2
-        //     \\    }
-        //     \\    else -> {
-        //     \\        a = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert a == 3
-        //     ,
-        // },
-        // .{
-        //     .description = "no match",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match {
-        //     \\    5 > 10 -> {
-        //     \\        a = 1
-        //     \\    }
-        //     \\    3 > 11 -> {
-        //     \\        a = 2
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert a == 5
-        //     ,
-        // },
+        .{
+            .description = "local variable declaration",
+            .source =
+            \\let a = 6
+            \\
+            \\{
+            \\    let b = 7
+            \\    a = a + b
+            \\}
+            \\
+            \\assert(a == 13)
+            ,
+        },
+        .{
+            .description = "local variable assignment",
+            .source =
+            \\let a = 6
+            \\
+            \\{
+            \\    let b = 7
+            \\    b = 5
+            \\    a = a + b
+            \\}
+            \\
+            \\assert(a == 11)
+            ,
+        },
+        .{
+            .description = "local variable declaration nested",
+            .source =
+            \\let a = 6
+            \\
+            \\{
+            \\    let b = 7
+            \\    a = a + b
+            \\
+            \\    {
+            \\        let c = 7
+            \\        a = a + c
+            \\    }
+            \\}
+            \\
+            \\assert(a == 20)
+            ,
+        },
+        .{
+            .description = "local variable assignment nested",
+            .source =
+            \\let a = 6
+            \\
+            \\{
+            \\    let b = 7
+            \\    a = a + b
+            \\
+            \\    {
+            \\        let c = 7
+            \\        c = 2
+            \\        b = 2
+            \\        a = a + b + c
+            \\    }
+            \\}
+            \\
+            \\assert(a == 17)
+            ,
+        },
+        .{
+            .description = "shadowing",
+            .source =
+            \\let a = 6
+            \\
+            \\{
+            \\    let a = 10
+            \\    let b = 10
+            \\    a = a + b
+            \\}
+            \\
+            \\assert(a == 6)
+            ,
+        },
+        .{
+            .description = "shadowing nested",
+            .source =
+            \\let a = 6
+            \\let d = 6
+            \\let e = 6
+            \\
+            \\{
+            \\    let a = 10
+            \\    let b = 10
+            \\    a = 9
+            \\    b = 9
+            \\
+            \\    {
+            \\        let a = 3
+            \\        let b = 3
+            \\        let c = 3
+            \\        a = 2
+            \\        b = 2
+            \\        c = 2
+            \\        a = a + b + c
+            \\        e = e + a
+            \\    }
+            \\
+            \\    a = a + b
+            \\    d = a + b
+            \\}
+            \\
+            \\assert(a == 6)
+            \\assert(d == 27)
+            \\assert(e == 12)
+            ,
+        },
+        .{
+            .description = "match as expression",
+            .source =
+            \\let a = 5
+            \\
+            \\let b = match (a) 5 -> 10
+            \\
+            \\assert(b == 10)
+            ,
+        },
+        .{
+            .description = "match as expression null",
+            .source =
+            \\let a = 5
+            \\
+            \\let b = match (a) 4 -> 10
+            \\
+            \\assert(b == null)
+            ,
+        },
+        .{
+            .description = "match one liner true",
+            .source =
+            \\let a = 5
+            \\
+            \\match (a) 5 -> a = 1
+            \\
+            \\assert(a == 1)
+            ,
+        },
+        .{
+            .description = "match one liner false",
+            .source =
+            \\let a = 5
+            \\
+            \\match (a) 4 -> a = 1
+            \\
+            \\assert(a == 5)
+            ,
+        },
+        .{
+            .description = "match first branch",
+            .source =
+            \\let a = true
+            \\let b
+            \\
+            \\match (a) {
+            \\    true -> {
+            \\        b = 1
+            \\    }
+            \\    false -> {
+            \\        b = 2
+            \\    }
+            \\    else -> {
+            \\        b = 3
+            \\    }
+            \\}
+            \\
+            \\assert(b == 1)
+            ,
+        },
+        .{
+            .description = "match second branch",
+            .source =
+            \\let a = false
+            \\let b
+            \\
+            \\match (a) {
+            \\    true -> {
+            \\        b = 1
+            \\    }
+            \\    false -> {
+            \\        b = 2
+            \\    }
+            \\    else -> {
+            \\        b = 3
+            \\    }
+            \\}
+            \\
+            \\assert(b == 2)
+            ,
+        },
+        .{
+            .description = "match else branch",
+            .source =
+            \\let a = "foo"
+            \\let b
+            \\
+            \\match (a) {
+            \\    true -> {
+            \\        b = 1
+            \\    }
+            \\    false -> {
+            \\        b = 2
+            \\    }
+            \\    _ -> {
+            \\        b = 3
+            \\    }
+            \\}
+            \\
+            \\assert(b == 3)
+            ,
+        },
+        .{
+            .description = "no match",
+            .source =
+            \\let a = "foo"
+            \\let b
+            \\
+            \\match (a) {
+            \\    true -> {
+            \\        b = 1
+            \\    }
+            \\    false -> {
+            \\        b = 2
+            \\    }
+            \\}
+            \\
+            \\assert(b == null)
+            ,
+        },
+        .{
+            .description = "multi line with assignment first branch",
+            .source =
+            \\let a = match {
+            \\    true -> 1
+            \\    false -> 2
+            \\}
+            \\
+            \\assert(a == 1)
+            ,
+        },
+        .{
+            .description = "multi line with assignment second branch",
+            .source =
+            \\let a = match {
+            \\    false -> 1
+            \\    true -> 2
+            \\}
+            \\
+            \\assert(a == 2)
+            ,
+        },
+        .{
+            .description = "multi line with assignment else branch",
+            .source =
+            \\let a = match {
+            \\    5 < 3 -> 1
+            \\    3 > 5 -> 2
+            \\    _ -> 3
+            \\}
+            \\
+            \\assert(a == 3)
+            ,
+        },
+        .{
+            .description = "multi line with assignment no match",
+            .source =
+            \\let a = match {
+            \\    5 < 3 -> 1
+            \\    3 > 5 -> 2
+            \\}
+            \\
+            \\assert(a == null)
+            ,
+        },
+        .{
+            .description = "match one liner no target true",
+            .source =
+            \\let a = 5
+            \\
+            \\match true -> a = 1
+            \\
+            \\assert(a == 1)
+            ,
+        },
+        .{
+            .description = "match one liner no target false",
+            .source =
+            \\let a = 5
+            \\
+            \\match false -> a = 1
+            \\
+            \\assert(a == 5)
+            ,
+        },
+        .{
+            .description = "match first branch no target",
+            .source =
+            \\let a = 5
+            \\
+            \\match {
+            \\    5 < 10 -> {
+            \\        a = 1
+            \\    }
+            \\    3 < 11 -> {
+            \\        a = 2
+            \\    }
+            \\    _ -> {
+            \\        a = 3
+            \\    }
+            \\}
+            \\
+            \\assert(a == 1)
+            ,
+        },
+        .{
+            .description = "match second branch no target",
+            .source =
+            \\let a = 5
+            \\
+            \\match {
+            \\    5 > 10 -> {
+            \\        a = 1
+            \\    }
+            \\    3 < 11 -> {
+            \\        a = 2
+            \\    }
+            \\    else -> {
+            \\        a = 3
+            \\    }
+            \\}
+            \\
+            \\assert(a == 2)
+            ,
+        },
+        .{
+            .description = "match else branch no target",
+            .source =
+            \\let a = 5
+            \\
+            \\match {
+            \\    5 > 10 -> {
+            \\        a = 1
+            \\    }
+            \\    3 > 11 -> {
+            \\        a = 2
+            \\    }
+            \\    _ -> {
+            \\        a = 3
+            \\    }
+            \\}
+            \\
+            \\assert(a == 3)
+            ,
+        },
+        .{
+            .description = "no match no target",
+            .source =
+            \\let a = 5
+            \\
+            \\match {
+            \\    5 > 10 -> {
+            \\        a = 1
+            \\    }
+            \\    3 > 11 -> {
+            \\        a = 2
+            \\    }
+            \\}
+            \\
+            \\assert(a == 5)
+            ,
+        },
         // .{
         //     .description = "logical and true",
         //     .source =
