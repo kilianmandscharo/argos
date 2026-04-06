@@ -15,3 +15,4 @@
 - appending to a list
 - getting the list length
 - implement two-stage compilation source -> ast -> byte code -> interpret
+- how to do the line handling with the new ast?

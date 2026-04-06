@@ -83,34 +83,18 @@ pub fn allocateClosure(vm: *virtual_machine.VirtualMachine, function: *ObjFuncti
 }
 
 pub fn allocateString(vm: *virtual_machine.VirtualMachine, chars: []const u8, hash: u64) !*Obj {
-    return allocateStringInternal(vm, chars, hash, false);
-}
-
-pub fn allocateStaticString(vm: *virtual_machine.VirtualMachine, chars: []const u8, hash: u64) !*Obj {
-    return allocateStringInternal(vm, chars, hash, true);
-}
-
-pub fn copyStaticString(vm: *virtual_machine.VirtualMachine, chars: []const u8) !*Obj {
-    const hash = std.hash.Wyhash.hash(0, chars);
-    const interned = vm.findString(chars, hash);
-    const obj = interned orelse try allocateStaticString(vm, chars, hash);
-    return obj;
+    const string = try allocateObject(vm, ObjString);
+    string.chars = chars;
+    string.hash = hash;
+    try vm.strings.put(vm.gpa, string, undefined);
+    return &string.obj;
 }
 
 pub fn copyString(vm: *virtual_machine.VirtualMachine, chars: []const u8) !*Obj {
     const hash = std.hash.Wyhash.hash(0, chars);
     const interned = vm.findString(chars, hash);
-    const obj = interned orelse try allocateString(vm, chars, hash);
+    const obj = interned orelse try allocateString(vm, try vm.gpa.dupe(u8, chars), hash);
     return obj;
-}
-
-fn allocateStringInternal(vm: *virtual_machine.VirtualMachine, chars: []const u8, hash: u64, static_lifetime: bool) !*Obj {
-    const string = try allocateObject(vm, ObjString);
-    string.chars = chars;
-    string.hash = hash;
-    string.static_lifetime = static_lifetime;
-    try vm.strings.put(vm.gpa, string, undefined);
-    return &string.obj;
 }
 
 pub const ObjType = enum {
@@ -156,9 +140,7 @@ pub const Obj = struct {
         switch (self.type) {
             .String => {
                 const string_obj = self.asString();
-                if (!string_obj.static_lifetime) {
-                    gpa.free(string_obj.chars);
-                }
+                gpa.free(string_obj.chars);
                 gpa.destroy(string_obj);
                 vm.bytes_allocated -= @sizeOf(ObjString);
             },
@@ -223,9 +205,6 @@ pub const ObjString = struct {
 
     obj: Obj = undefined,
     chars: []const u8,
-    // TODO: allowing static strings means we need to keep the source code
-    // around for the full runtime, do we want that?
-    static_lifetime: bool = false,
     hash: u64,
 
     pub fn format(

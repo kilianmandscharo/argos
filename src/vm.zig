@@ -7,6 +7,7 @@ const scanner = @import("scanner.zig");
 const native = @import("native.zig");
 const logging = @import("logging.zig");
 const constants = @import("constants.zig");
+const parser = @import("parser.zig");
 
 const InterpretResult = enum {
     Ok,
@@ -140,16 +141,19 @@ pub const VirtualMachine = struct {
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
         logDebug("Starting pre-compilation...", .{});
-        var s = scanner.Scanner.init(source);
-        var p = compiler.Parser.init(&s);
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+
+        const ast = try parser.createAst(arena.allocator(), source);
+
         var c: compiler.Compiler = undefined;
-        try compiler.Compiler.init(&c, self, self.gpa, &p, .Script, null, null, 0);
+        try compiler.Compiler.init(&c, self, self.gpa, .Script, null, 0);
         logDebug("Pre-compilation finished.", .{});
 
         self.current_compiler = &c;
 
         logDebug("Compiling...", .{});
-        const function = try c.compile();
+        const function = try c.compile(ast);
+        arena.deinit();
         logDebug("Compilation finished.", .{});
 
         logDebug("Setting up global function...", .{});
@@ -196,7 +200,7 @@ pub const VirtualMachine = struct {
     }
 
     fn defineNative(self: *VirtualMachine, name: []const u8, function: object.NativeFn) !void {
-        self.push(value.wrapObj(try object.copyStaticString(self, name)));
+        self.push(value.wrapObj(try object.copyString(self, name)));
         self.push(value.wrapObj(try object.allocateNative(self, function)));
         try self.globals.put(self.gpa, self.stack[0].asObj().asString(), self.stack[1]);
         _ = self.pop();

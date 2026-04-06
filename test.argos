@@ -1,7 +1,2 @@
-for (0..3) |i| {
-    let foo = fn() {
-        let l = List{"a", "b", "c"}
-        print l[i]
-    }
-    foo()
-}
+let foo = 5 + 6
+print(foo)

@@ -38,27 +38,7 @@ const FunctionType = enum {
     Script,
 };
 
-pub const Parser = struct {
-    current: scanner.Token,
-    previous: scanner.Token,
-    scanner: *scanner.Scanner,
-
-    pub fn init(scanner_instance: *scanner.Scanner) @This() {
-        return Parser{
-            .current = undefined,
-            .previous = undefined,
-            .scanner = scanner_instance,
-        };
-    }
-
-    pub fn advance(self: *Parser) !void {
-        self.previous = self.current;
-        self.current = self.scanner.next();
-    }
-};
-
 pub const Compiler = struct {
-    parser: *Parser,
     gpa: std.mem.Allocator,
     vm: *virtual_machine.VirtualMachine,
     locals: [UINT8_COUNT]Local,
@@ -71,7 +51,7 @@ pub const Compiler = struct {
     indent: usize,
 
     const Local = struct {
-        name: scanner.Token,
+        name: []const u8,
         depth: ?u32,
         is_captured: bool,
     };
@@ -87,12 +67,10 @@ pub const Compiler = struct {
         self: *Compiler,
         vm: *virtual_machine.VirtualMachine,
         gpa: std.mem.Allocator,
-        p: *Parser,
         func_type: FunctionType,
         enclosing: ?*Compiler,
         indent: usize,
     ) !void {
-        self.parser = p;
         self.gpa = gpa;
         self.vm = vm;
         self.locals = undefined;
@@ -113,9 +91,7 @@ pub const Compiler = struct {
         self.local_count += 1;
         local.depth = 0;
         local.is_captured = false;
-        local.name.source = "";
-        local.name.start = 0;
-        local.name.length = 0;
+        local.name = "";
     }
 
     fn getFunctionName(self: *Compiler) []const u8 {
@@ -132,12 +108,9 @@ pub const Compiler = struct {
         );
     }
 
-    pub fn compile(self: *Compiler) !*object.ObjFunction {
-        try self.parser.advance();
-        // TODO: we stop compilation on the first error, which makes sense for
-        // degugging, but how to best handle?
-        while (!try self.match(.Eof)) {
-            self.declaration() catch |err| {
+    pub fn compile(self: *Compiler, ast: parser.Program) !*object.ObjFunction {
+        for (ast.items) |stmt| {
+            self.compileStatement(stmt) catch |err| {
                 self.currentChunk().disassemble("<error>");
                 return err;
             };
@@ -162,32 +135,6 @@ pub const Compiler = struct {
         try self.emitOpCode(.Return);
     }
 
-    fn declaration(self: *Compiler) !void {
-        try self.chopNewlines();
-        if (try self.match(.Let)) {
-            try self.varDeclaration();
-        } else {
-            try self.statement();
-        }
-    }
-
-    fn varDeclaration(self: *Compiler) !void {
-        self.log("var declaration", .{});
-        defer self.log("end var declaration", .{});
-
-        const global = try self.parseVariable("Expect variable name.");
-        if (try self.match(.Assign)) {
-            if (self.check(.Fn)) {
-                self.markInitialized();
-            }
-            try self.expression();
-        } else {
-            try self.emitOpCode(.Null);
-        }
-        _ = try self.match(.NewLine);
-        try self.defineVariable(global);
-    }
-
     fn defineVariable(self: *Compiler, global: usize) !void {
         if (self.scope_depth > 0) {
             self.markInitialized();
@@ -202,28 +149,24 @@ pub const Compiler = struct {
         self.locals[self.local_count - 1].depth = self.scope_depth;
     }
 
-    fn parseVariable(self: *Compiler, message: []const u8) !usize {
-        try self.consume(.Identifier, message);
-
-        try self.declareVariable();
+    fn getVariable(self: *Compiler, name: []const u8) !usize {
+        try self.declareVariable(name);
         if (self.scope_depth > 0) return 0;
-
-        return try self.identifierConstant(&self.parser.previous);
+        return try self.identifierConstant(name);
     }
 
-    fn declareVariable(self: *Compiler) !void {
+    fn declareVariable(self: *Compiler, name: []const u8) !void {
         if (self.scope_depth == 0) return;
-        var name = self.parser.previous;
 
         if (self.local_count > 0) {
             var i = self.local_count;
             while (i > 0) : (i -= 1) {
-                var local = self.locals[i - 1];
+                const local = self.locals[i - 1];
                 if (local.depth != null and local.depth.? < self.scope_depth) {
                     break;
                 }
-                if (Compiler.identifiersEqual(&name, &local.name)) {
-                    return self.errorAtPrevious("Already a variable with this name in this scope.");
+                if (Compiler.identifiersEqual(name, local.name)) {
+                    return errorAt("Already a variable with this name in this scope.");
                 }
             }
         }
@@ -231,9 +174,9 @@ pub const Compiler = struct {
         try self.addLocal(name);
     }
 
-    fn addLocal(self: *Compiler, name: scanner.Token) !void {
+    fn addLocal(self: *Compiler, name: []const u8) !void {
         if (self.local_count == std.math.maxInt(u8) + 1) {
-            return self.errorAtPrevious("Too many local variables in block.");
+            return errorAt("Too many local variables in block.");
         }
         const local = &self.locals[self.local_count];
         self.local_count += 1;
@@ -242,84 +185,9 @@ pub const Compiler = struct {
         local.is_captured = false;
     }
 
-    fn identifierConstant(self: *Compiler, name: *scanner.Token) !usize {
-        const start = name.start;
-        const end = name.start + name.length;
-        const slice = name.source[start..end];
-        const obj = try object.copyStaticString(self.vm, slice);
+    fn identifierConstant(self: *Compiler, name: []const u8) !usize {
+        const obj = try object.copyString(self.vm, name);
         return try self.makeConstant(value.wrapObj(obj));
-    }
-
-    fn statement(self: *Compiler) !void {
-        if (try self.match(.Print)) {
-            try self.printStatement();
-        } else if (try self.match(.Assert)) {
-            try self.assertStatement();
-        } else if (try self.match(.Match)) {
-            try self.matchStatement();
-        } else if (try self.match(.While)) {
-            try self.whileStatement();
-        } else if (try self.match(.For)) {
-            try self.forStatement();
-        } else if (try self.match(.Return)) {
-            try self.returnStatement();
-        } else if (try self.match(.LBrace)) {
-            self.beginScope();
-            try self.blockStatement();
-            try self.endScope();
-        } else {
-            try self.expressionStatement();
-        }
-    }
-
-    fn forStatement(self: *Compiler) anyerror!void {
-        self.log("for statement", .{});
-        defer self.log("end for statement", .{});
-
-        self.beginScope();
-
-        try self.consume(.LParen, "Expect '(' after 'for'");
-        try self.expression();
-        try self.consume(.DotDot, "Expect '..' after expression");
-        try self.expression();
-        try self.consume(.RParen, "Expect ')' after range");
-
-        try self.consume(.Pipe, "Expect '|' after loop range");
-        try self.consume(.Identifier, "Expect identifier in loop capture");
-        try self.declareVariable();
-        self.markInitialized();
-        try self.consume(.Pipe, "Expect '|' after variable capture");
-
-        const increment_var_index = self.local_count - 1;
-
-        // a dummy local for the right side of the range
-        try self.addLocal(.{
-            .source = "",
-            .type = .Identifier,
-            .start = 0,
-            .length = 0,
-            .line = 0,
-        });
-        self.markInitialized();
-
-        const loop_start = self.currentChunk().code.items.len;
-
-        const exit_jump = try self.emitJump(.JumpIfGreaterOrEq);
-        try self.statement();
-
-        try self.emitOpCode(.GetLocal);
-        try self.emitU24(increment_var_index);
-        try self.emitConstant(value.wrapInt(1));
-        try self.emitOpCode(.Add);
-        try self.emitOpCode(.SetLocal);
-        try self.emitU24(increment_var_index);
-        try self.emitOpCode(.Pop);
-
-        try self.emitLoop(loop_start);
-
-        try self.patchJump(exit_jump);
-
-        try self.endScope();
     }
 
     fn emitLoop(self: *Compiler, loop_start: usize) !void {
@@ -327,80 +195,10 @@ pub const Compiler = struct {
 
         const offset = self.currentChunk().code.items.len - loop_start + 2;
         if (offset > std.math.maxInt(u16)) {
-            return self.errorAtPrevious("Loop body too large.");
+            return errorAt("Loop body too large.");
         }
 
         try self.emitU16(offset);
-    }
-
-    fn matchStatement(self: *Compiler) anyerror!void {
-        self.log("match statement", .{});
-        defer self.log("end match statement", .{});
-
-        var has_target = false;
-
-        if (self.check(.LParen)) {
-            has_target = true;
-            try self.parser.advance();
-            try self.expression();
-            try self.consume(.RParen, "Expect ')' after match target");
-        }
-
-        const instruction: chunk.OpCode = if (has_target) .JumpIfNotEq else .JumpIfFalse;
-
-        if (!self.check(.LBrace)) {
-            try self.expression();
-            try self.consume(.Arrow, "Expect '->' after match expression");
-
-            const then_jump = try self.emitJump(instruction);
-            try self.statement();
-            try self.patchJump(then_jump);
-            try self.emitOpCode(.Pop);
-
-            if (has_target) try self.emitOpCode(.Pop);
-
-            return;
-        }
-
-        try self.parser.advance();
-        try self.consume(.NewLine, "Expect new line after '{' in match block");
-
-        var else_jumps: std.ArrayList(usize) = .{};
-        errdefer else_jumps.deinit(self.gpa);
-
-        while (!self.check(.Eof) and !self.check(.RBrace)) {
-            try self.chopNewlines();
-
-            if (self.check(.Else)) break;
-
-            try self.expression();
-            try self.consume(.Arrow, "Expect '->' after match expression");
-
-            const then_jump = try self.emitJump(instruction);
-            try self.emitOpCode(.Pop);
-            try self.statement();
-            try else_jumps.append(self.gpa, try self.emitJump(.Jump));
-            try self.patchJump(then_jump);
-            try self.emitOpCode(.Pop);
-        }
-
-        // TODO: what if the else branch is not the last?
-        if (self.check(.Else)) {
-            try self.parser.advance();
-            try self.consume(.Arrow, "Expect '->' after else in match expression");
-            try self.statement();
-        }
-
-        for (else_jumps.items) |jump| {
-            try self.patchJump(jump);
-        }
-
-        if (has_target) try self.emitOpCode(.Pop);
-
-        try self.consume(.RBrace, "Expect '}' at the end of match block");
-        try self.consume(.NewLine, "Expect new line after match block");
-
-        else_jumps.deinit(self.gpa);
     }
 
     fn emitJump(self: *Compiler, instruction: chunk.OpCode) !usize {
@@ -414,7 +212,7 @@ pub const Compiler = struct {
         const cur_chunk = self.currentChunk();
         const jump = cur_chunk.code.items.len - offset - 2;
         if (jump > std.math.maxInt(u16)) {
-            return self.errorAtPrevious("Too much code to jump over.");
+            return errorAt("Too much code to jump over.");
         }
         const bytes = chunk.indexToU16(jump);
         cur_chunk.code.items[offset] = bytes[0];
@@ -432,7 +230,7 @@ pub const Compiler = struct {
         }
 
         if (upvalue_count == UINT8_COUNT) {
-            return self.errorAtPrevious("Too many closure variables in function.");
+            return errorAt("Too many closure variables in function.");
         }
 
         self.upvalues[upvalue_count].is_local = is_local;
@@ -442,7 +240,7 @@ pub const Compiler = struct {
         return retVal;
     }
 
-    fn resolveUpvalue(self: *Compiler, name: *scanner.Token) !?u8 {
+    fn resolveUpvalue(self: *Compiler, name: []const u8) !?u8 {
         if (self.enclosing == null) return null;
 
         const enclosing = self.enclosing.?;
@@ -456,12 +254,6 @@ pub const Compiler = struct {
         if (upvalue) |index| return try self.addUpvalue(index, false);
 
         return null;
-    }
-
-    fn chopNewlines(self: *Compiler) !void {
-        while (self.check(.NewLine)) {
-            try self.parser.advance();
-        }
     }
 
     fn blockStatement(self: *Compiler) anyerror!void {
@@ -494,14 +286,14 @@ pub const Compiler = struct {
         }
     }
 
-    fn resolveLocal(self: *Compiler, name: *scanner.Token) !?usize {
+    fn resolveLocal(self: *Compiler, name: []const u8) !?usize {
         if (self.local_count == 0) return null;
         var i = self.local_count;
         while (i > 0) : (i -= 1) {
             const local = &self.locals[i - 1];
-            if (Compiler.identifiersEqual(name, &local.name)) {
+            if (Compiler.identifiersEqual(name, local.name)) {
                 if (local.depth == null) {
-                    return self.errorAtPrevious("Can't read local variable in its own initializer.");
+                    return errorAt("Can't read local variable in its own initializer.");
                 }
                 return i - 1;
             }
@@ -509,15 +301,13 @@ pub const Compiler = struct {
         return null;
     }
 
-    fn identifiersEqual(a: *scanner.Token, b: *scanner.Token) bool {
-        const a_string = a.toString();
-        const b_string = b.toString();
-        if (a_string.len != b_string.len) return false;
-        return std.mem.eql(u8, a_string, b_string);
+    fn identifiersEqual(a: []const u8, b: []const u8) bool {
+        if (a.len != b.len) return false;
+        return std.mem.eql(u8, a, b);
     }
 
     fn emitConstant(self: *Compiler, val: value.Value) !void {
-        try self.currentChunk().writeConstant(self.gpa, val, self.parser.previous.line);
+        try self.currentChunk().writeConstant(self.gpa, val, 0);
     }
 
     fn makeConstant(self: *Compiler, val: value.Value) !usize {
@@ -534,11 +324,11 @@ pub const Compiler = struct {
     }
 
     fn emitOpByte(self: *Compiler, op_byte: chunk.OpByte) !void {
-        try self.currentChunk().write(self.gpa, op_byte, self.parser.previous.line);
+        try self.currentChunk().write(self.gpa, op_byte, 0);
     }
 
     fn emitByte(self: *Compiler, byte: u8) !void {
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Byte = byte }, self.parser.previous.line);
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Byte = byte }, 0);
     }
 
     fn emitU24(self: *Compiler, index: usize) !void {
@@ -555,60 +345,97 @@ pub const Compiler = struct {
     }
 
     fn emitOpCode(self: *Compiler, op_code: chunk.OpCode) !void {
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = op_code }, self.parser.previous.line);
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = op_code }, 0);
     }
 
     fn emitOpCodes(self: *Compiler, a: chunk.OpCode, b: chunk.OpCode) !void {
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = a }, self.parser.previous.line);
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = b }, self.parser.previous.line);
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = a }, 0);
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = b }, 0);
     }
 
-    fn consume(self: *Compiler, expected: scanner.TokenType, message: []const u8) !void {
-        if (self.check(expected)) {
-            try self.parser.advance();
-            return;
-        }
-        return self.errorAtCurrent(message);
-    }
-
-    fn match(self: *Compiler, token_type: scanner.TokenType) !bool {
-        if (!self.check(token_type)) return false;
-        try self.parser.advance();
-        return true;
-    }
-
-    fn check(self: *Compiler, token_type: scanner.TokenType) bool {
-        return self.parser.current.type == token_type;
-    }
-
-    fn errorAtCurrent(self: *Compiler, message: []const u8) anyerror {
-        return Compiler.errorAt(&self.parser.current, message);
-    }
-
-    fn errorAtPrevious(self: *Compiler, message: []const u8) anyerror {
-        return Compiler.errorAt(&self.parser.previous, message);
-    }
-
-    fn errorAt(token: *scanner.Token, message: []const u8) anyerror {
-        std.debug.print("[line {d}] Error", .{token.line});
-        switch (token.type) {
-            .Eof => std.debug.print(" at end", .{}),
-            else => std.debug.print(" at '{s}'", .{token.source[token.start .. token.start + token.length]}),
-        }
-        std.debug.print(": {s}\n", .{message});
+    fn errorAt(message: []const u8) anyerror {
+        // std.debug.print("[line {d}] Error", .{line});
+        // std.debug.print(" at '{s}'", .{name});
+        // std.debug.print(": {s}\n", .{message});
+        std.debug.print("{s}", .{message});
         return error.CompileError;
     }
 
     fn compileStatement(self: *Compiler, stmt: parser.Statement) !void {
         switch (stmt) {
-            .VarDeclaration => {},
+            .VarDeclaration => |val| {
+                const global = try self.getVariable(val.name);
+                try self.compileExpression(val.expression);
+                try self.defineVariable(global);
+            },
             .Block => |val| {
                 for (val.items) |item| {
-                    try compileStatement(item);
+                    try self.compileStatement(item);
                 }
             },
-            .Assignment => {},
-            .For => {},
+            .Assignment => |val| {
+                switch (val.target) {
+                    .Identifier => |name| {
+                        if (try self.resolveLocal(name)) |local| {
+                            try self.emitOpCode(.SetLocal);
+                            try self.emitU24(local);
+                        } else if (try self.resolveUpvalue(name)) |upvalue| {
+                            try self.emitOpCode(.SetUpvalue);
+                            try self.emitByte(upvalue);
+                        } else {
+                            const constant = try self.identifierConstant(name);
+                            try self.emitOpCode(.SetGlobal);
+                            try self.emitU24(constant);
+                        }
+                    },
+                    .Index => |index| {
+                        // TODO: this can be a list or a table
+                        try self.compileExpression(index.left);
+                        try self.compileExpression(index.index);
+                        try self.emitOpCode(.ListSet);
+                    },
+                }
+            },
+            .For => |val| {
+                self.beginScope();
+                if (val.expression.* != .Range) {
+                    return errorAt("Only range expressions are supported for now.");
+                }
+
+                try self.compileExpression(val.expression.Range.start);
+                try self.compileExpression(val.expression.Range.end);
+
+                try self.declareVariable(val.capture);
+                self.markInitialized();
+
+                const increment_var_index = self.local_count - 1;
+
+                // a dummy local for the right side of the range
+                try self.addLocal("");
+                self.markInitialized();
+
+                const loop_start = self.currentChunk().code.items.len;
+
+                const exit_jump = try self.emitJump(.JumpIfGreaterOrEq);
+
+                for (val.body.items) |item| {
+                    try self.compileStatement(item);
+                }
+
+                try self.emitOpCode(.GetLocal);
+                try self.emitU24(increment_var_index);
+                try self.emitConstant(value.wrapInt(1));
+                try self.emitOpCode(.Add);
+                try self.emitOpCode(.SetLocal);
+                try self.emitU24(increment_var_index);
+                try self.emitOpCode(.Pop);
+
+                try self.emitLoop(loop_start);
+
+                try self.patchJump(exit_jump);
+
+                try self.endScope();
+            },
             .While => |val| {
                 const loop_start = self.currentChunk().code.items.len;
                 try self.compileExpression(val.expression);
@@ -617,7 +444,7 @@ pub const Compiler = struct {
                 try self.emitOpCode(.Pop);
 
                 for (val.body.items) |item| {
-                    try compileStatement(item);
+                    try self.compileStatement(item);
                 }
 
                 try self.emitLoop(loop_start);
@@ -627,7 +454,7 @@ pub const Compiler = struct {
             },
             .Return => |val| {
                 if (self.type == .Script) {
-                    return self.errorAtPrevious("Can't return from top-level code.");
+                    return errorAt("Can't return from top-level code.");
                 }
                 try self.compileExpression(val);
                 try self.emitOpCode(.Return);
@@ -647,9 +474,21 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileExpression(self: *Compiler, expr: *const parser.Expression) !void {
+    fn compileExpression(self: *Compiler, expr: *const parser.Expression) anyerror!void {
         switch (expr.*) {
-            .Identifier => {},
+            .Identifier => |name| {
+                if (try self.resolveLocal(name)) |local| {
+                    try self.emitOpCode(.GetLocal);
+                    try self.emitU24(local);
+                } else if (try self.resolveUpvalue(name)) |upvalue| {
+                    try self.emitOpCode(.GetUpvalue);
+                    try self.emitByte(upvalue);
+                } else {
+                    const constant = try self.identifierConstant(name);
+                    try self.emitOpCode(.GetGlobal);
+                    try self.emitU24(constant);
+                }
+            },
             .String => |val| {
                 try self.emitConstant(value.wrapObj(try object.copyString(self.vm, val)));
             },
@@ -664,19 +503,34 @@ pub const Compiler = struct {
             },
             .Infix => |val| {
                 try self.compileExpression(val.left);
-                try self.compileExpression(val.right);
-                switch (val.operator) {
-                    .Plus => try self.emitOpCode(.Add),
-                    .Minus => try self.emitOpCode(.Subtract),
-                    .Asterisk => try self.emitOpCode(.Multiply),
-                    .Slash => try self.emitOpCode(.Divide),
-                    .Eq => try self.emitOpCode(.Equal),
-                    .NotEq => try self.emitOpCodes(.Equal, .Not),
-                    .Gt => try self.emitOpCode(.Greater),
-                    .GtOrEq => try self.emitOpCodes(.Less, .Not),
-                    .Lt => try self.emitOpCode(.Less),
-                    .LtOrEq => try self.emitOpCodes(.Greater, .Not),
-                    else => unreachable,
+
+                if (val.operator == .And) {
+                    const end_jump = try self.emitJump(.JumpIfFalse);
+                    try self.emitOpCode(.Pop);
+                    try self.compileExpression(val.right);
+                    try self.patchJump(end_jump);
+                } else if (val.operator == .Or) {
+                    const else_jump = try self.emitJump(.JumpIfFalse);
+                    const end_jump = try self.emitJump(.Jump);
+                    try self.patchJump(else_jump);
+                    try self.emitOpCode(.Pop);
+                    try self.compileExpression(val.right);
+                    try self.patchJump(end_jump);
+                } else {
+                    try self.compileExpression(val.right);
+                    switch (val.operator) {
+                        .Plus => try self.emitOpCode(.Add),
+                        .Minus => try self.emitOpCode(.Subtract),
+                        .Asterisk => try self.emitOpCode(.Multiply),
+                        .Slash => try self.emitOpCode(.Divide),
+                        .Eq => try self.emitOpCode(.Equal),
+                        .NotEq => try self.emitOpCodes(.Equal, .Not),
+                        .Gt => try self.emitOpCode(.Greater),
+                        .GtOrEq => try self.emitOpCodes(.Less, .Not),
+                        .Lt => try self.emitOpCode(.Less),
+                        .LtOrEq => try self.emitOpCodes(.Greater, .Not),
+                        else => unreachable,
+                    }
                 }
             },
             .Prefix => |val| {
@@ -687,11 +541,62 @@ pub const Compiler = struct {
                     else => unreachable,
                 }
             },
-            .Function => {},
+            .Function => |val| {
+                self.indent += 1;
+
+                var new_compiler: Compiler = undefined;
+                try new_compiler.init(
+                    self.vm,
+                    self.gpa,
+                    .Function,
+                    self,
+                    self.indent,
+                );
+
+                new_compiler.vm.current_compiler = &new_compiler;
+                new_compiler.beginScope();
+
+                for (val.params.items) |param| {
+                    switch (param) {
+                        .Positional => |name| {
+                            new_compiler.function.?.arity += 1;
+                            if (new_compiler.function.?.arity > 255) {
+                                return errorAt("Can't have more than 255 parameters.");
+                            }
+                            try self.declareVariable(name);
+                            const constant = if (self.scope_depth > 0) 0 else try self.identifierConstant(name);
+                            try new_compiler.defineVariable(constant);
+                        },
+                        .Default => unreachable,
+                    }
+                }
+
+                switch (val.body) {
+                    .Block => |block| {
+                        for (block.items) |stmt| {
+                            try new_compiler.compileStatement(stmt);
+                        }
+                    },
+                    .Expression => unreachable,
+                }
+
+                const function = try new_compiler.endCompiler();
+
+                const constant = try self.makeConstant(value.wrapObj(&function.obj));
+                try self.emitOpCode(.Closure);
+                try self.emitU24(constant);
+
+                for (0..function.upvalue_count) |i| {
+                    try self.emitByte(@intFromBool(new_compiler.upvalues[i].is_local));
+                    try self.emitByte(new_compiler.upvalues[i].index);
+                }
+
+                self.indent -= 1;
+            },
             .Call => |val| {
                 const count = val.args.items.len;
                 if (count == 255) {
-                    return self.errorAtPrevious("Can't have more than 255 arguments");
+                    return errorAt("Can't have more than 255 arguments");
                 }
                 for (val.args.items) |arg| {
                     switch (arg) {
@@ -699,9 +604,9 @@ pub const Compiler = struct {
                         .Named => unreachable,
                     }
                 }
-                try self.emitBytes(.Call, count);
+                try self.emitBytes(.Call, @intCast(count));
             },
-            .Range => {},
+            .Range => unreachable,
             .List => |val| {
                 var index = val.items.len;
                 while (index > 0) {
@@ -712,140 +617,68 @@ pub const Compiler = struct {
                 try self.emitOpCode(.ListInit);
                 try self.emitU24(val.items.len);
             },
-            .Table => {},
+            .Table => unreachable,
             .Index => |val| {
                 try self.compileExpression(val.left);
                 try self.compileExpression(val.index);
                 try self.emitOpCode(.ListGet);
             },
-            .Match => {},
+            .Match => |val| {
+                const has_target = val.target != null;
+                const instruction: chunk.OpCode = if (has_target) .JumpIfNotEq else .JumpIfFalse;
+
+                if (val.body == .Single) {
+                    try self.compileExpression(val.body.Single.pattern);
+
+                    const then_jump = try self.emitJump(instruction);
+
+                    try self.compileStatement(val.body.Single.body);
+                    try self.patchJump(then_jump);
+                    try self.emitOpCode(.Pop);
+
+                    if (has_target) try self.emitOpCode(.Pop);
+                    return;
+                }
+
+                var else_jumps: std.ArrayList(usize) = .{};
+                errdefer else_jumps.deinit(self.gpa);
+
+                const arms = val.body.Multiple.items;
+
+                for (arms) |arm| {
+                    if (arm.pattern.* == .Identifier and std.mem.eql(u8, arm.pattern.Identifier, "_")) {
+                        break;
+                    }
+                    try self.compileExpression(arm.pattern);
+                    const then_jump = try self.emitJump(instruction);
+                    try self.emitOpCode(.Pop);
+                    try self.compileStatement(val.body.Single.body);
+                    try else_jumps.append(self.gpa, try self.emitJump(.Jump));
+                    try self.patchJump(then_jump);
+                    try self.emitOpCode(.Pop);
+                }
+
+                const last_arm: ?parser.MatchArm = if (arms.len > 0) arms[arms.len - 1] else null;
+                var else_arm: ?parser.MatchArm = null;
+                if (last_arm) |arm| {
+                    if (arm.pattern.* == .Identifier and std.mem.eql(u8, arm.pattern.Identifier, "_")) {
+                        else_arm = arm;
+                    }
+                }
+                if (else_arm) |arm| {
+                    try self.compileStatement(arm.body);
+                }
+
+                for (else_jumps.items) |jump| {
+                    try self.patchJump(jump);
+                }
+
+                if (has_target) try self.emitOpCode(.Pop);
+                else_jumps.deinit(self.gpa);
+            },
             .Null => {
                 try self.emitOpCode(.Null);
             },
         }
     }
 };
-
-fn unary(compiler: *Compiler, can_assign: bool) !void {
-    _ = can_assign;
-    const operator_type = compiler.parser.previous.type;
-    try compiler.parsePrecedence(.Prefix);
-    switch (operator_type) {
-        .Minus => try compiler.emitOpCode(.Negate),
-        .Bang => try compiler.emitOpCode(.Not),
-        else => unreachable,
-    }
-}
-
-fn variable(compiler: *Compiler, can_assign: bool) !void {
-    var name = compiler.parser.previous;
-    try namedVariable(compiler, &name, can_assign);
-}
-
-fn namedVariable(compiler: *Compiler, name: *scanner.Token, can_assign: bool) !void {
-    var getOp: chunk.OpCode = undefined;
-    var setOp: chunk.OpCode = undefined;
-
-    var arg: usize = undefined;
-    var emit_u24 = true;
-
-    if (try compiler.resolveLocal(name)) |val| {
-        getOp = .GetLocal;
-        setOp = .SetLocal;
-        arg = val;
-    } else if (try compiler.resolveUpvalue(name)) |val| {
-        getOp = .GetUpvalue;
-        setOp = .SetUpvalue;
-        arg = val;
-        emit_u24 = false;
-    } else {
-        arg = try compiler.identifierConstant(name);
-        getOp = .GetGlobal;
-        setOp = .SetGlobal;
-    }
-
-    if (can_assign and try compiler.match(.Assign)) {
-        try compiler.expression();
-        try compiler.emitOpCode(setOp);
-        if (emit_u24) {
-            try compiler.emitU24(arg);
-        } else {
-            try compiler.emitByte(@intCast(arg));
-        }
-    } else {
-        try compiler.emitOpCode(getOp);
-        if (emit_u24) {
-            try compiler.emitU24(arg);
-        } else {
-            try compiler.emitByte(@intCast(arg));
-        }
-    }
-}
-
-fn logicalAnd(compiler: *Compiler) !void {
-    const end_jump = try compiler.emitJump(.JumpIfFalse);
-    try compiler.emitOpCode(.Pop);
-    try compiler.parsePrecedence(.LogicalAnd);
-    try compiler.patchJump(end_jump);
-}
-
-fn logicalOr(compiler: *Compiler) !void {
-    const else_jump = try compiler.emitJump(.JumpIfFalse);
-    const end_jump = try compiler.emitJump(.Jump);
-
-    try compiler.patchJump(else_jump);
-    try compiler.emitOpCode(.Pop);
-
-    try compiler.parsePrecedence(.LogicalOr);
-    try compiler.patchJump(end_jump);
-}
-
-fn func(compiler: *Compiler, can_assign: bool) !void {
-    _ = can_assign;
-
-    compiler.indent += 1;
-
-    var new_compiler: Compiler = undefined;
-    try Compiler.init(
-        &new_compiler,
-        compiler.vm,
-        compiler.gpa,
-        compiler.parser,
-        .Function,
-        compiler,
-        compiler.indent,
-    );
-
-    new_compiler.vm.current_compiler = &new_compiler;
-    new_compiler.beginScope();
-
-    try new_compiler.consume(.LParen, "Expect '(' after function name.");
-
-    if (!new_compiler.check(.RParen)) {
-        while (true) {
-            new_compiler.function.?.arity += 1;
-            if (new_compiler.function.?.arity > 255) {
-                return compiler.errorAtCurrent("Can't have more than 255 parameters.");
-            }
-            const constant = try new_compiler.parseVariable("Expect parameter name.");
-            try new_compiler.defineVariable(constant);
-            if (!try new_compiler.match(.Comma)) break;
-        }
-    }
-
-    try new_compiler.consume(.RParen, "Expect ')' after function parameters.");
-    try new_compiler.statement();
-
-    const function = try new_compiler.endCompiler();
-
-    const constant = try compiler.makeConstant(value.wrapObj(&function.obj));
-    try compiler.emitOpCode(.Closure);
-    try compiler.emitU24(constant);
-
-    for (0..function.upvalue_count) |i| {
-        try compiler.emitByte(@intFromBool(new_compiler.upvalues[i].is_local));
-        try compiler.emitByte(new_compiler.upvalues[i].index);
-    }
-
-    compiler.indent -= 1;
-}
