@@ -8,6 +8,7 @@ const logging = @import("logging.zig");
 const memory = @import("memory.zig");
 const constants = @import("constants.zig");
 const parser = @import("parser.zig");
+const ast = @import("ast.zig");
 
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
     logging.log(fmt, args, .{
@@ -110,8 +111,8 @@ pub const Compiler = struct {
         );
     }
 
-    pub fn compile(self: *Compiler, ast: parser.Program) !*object.ObjFunction {
-        for (ast.items) |stmt| {
+    pub fn compile(self: *Compiler, program: ast.Program) !*object.ObjFunction {
+        for (program.items) |stmt| {
             self.compileStatement(stmt) catch |err| {
                 self.currentChunk().disassemble("<error>");
                 return err;
@@ -363,7 +364,7 @@ pub const Compiler = struct {
         return error.CompileError;
     }
 
-    fn compileStatement(self: *Compiler, stmt: parser.Statement) !void {
+    fn compileStatement(self: *Compiler, stmt: ast.Statement) !void {
         switch (stmt) {
             .VarDeclaration => |val| {
                 const global = try self.getVariable(val.name);
@@ -481,7 +482,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileExpression(self: *Compiler, expr: *const parser.Expression) anyerror!void {
+    fn compileExpression(self: *Compiler, expr: *const ast.Expression) anyerror!void {
         switch (expr.*) {
             .Identifier => |name| {
                 if (try self.resolveLocal(name)) |local| {
@@ -684,8 +685,8 @@ pub const Compiler = struct {
                     try self.emitOpCode(.Pop);
                 }
 
-                const last_arm: ?parser.MatchArm = if (arms.len > 0) arms[arms.len - 1] else null;
-                var else_arm: ?parser.MatchArm = null;
+                const last_arm: ?ast.MatchArm = if (arms.len > 0) arms[arms.len - 1] else null;
+                var else_arm: ?ast.MatchArm = null;
                 if (last_arm) |arm| {
                     if (arm.pattern.* == .Identifier and std.mem.eql(u8, arm.pattern.Identifier, "_")) {
                         else_arm = arm;
@@ -711,7 +712,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileMatchArmBody(self: *Compiler, body: parser.Statement) !void {
+    fn compileMatchArmBody(self: *Compiler, body: ast.Statement) !void {
         self.ctx.suppress_pop = true;
         defer self.ctx.suppress_pop = false;
 

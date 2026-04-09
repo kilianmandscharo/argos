@@ -3,11 +3,9 @@ const logging = @import("logging.zig");
 const scanner = @import("scanner.zig");
 const test_utils = @import("test_utils.zig");
 const parser = @import("parser.zig");
+const ast = @import("ast.zig");
 
-const Statement = parser.Statement;
-const Expression = parser.Expression;
-
-fn expectStatement(expected: Statement, actual: Statement) anyerror!void {
+fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void {
     try expectTag(expected, actual);
 
     switch (expected) {
@@ -67,7 +65,7 @@ fn expectTag(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(std.meta.activeTag(expected), std.meta.activeTag(actual));
 }
 
-fn expectExpression(expected: Expression, actual: Expression) !void {
+fn expectExpression(expected: ast.Expression, actual: ast.Expression) !void {
     try expectTag(expected, actual);
 
     switch (expected) {
@@ -167,7 +165,7 @@ fn expectExpression(expected: Expression, actual: Expression) !void {
 const StatementTestCase = struct {
     description: []const u8,
     input: []const u8,
-    expected_statement: ?Statement = null,
+    expected_statement: ?ast.Statement = null,
     expect_error: bool = false,
 };
 
@@ -177,9 +175,9 @@ fn runStatementTest(arena: std.mem.Allocator, test_case: StatementTestCase) anye
     if (test_case.expect_error) {
         try std.testing.expectError(error.ParserError, result);
     } else {
-        const ast = try result;
-        try std.testing.expectEqual(ast.items.len, 1);
-        try expectStatement(test_case.expected_statement.?, ast.items[0]);
+        const program = try result;
+        try std.testing.expectEqual(program.items.len, 1);
+        try expectStatement(test_case.expected_statement.?, program.items[0]);
     }
 }
 
@@ -193,10 +191,10 @@ test "statements" {
             .input =
             \\let foo = 5
             ,
-            .expected_statement = Statement{
+            .expected_statement = .{
                 .VarDeclaration = .{
                     .name = "foo",
-                    .expression = &Expression{ .Integer = 5 },
+                    .expression = &.{ .Integer = 5 },
                 },
             },
         },
@@ -205,10 +203,10 @@ test "statements" {
             .input =
             \\let foo
             ,
-            .expected_statement = Statement{
+            .expected_statement = .{
                 .VarDeclaration = .{
                     .name = "foo",
-                    .expression = &Expression{ .Null = {} },
+                    .expression = &.{ .Null = {} },
                 },
             },
         },
@@ -217,10 +215,10 @@ test "statements" {
             .input =
             \\foo = 5
             ,
-            .expected_statement = Statement{
+            .expected_statement = .{
                 .Assignment = .{
                     .target = .{ .Identifier = "foo" },
-                    .expression = &Expression{ .Integer = 5 },
+                    .expression = &.{ .Integer = 5 },
                 },
             },
         },
@@ -229,15 +227,15 @@ test "statements" {
             .input =
             \\foo[0] = 5
             ,
-            .expected_statement = Statement{
+            .expected_statement = .{
                 .Assignment = .{
                     .target = .{
                         .Index = .{
-                            .left = &Expression{ .Identifier = "foo" },
-                            .index = &Expression{ .Integer = 0 },
+                            .left = &.{ .Identifier = "foo" },
+                            .index = &.{ .Integer = 0 },
                         },
                     },
-                    .expression = &Expression{ .Integer = 5 },
+                    .expression = &.{ .Integer = 5 },
                 },
             },
         },
@@ -246,8 +244,8 @@ test "statements" {
             .input =
             \\return 5
             ,
-            .expected_statement = Statement{
-                .Return = &Expression{ .Integer = 5 },
+            .expected_statement = .{
+                .Return = &.{ .Integer = 5 },
             },
         },
         .{
@@ -255,8 +253,8 @@ test "statements" {
             .input =
             \\return
             ,
-            .expected_statement = Statement{
-                .Return = &Expression{ .Null = {} },
+            .expected_statement = .{
+                .Return = &.{ .Null = {} },
             },
         },
         .{
@@ -264,8 +262,8 @@ test "statements" {
             .input =
             \\print(5)
             ,
-            .expected_statement = Statement{
-                .Print = &Expression{ .Integer = 5 },
+            .expected_statement = .{
+                .Print = &.{ .Integer = 5 },
             },
         },
         .{
@@ -273,8 +271,8 @@ test "statements" {
             .input =
             \\assert(5)
             ,
-            .expected_statement = Statement{
-                .Assert = &Expression{ .Integer = 5 },
+            .expected_statement = .{
+                .Assert = &.{ .Integer = 5 },
             },
         },
         .{
@@ -282,11 +280,11 @@ test "statements" {
             .input =
             \\5 + 5
             ,
-            .expected_statement = Statement{
-                .Expression = &Expression{
+            .expected_statement = .{
+                .Expression = &.{
                     .Infix = .{
-                        .left = &Expression{ .Integer = 5 },
-                        .right = &Expression{ .Integer = 5 },
+                        .left = &.{ .Integer = 5 },
+                        .right = &.{ .Integer = 5 },
                         .operator = .Plus,
                     },
                 },
@@ -300,19 +298,19 @@ test "statements" {
             \\    foo + 2
             \\}
             ,
-            .expected_statement = Statement{
-                .Block = try test_utils.list(Statement, arena.allocator(), &.{
-                    Statement{
+            .expected_statement = .{
+                .Block = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                    .{
                         .VarDeclaration = .{
                             .name = "foo",
-                            .expression = &Expression{ .Integer = 5 },
+                            .expression = &.{ .Integer = 5 },
                         },
                     },
-                    Statement{
-                        .Expression = &Expression{
+                    .{
+                        .Expression = &.{
                             .Infix = .{
-                                .left = &Expression{ .Identifier = "foo" },
-                                .right = &Expression{ .Integer = 2 },
+                                .left = &.{ .Identifier = "foo" },
+                                .right = &.{ .Integer = 2 },
                                 .operator = .Plus,
                             },
                         },
@@ -325,10 +323,10 @@ test "statements" {
             .input =
             \\{ print(1) }
             ,
-            .expected_statement = Statement{
-                .Block = try test_utils.list(Statement, arena.allocator(), &.{
-                    Statement{
-                        .Print = &Expression{ .Integer = 1 },
+            .expected_statement = .{
+                .Block = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                    .{
+                        .Print = &.{ .Integer = 1 },
                     },
                 }),
             },
@@ -338,7 +336,7 @@ test "statements" {
             .input =
             \\{}
             ,
-            .expected_statement = Statement{
+            .expected_statement = .{
                 .Block = .{},
             },
         },
@@ -349,7 +347,7 @@ test "statements" {
             \\
             \\}
             ,
-            .expected_statement = Statement{
+            .expected_statement = .{
                 .Block = .{},
             },
         },
@@ -360,23 +358,23 @@ test "statements" {
             \\    foo = foo + 1
             \\}
             ,
-            .expected_statement = Statement{
+            .expected_statement = .{
                 .While = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Infix = .{
-                            .left = &Expression{ .Identifier = "foo" },
-                            .right = &Expression{ .Integer = 5 },
+                            .left = &.{ .Identifier = "foo" },
+                            .right = &.{ .Integer = 5 },
                             .operator = .Lt,
                         },
                     },
-                    .body = try test_utils.list(Statement, arena.allocator(), &.{
-                        Statement{
+                    .body = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                        .{
                             .Assignment = .{
                                 .target = .{ .Identifier = "foo" },
-                                .expression = &Expression{
+                                .expression = &.{
                                     .Infix = .{
-                                        .left = &Expression{ .Identifier = "foo" },
-                                        .right = &Expression{ .Integer = 1 },
+                                        .left = &.{ .Identifier = "foo" },
+                                        .right = &.{ .Integer = 1 },
                                         .operator = .Plus,
                                     },
                                 },
@@ -393,19 +391,19 @@ test "statements" {
             \\    print(i)
             \\}
             ,
-            .expected_statement = Statement{
+            .expected_statement = .{
                 .For = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Range = .{
-                            .start = &Expression{ .Integer = 0 },
-                            .end = &Expression{ .Integer = 5 },
+                            .start = &.{ .Integer = 0 },
+                            .end = &.{ .Integer = 5 },
                         },
                     },
                     .capture = "i",
                     .index = null,
-                    .body = try test_utils.list(Statement, arena.allocator(), &.{
-                        Statement{
-                            .Print = &Expression{ .Identifier = "i" },
+                    .body = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                        .{
+                            .Print = &.{ .Identifier = "i" },
                         },
                     }),
                 },
@@ -418,16 +416,16 @@ test "statements" {
             \\    print(i)
             \\}
             ,
-            .expected_statement = Statement{
+            .expected_statement = .{
                 .For = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Identifier = "foo",
                     },
                     .capture = "item",
                     .index = "i",
-                    .body = try test_utils.list(Statement, arena.allocator(), &.{
-                        Statement{
-                            .Print = &Expression{ .Identifier = "i" },
+                    .body = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                        .{
+                            .Print = &.{ .Identifier = "i" },
                         },
                     }),
                 },
@@ -455,7 +453,7 @@ test "statements" {
 const ExpressionTestCase = struct {
     description: []const u8,
     input: []const u8,
-    expected_expression: ?Expression = null,
+    expected_expression: ?ast.Expression = null,
     expect_error: bool = false,
 };
 
@@ -465,10 +463,10 @@ fn runExpressionTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) an
     if (test_case.expect_error) {
         try std.testing.expectError(error.ParserError, result);
     } else {
-        const ast = try result;
-        try std.testing.expectEqual(ast.items.len, 1);
-        try std.testing.expect(ast.items[0] == .Expression);
-        try expectExpression(test_case.expected_expression.?, ast.items[0].Expression.*);
+        const program = try result;
+        try std.testing.expectEqual(program.items.len, 1);
+        try std.testing.expect(program.items[0] == .Expression);
+        try expectExpression(test_case.expected_expression.?, program.items[0].Expression.*);
     }
 }
 
@@ -479,42 +477,42 @@ test "expressions" {
             .input =
             \\foo
             ,
-            .expected_expression = Expression{ .Identifier = "foo" },
+            .expected_expression = .{ .Identifier = "foo" },
         },
         .{
             .description = "should parse string literal",
             .input =
             \\"foo"
             ,
-            .expected_expression = Expression{ .String = "foo" },
+            .expected_expression = .{ .String = "foo" },
         },
         .{
             .description = "should parse integer literal",
             .input =
             \\666
             ,
-            .expected_expression = Expression{ .Integer = 666 },
+            .expected_expression = .{ .Integer = 666 },
         },
         .{
             .description = "should parse float literal",
             .input =
             \\3.1415
             ,
-            .expected_expression = Expression{ .Float = 3.1415 },
+            .expected_expression = .{ .Float = 3.1415 },
         },
         .{
             .description = "should parse true",
             .input =
             \\true
             ,
-            .expected_expression = Expression{ .Boolean = true },
+            .expected_expression = .{ .Boolean = true },
         },
         .{
             .description = "should parse false",
             .input =
             \\false
             ,
-            .expected_expression = Expression{ .Boolean = false },
+            .expected_expression = .{ .Boolean = false },
         },
     };
 
@@ -531,9 +529,9 @@ test "prefix expressions" {
         .{
             .description = "should parse bang operator with true",
             .input = "!true",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Prefix = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Boolean = true,
                     },
                     .operator = .Bang,
@@ -543,9 +541,9 @@ test "prefix expressions" {
         .{
             .description = "should parse bang operator with false",
             .input = "!false",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Prefix = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Boolean = false,
                     },
                     .operator = .Bang,
@@ -555,9 +553,9 @@ test "prefix expressions" {
         .{
             .description = "should parse tilde operator with false",
             .input = "~false",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Prefix = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Boolean = false,
                     },
                     .operator = .Tilde,
@@ -567,9 +565,9 @@ test "prefix expressions" {
         .{
             .description = "should parse plus operator with integer",
             .input = "+5",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Prefix = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Integer = 5,
                     },
                     .operator = .Plus,
@@ -579,9 +577,9 @@ test "prefix expressions" {
         .{
             .description = "should parse minus operator with integer",
             .input = "-2",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Prefix = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Integer = 2,
                     },
                     .operator = .Minus,
@@ -591,9 +589,9 @@ test "prefix expressions" {
         .{
             .description = "should parse tilde operator with integer",
             .input = "~5",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Prefix = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Integer = 5,
                     },
                     .operator = .Tilde,
@@ -603,9 +601,9 @@ test "prefix expressions" {
         .{
             .description = "should parse plus operator with float",
             .input = "+5.41",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Prefix = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Float = 5.41,
                     },
                     .operator = .Plus,
@@ -615,9 +613,9 @@ test "prefix expressions" {
         .{
             .description = "should parse minus operator with float",
             .input = "-2.1234",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Prefix = .{
-                    .expression = &Expression{
+                    .expression = &.{
                         .Float = 2.1234,
                     },
                     .operator = .Minus,
@@ -639,10 +637,10 @@ test "infix expression" {
         .{
             .description = "should parse integer addition",
             .input = "1 + 1",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 1 },
-                    .right = &Expression{ .Integer = 1 },
+                    .left = &.{ .Integer = 1 },
+                    .right = &.{ .Integer = 1 },
                     .operator = .Plus,
                 },
             },
@@ -650,10 +648,10 @@ test "infix expression" {
         .{
             .description = "should parse float addition",
             .input = "1.1 + 1.35",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Float = 1.1 },
-                    .right = &Expression{ .Float = 1.35 },
+                    .left = &.{ .Float = 1.1 },
+                    .right = &.{ .Float = 1.35 },
                     .operator = .Plus,
                 },
             },
@@ -661,10 +659,10 @@ test "infix expression" {
         .{
             .description = "should parse integer subtraction",
             .input = "40 - 22",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 40 },
-                    .right = &Expression{ .Integer = 22 },
+                    .left = &.{ .Integer = 40 },
+                    .right = &.{ .Integer = 22 },
                     .operator = .Minus,
                 },
             },
@@ -672,10 +670,10 @@ test "infix expression" {
         .{
             .description = "should parse float subtraction",
             .input = "40.54 - 22.33",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Float = 40.54 },
-                    .right = &Expression{ .Float = 22.33 },
+                    .left = &.{ .Float = 40.54 },
+                    .right = &.{ .Float = 22.33 },
                     .operator = .Minus,
                 },
             },
@@ -683,10 +681,10 @@ test "infix expression" {
         .{
             .description = "should parse integer multiplication",
             .input = "5 * 66",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 5 },
-                    .right = &Expression{ .Integer = 66 },
+                    .left = &.{ .Integer = 5 },
+                    .right = &.{ .Integer = 66 },
                     .operator = .Asterisk,
                 },
             },
@@ -694,10 +692,10 @@ test "infix expression" {
         .{
             .description = "should parse integer mod",
             .input = "33 % 2",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 33 },
-                    .right = &Expression{ .Integer = 2 },
+                    .left = &.{ .Integer = 33 },
+                    .right = &.{ .Integer = 2 },
                     .operator = .Percent,
                 },
             },
@@ -705,20 +703,20 @@ test "infix expression" {
         .{
             .description = "should preserve order of operations without parens",
             .input = "3 * 4 / 3",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{
+                    .left = &.{
                         .Infix = .{
-                            .left = &Expression{
+                            .left = &.{
                                 .Integer = 3,
                             },
-                            .right = &Expression{
+                            .right = &.{
                                 .Integer = 4,
                             },
                             .operator = .Asterisk,
                         },
                     },
-                    .right = &Expression{ .Integer = 3 },
+                    .right = &.{ .Integer = 3 },
                     .operator = .Slash,
                 },
             },
@@ -726,20 +724,20 @@ test "infix expression" {
         .{
             .description = "should respect parentheses in first pos",
             .input = "(3 * 4) / 3",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{
+                    .left = &.{
                         .Infix = .{
-                            .left = &Expression{
+                            .left = &.{
                                 .Integer = 3,
                             },
-                            .right = &Expression{
+                            .right = &.{
                                 .Integer = 4,
                             },
                             .operator = .Asterisk,
                         },
                     },
-                    .right = &Expression{ .Integer = 3 },
+                    .right = &.{ .Integer = 3 },
                     .operator = .Slash,
                 },
             },
@@ -747,15 +745,15 @@ test "infix expression" {
         .{
             .description = "should respect parentheses in second pos",
             .input = "3 * (4 / 3)",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 3 },
-                    .right = &Expression{
+                    .left = &.{ .Integer = 3 },
+                    .right = &.{
                         .Infix = .{
-                            .left = &Expression{
+                            .left = &.{
                                 .Integer = 4,
                             },
-                            .right = &Expression{
+                            .right = &.{
                                 .Integer = 3,
                             },
                             .operator = .Slash,
@@ -768,10 +766,10 @@ test "infix expression" {
         .{
             .description = "should parse float multiplication",
             .input = "5.3 * 66.5",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Float = 5.3 },
-                    .right = &Expression{ .Float = 66.5 },
+                    .left = &.{ .Float = 5.3 },
+                    .right = &.{ .Float = 66.5 },
                     .operator = .Asterisk,
                 },
             },
@@ -779,10 +777,10 @@ test "infix expression" {
         .{
             .description = "should parse float mod",
             .input = "1.1 % 5.3",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Float = 1.1 },
-                    .right = &Expression{ .Float = 5.3 },
+                    .left = &.{ .Float = 1.1 },
+                    .right = &.{ .Float = 5.3 },
                     .operator = .Percent,
                 },
             },
@@ -790,10 +788,10 @@ test "infix expression" {
         .{
             .description = "should parse integer division",
             .input = "6 / 2",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 6 },
-                    .right = &Expression{ .Integer = 2 },
+                    .left = &.{ .Integer = 6 },
+                    .right = &.{ .Integer = 2 },
                     .operator = .Slash,
                 },
             },
@@ -801,10 +799,10 @@ test "infix expression" {
         .{
             .description = "should parse float division",
             .input = "6.55 / 2.413",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Float = 6.55 },
-                    .right = &Expression{ .Float = 2.413 },
+                    .left = &.{ .Float = 6.55 },
+                    .right = &.{ .Float = 2.413 },
                     .operator = .Slash,
                 },
             },
@@ -812,10 +810,10 @@ test "infix expression" {
         .{
             .description = "should parse integer less than",
             .input = "1 < 5",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 1 },
-                    .right = &Expression{ .Integer = 5 },
+                    .left = &.{ .Integer = 1 },
+                    .right = &.{ .Integer = 5 },
                     .operator = .Lt,
                 },
             },
@@ -823,10 +821,10 @@ test "infix expression" {
         .{
             .description = "should parse integer less than or equal",
             .input = "1 <= 5",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 1 },
-                    .right = &Expression{ .Integer = 5 },
+                    .left = &.{ .Integer = 1 },
+                    .right = &.{ .Integer = 5 },
                     .operator = .LtOrEq,
                 },
             },
@@ -834,10 +832,10 @@ test "infix expression" {
         .{
             .description = "should parse integer greater than",
             .input = "1 > 5",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 1 },
-                    .right = &Expression{ .Integer = 5 },
+                    .left = &.{ .Integer = 1 },
+                    .right = &.{ .Integer = 5 },
                     .operator = .Gt,
                 },
             },
@@ -845,10 +843,10 @@ test "infix expression" {
         .{
             .description = "should parse integer greater than or equal",
             .input = "1 >= 5",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 1 },
-                    .right = &Expression{ .Integer = 5 },
+                    .left = &.{ .Integer = 1 },
+                    .right = &.{ .Integer = 5 },
                     .operator = .GtOrEq,
                 },
             },
@@ -856,10 +854,10 @@ test "infix expression" {
         .{
             .description = "should parse integer equals",
             .input = "3 == 3",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 3 },
-                    .right = &Expression{ .Integer = 3 },
+                    .left = &.{ .Integer = 3 },
+                    .right = &.{ .Integer = 3 },
                     .operator = .Eq,
                 },
             },
@@ -867,10 +865,10 @@ test "infix expression" {
         .{
             .description = "should parse integer does not equal",
             .input = "3 != 3",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 3 },
-                    .right = &Expression{ .Integer = 3 },
+                    .left = &.{ .Integer = 3 },
+                    .right = &.{ .Integer = 3 },
                     .operator = .NotEq,
                 },
             },
@@ -878,10 +876,10 @@ test "infix expression" {
         .{
             .description = "should parse integer bitwise or",
             .input = "3 | 3",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 3 },
-                    .right = &Expression{ .Integer = 3 },
+                    .left = &.{ .Integer = 3 },
+                    .right = &.{ .Integer = 3 },
                     .operator = .Pipe,
                 },
             },
@@ -889,10 +887,10 @@ test "infix expression" {
         .{
             .description = "should parse integer bitwise and",
             .input = "3 & 3",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 3 },
-                    .right = &Expression{ .Integer = 3 },
+                    .left = &.{ .Integer = 3 },
+                    .right = &.{ .Integer = 3 },
                     .operator = .Ampersand,
                 },
             },
@@ -900,10 +898,10 @@ test "infix expression" {
         .{
             .description = "should parse integer bitwise xor",
             .input = "3 ^ 3",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 3 },
-                    .right = &Expression{ .Integer = 3 },
+                    .left = &.{ .Integer = 3 },
+                    .right = &.{ .Integer = 3 },
                     .operator = .Caret,
                 },
             },
@@ -911,10 +909,10 @@ test "infix expression" {
         .{
             .description = "should parse integer shift left",
             .input = "3 << 3",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 3 },
-                    .right = &Expression{ .Integer = 3 },
+                    .left = &.{ .Integer = 3 },
+                    .right = &.{ .Integer = 3 },
                     .operator = .LeftShift,
                 },
             },
@@ -922,10 +920,10 @@ test "infix expression" {
         .{
             .description = "should parse integer shift right",
             .input = "3 >> 3",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Integer = 3 },
-                    .right = &Expression{ .Integer = 3 },
+                    .left = &.{ .Integer = 3 },
+                    .right = &.{ .Integer = 3 },
                     .operator = .RightShift,
                 },
             },
@@ -933,10 +931,10 @@ test "infix expression" {
         .{
             .description = "should parse boolean equals",
             .input = "true == false",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Boolean = true },
-                    .right = &Expression{ .Boolean = false },
+                    .left = &.{ .Boolean = true },
+                    .right = &.{ .Boolean = false },
                     .operator = .Eq,
                 },
             },
@@ -944,10 +942,10 @@ test "infix expression" {
         .{
             .description = "should parse boolean does not equal",
             .input = "true != false",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Boolean = true },
-                    .right = &Expression{ .Boolean = false },
+                    .left = &.{ .Boolean = true },
+                    .right = &.{ .Boolean = false },
                     .operator = .NotEq,
                 },
             },
@@ -955,10 +953,10 @@ test "infix expression" {
         .{
             .description = "should parse boolean logical or",
             .input = "true or false",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Boolean = true },
-                    .right = &Expression{ .Boolean = false },
+                    .left = &.{ .Boolean = true },
+                    .right = &.{ .Boolean = false },
                     .operator = .Or,
                 },
             },
@@ -966,10 +964,10 @@ test "infix expression" {
         .{
             .description = "should parse boolean logical and",
             .input = "true and false",
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Infix = .{
-                    .left = &Expression{ .Boolean = true },
-                    .right = &Expression{ .Boolean = false },
+                    .left = &.{ .Boolean = true },
+                    .right = &.{ .Boolean = false },
                     .operator = .And,
                 },
             },
@@ -991,12 +989,12 @@ test "range expression" {
             .input =
             \\0..10
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Range = .{
-                    .start = &Expression{
+                    .start = &.{
                         .Integer = 0,
                     },
-                    .end = &Expression{
+                    .end = &.{
                         .Integer = 10,
                     },
                 },
@@ -1007,26 +1005,26 @@ test "range expression" {
             .input =
             \\2 + 3..50 - 10
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Range = .{
-                    .start = &Expression{
+                    .start = &.{
                         .Infix = .{
                             .operator = .Plus,
-                            .left = &Expression{
+                            .left = &.{
                                 .Integer = 2,
                             },
-                            .right = &Expression{
+                            .right = &.{
                                 .Integer = 3,
                             },
                         },
                     },
-                    .end = &Expression{
+                    .end = &.{
                         .Infix = .{
                             .operator = .Minus,
-                            .left = &Expression{
+                            .left = &.{
                                 .Integer = 50,
                             },
-                            .right = &Expression{
+                            .right = &.{
                                 .Integer = 10,
                             },
                         },
@@ -1039,20 +1037,20 @@ test "range expression" {
             .input =
             \\start()..end()
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Range = .{
-                    .start = &Expression{
+                    .start = &.{
                         .Call = .{
                             .args = .{},
-                            .function = &Expression{
+                            .function = &.{
                                 .Identifier = "start",
                             },
                         },
                     },
-                    .end = &Expression{
+                    .end = &.{
                         .Call = .{
                             .args = .{},
-                            .function = &Expression{
+                            .function = &.{
                                 .Identifier = "end",
                             },
                         },
@@ -1080,7 +1078,7 @@ test "list literal" {
             .input =
             \\List{}
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .List = .{},
             },
         },
@@ -1091,7 +1089,7 @@ test "list literal" {
             \\
             \\}
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .List = .{},
             },
         },
@@ -1100,10 +1098,10 @@ test "list literal" {
             .input =
             \\List{1, 2}
             ,
-            .expected_expression = Expression{
-                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
-                    &Expression{ .Integer = 1 },
-                    &Expression{ .Integer = 2 },
+            .expected_expression = .{
+                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
+                    &.{ .Integer = 1 },
+                    &.{ .Integer = 2 },
                 }),
             },
         },
@@ -1112,10 +1110,10 @@ test "list literal" {
             .input =
             \\List{1, 2,}
             ,
-            .expected_expression = Expression{
-                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
-                    &Expression{ .Integer = 1 },
-                    &Expression{ .Integer = 2 },
+            .expected_expression = .{
+                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
+                    &.{ .Integer = 1 },
+                    &.{ .Integer = 2 },
                 }),
             },
         },
@@ -1127,10 +1125,10 @@ test "list literal" {
             \\    2
             \\}
             ,
-            .expected_expression = Expression{
-                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
-                    &Expression{ .Integer = 1 },
-                    &Expression{ .Integer = 2 },
+            .expected_expression = .{
+                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
+                    &.{ .Integer = 1 },
+                    &.{ .Integer = 2 },
                 }),
             },
         },
@@ -1142,10 +1140,10 @@ test "list literal" {
             \\    2,
             \\}
             ,
-            .expected_expression = Expression{
-                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
-                    &Expression{ .Integer = 1 },
-                    &Expression{ .Integer = 2 },
+            .expected_expression = .{
+                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
+                    &.{ .Integer = 1 },
+                    &.{ .Integer = 2 },
                 }),
             },
         },
@@ -1160,10 +1158,10 @@ test "list literal" {
             \\
             \\}
             ,
-            .expected_expression = Expression{
-                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
-                    &Expression{ .Integer = 1 },
-                    &Expression{ .Integer = 2 },
+            .expected_expression = .{
+                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
+                    &.{ .Integer = 1 },
+                    &.{ .Integer = 2 },
                 }),
             },
         },
@@ -1178,10 +1176,10 @@ test "list literal" {
             \\
             \\}
             ,
-            .expected_expression = Expression{
-                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
-                    &Expression{ .Integer = 1 },
-                    &Expression{ .Integer = 2 },
+            .expected_expression = .{
+                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
+                    &.{ .Integer = 1 },
+                    &.{ .Integer = 2 },
                 }),
             },
         },
@@ -1193,10 +1191,10 @@ test "list literal" {
             \\    2,
             \\}
             ,
-            .expected_expression = Expression{
-                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
-                    &Expression{ .Integer = 1 },
-                    &Expression{ .Integer = 2 },
+            .expected_expression = .{
+                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
+                    &.{ .Integer = 1 },
+                    &.{ .Integer = 2 },
                 }),
             },
         },
@@ -1232,22 +1230,22 @@ test "list literal" {
             \\    List{3, 4},
             \\}
             ,
-            .expected_expression = Expression{
-                .List = try test_utils.list(*const Expression, arena.allocator(), &.{
-                    &Expression{ .List = try test_utils.list(
-                        *const Expression,
+            .expected_expression = .{
+                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
+                    &.{ .List = try test_utils.list(
+                        *const ast.Expression,
                         arena.allocator(),
                         &.{
-                            &Expression{ .Integer = 1 },
-                            &Expression{ .Integer = 2 },
+                            &.{ .Integer = 1 },
+                            &.{ .Integer = 2 },
                         },
                     ) },
-                    &Expression{ .List = try test_utils.list(
-                        *const Expression,
+                    &.{ .List = try test_utils.list(
+                        *const ast.Expression,
                         arena.allocator(),
                         &.{
-                            &Expression{ .Integer = 3 },
-                            &Expression{ .Integer = 4 },
+                            &.{ .Integer = 3 },
+                            &.{ .Integer = 4 },
                         },
                     ) },
                 }),
@@ -1273,7 +1271,7 @@ test "table literal" {
             .input =
             \\Table{}
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Table = .{},
             },
         },
@@ -1284,7 +1282,7 @@ test "table literal" {
             \\
             \\}
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Table = .{},
             },
         },
@@ -1293,10 +1291,10 @@ test "table literal" {
             .input =
             \\Table{"a" = 1, "b" = 2}
             ,
-            .expected_expression = Expression{
-                .Table = try test_utils.list(parser.TablePair, arena.allocator(), &.{
-                    .{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
-                    .{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+            .expected_expression = .{
+                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
+                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
+                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
                 }),
             },
         },
@@ -1305,10 +1303,10 @@ test "table literal" {
             .input =
             \\Table{"a" = 1, "b" = 2,}
             ,
-            .expected_expression = Expression{
-                .Table = try test_utils.list(parser.TablePair, arena.allocator(), &.{
-                    .{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
-                    .{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+            .expected_expression = .{
+                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
+                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
+                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
                 }),
             },
         },
@@ -1320,10 +1318,10 @@ test "table literal" {
             \\    "b" = 2
             \\}
             ,
-            .expected_expression = Expression{
-                .Table = try test_utils.list(parser.TablePair, arena.allocator(), &.{
-                    .{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
-                    .{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+            .expected_expression = .{
+                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
+                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
+                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
                 }),
             },
         },
@@ -1335,10 +1333,10 @@ test "table literal" {
             \\    "b" = 2,
             \\}
             ,
-            .expected_expression = Expression{
-                .Table = try test_utils.list(parser.TablePair, arena.allocator(), &.{
-                    .{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
-                    .{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+            .expected_expression = .{
+                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
+                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
+                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
                 }),
             },
         },
@@ -1353,10 +1351,10 @@ test "table literal" {
             \\
             \\}
             ,
-            .expected_expression = Expression{
-                .Table = try test_utils.list(parser.TablePair, arena.allocator(), &.{
-                    .{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
-                    .{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+            .expected_expression = .{
+                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
+                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
+                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
                 }),
             },
         },
@@ -1371,10 +1369,10 @@ test "table literal" {
             \\
             \\}
             ,
-            .expected_expression = Expression{
-                .Table = try test_utils.list(parser.TablePair, arena.allocator(), &.{
-                    .{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
-                    .{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+            .expected_expression = .{
+                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
+                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
+                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
                 }),
             },
         },
@@ -1410,30 +1408,30 @@ test "table literal" {
             \\    "b" = Table{"a" = 3, "b" = 4},
             \\}
             ,
-            .expected_expression = Expression{
-                .Table = try test_utils.list(parser.TablePair, arena.allocator(), &.{
+            .expected_expression = .{
+                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
                     .{
-                        .key = &Expression{ .String = "a" },
-                        .value = &Expression{
+                        .key = &.{ .String = "a" },
+                        .value = &.{
                             .Table = try test_utils.list(
-                                parser.TablePair,
+                                ast.TablePair,
                                 arena.allocator(),
                                 &.{
-                                    .{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 1 } },
-                                    .{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 2 } },
+                                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
+                                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
                                 },
                             ),
                         },
                     },
                     .{
-                        .key = &Expression{ .String = "b" },
-                        .value = &Expression{
+                        .key = &.{ .String = "b" },
+                        .value = &.{
                             .Table = try test_utils.list(
-                                parser.TablePair,
+                                ast.TablePair,
                                 arena.allocator(),
                                 &.{
-                                    .{ .key = &Expression{ .String = "a" }, .value = &Expression{ .Integer = 3 } },
-                                    .{ .key = &Expression{ .String = "b" }, .value = &Expression{ .Integer = 4 } },
+                                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 3 } },
+                                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 4 } },
                                 },
                             ),
                         },
@@ -1461,9 +1459,9 @@ test "function call" {
             .input =
             \\test()
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Call = .{
-                    .function = &Expression{
+                    .function = &.{
                         .Identifier = "test",
                     },
                     .args = .{},
@@ -1475,14 +1473,14 @@ test "function call" {
             .input =
             \\test(1, 2)
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Call = .{
-                    .function = &Expression{
+                    .function = &.{
                         .Identifier = "test",
                     },
-                    .args = try test_utils.list(parser.FunctionArg, arena.allocator(), &.{
-                        .{ .Positional = &Expression{ .Integer = 1 } },
-                        .{ .Positional = &Expression{ .Integer = 2 } },
+                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
+                        .{ .Positional = &.{ .Integer = 1 } },
+                        .{ .Positional = &.{ .Integer = 2 } },
                     }),
                 },
             },
@@ -1492,14 +1490,14 @@ test "function call" {
             .input =
             \\test(1, 2,)
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Call = .{
-                    .function = &Expression{
+                    .function = &.{
                         .Identifier = "test",
                     },
-                    .args = try test_utils.list(parser.FunctionArg, arena.allocator(), &.{
-                        .{ .Positional = &Expression{ .Integer = 1 } },
-                        .{ .Positional = &Expression{ .Integer = 2 } },
+                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
+                        .{ .Positional = &.{ .Integer = 1 } },
+                        .{ .Positional = &.{ .Integer = 2 } },
                     }),
                 },
             },
@@ -1512,14 +1510,14 @@ test "function call" {
             \\    2
             \\)
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Call = .{
-                    .function = &Expression{
+                    .function = &.{
                         .Identifier = "test",
                     },
-                    .args = try test_utils.list(parser.FunctionArg, arena.allocator(), &.{
-                        .{ .Positional = &Expression{ .Integer = 1 } },
-                        .{ .Positional = &Expression{ .Integer = 2 } },
+                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
+                        .{ .Positional = &.{ .Integer = 1 } },
+                        .{ .Positional = &.{ .Integer = 2 } },
                     }),
                 },
             },
@@ -1532,14 +1530,14 @@ test "function call" {
             \\    2,
             \\)
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Call = .{
-                    .function = &Expression{
+                    .function = &.{
                         .Identifier = "test",
                     },
-                    .args = try test_utils.list(parser.FunctionArg, arena.allocator(), &.{
-                        .{ .Positional = &Expression{ .Integer = 1 } },
-                        .{ .Positional = &Expression{ .Integer = 2 } },
+                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
+                        .{ .Positional = &.{ .Integer = 1 } },
+                        .{ .Positional = &.{ .Integer = 2 } },
                     }),
                 },
             },
@@ -1553,15 +1551,15 @@ test "function call" {
             \\    b=3,
             \\)
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Call = .{
-                    .function = &Expression{
+                    .function = &.{
                         .Identifier = "test",
                     },
-                    .args = try test_utils.list(parser.FunctionArg, arena.allocator(), &.{
-                        .{ .Positional = &Expression{ .Integer = 1 } },
-                        .{ .Named = .{ .name = "c", .value = &Expression{ .Integer = 2 } } },
-                        .{ .Named = .{ .name = "b", .value = &Expression{ .Integer = 3 } } },
+                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
+                        .{ .Positional = &.{ .Integer = 1 } },
+                        .{ .Named = .{ .name = "c", .value = &.{ .Integer = 2 } } },
+                        .{ .Named = .{ .name = "b", .value = &.{ .Integer = 3 } } },
                     }),
                 },
             },
@@ -1588,7 +1586,7 @@ test "function literal" {
             \\
             \\}
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Function = .{ .params = .{}, .body = .{ .Block = .{} } },
             },
         },
@@ -1599,20 +1597,20 @@ test "function literal" {
             \\    return a + b
             \\}
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Function = .{
-                    .params = try test_utils.list(parser.FunctionParam, arena.allocator(), &.{
+                    .params = try test_utils.list(ast.FunctionParam, arena.allocator(), &.{
                         .{ .Positional = "a" },
                         .{ .Positional = "b" },
                     }),
                     .body = .{
-                        .Block = try test_utils.list(Statement, arena.allocator(), &.{
+                        .Block = try test_utils.list(ast.Statement, arena.allocator(), &.{
                             .{
-                                .Return = &Expression{
+                                .Return = &.{
                                     .Infix = .{
-                                        .left = &Expression{ .Identifier = "a" },
+                                        .left = &.{ .Identifier = "a" },
                                         .operator = .Plus,
-                                        .right = &Expression{ .Identifier = "b" },
+                                        .right = &.{ .Identifier = "b" },
                                     },
                                 },
                             },
@@ -1626,18 +1624,18 @@ test "function literal" {
             .input =
             \\fn(a, b) a + b
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Function = .{
-                    .params = try test_utils.list(parser.FunctionParam, arena.allocator(), &.{
+                    .params = try test_utils.list(ast.FunctionParam, arena.allocator(), &.{
                         .{ .Positional = "a" },
                         .{ .Positional = "b" },
                     }),
                     .body = .{
-                        .Expression = &Expression{
+                        .Expression = &.{
                             .Infix = .{
-                                .left = &Expression{ .Identifier = "a" },
+                                .left = &.{ .Identifier = "a" },
                                 .operator = .Plus,
-                                .right = &Expression{ .Identifier = "b" },
+                                .right = &.{ .Identifier = "b" },
                             },
                         },
                     },
@@ -1649,18 +1647,18 @@ test "function literal" {
             .input =
             \\fn(a = 11, b = 12) a + b
             ,
-            .expected_expression = Expression{
+            .expected_expression = .{
                 .Function = .{
-                    .params = try test_utils.list(parser.FunctionParam, arena.allocator(), &.{
-                        .{ .Default = .{ .name = "a", .value = &Expression{ .Integer = 11 } } },
-                        .{ .Default = .{ .name = "b", .value = &Expression{ .Integer = 12 } } },
+                    .params = try test_utils.list(ast.FunctionParam, arena.allocator(), &.{
+                        .{ .Default = .{ .name = "a", .value = &.{ .Integer = 11 } } },
+                        .{ .Default = .{ .name = "b", .value = &.{ .Integer = 12 } } },
                     }),
                     .body = .{
-                        .Expression = &Expression{
+                        .Expression = &.{
                             .Infix = .{
-                                .left = &Expression{ .Identifier = "a" },
+                                .left = &.{ .Identifier = "a" },
                                 .operator = .Plus,
-                                .right = &Expression{ .Identifier = "b" },
+                                .right = &.{ .Identifier = "b" },
                             },
                         },
                     },
@@ -1759,7 +1757,7 @@ test "match expression" {
                 .Match = .{
                     .target = &.{ .Identifier = "foo" },
                     .body = .{
-                        .Multiple = try test_utils.list(parser.MatchArm, arena.allocator(), &.{
+                        .Multiple = try test_utils.list(ast.MatchArm, arena.allocator(), &.{
                             .{
                                 .pattern = &.{ .Integer = 1 },
                                 .body = .{ .Print = &.{ .String = "a" } },
@@ -1791,7 +1789,7 @@ test "parse program" {
     const ProgramTestCase = struct {
         description: []const u8,
         input: []const u8,
-        expected: parser.Program,
+        expected: ast.Program,
     };
 
     const run = struct {
@@ -1824,17 +1822,17 @@ test "parse program" {
             \\
             \\print(fib(30))
             ,
-            .expected = try test_utils.list(Statement, arena.allocator(), &.{
+            .expected = try test_utils.list(ast.Statement, arena.allocator(), &.{
                 .{
                     .VarDeclaration = .{
                         .name = "fib",
                         .expression = &.{
                             .Function = .{
-                                .params = try test_utils.list(parser.FunctionParam, arena.allocator(), &.{
+                                .params = try test_utils.list(ast.FunctionParam, arena.allocator(), &.{
                                     .{ .Positional = "n" },
                                 }),
                                 .body = .{
-                                    .Block = try test_utils.list(Statement, arena.allocator(), &.{
+                                    .Block = try test_utils.list(ast.Statement, arena.allocator(), &.{
                                         .{
                                             .VarDeclaration = .{
                                                 .name = "a",
@@ -1857,7 +1855,7 @@ test "parse program" {
                                                 },
                                                 .capture = "_",
                                                 .index = null,
-                                                .body = try test_utils.list(Statement, arena.allocator(), &.{
+                                                .body = try test_utils.list(ast.Statement, arena.allocator(), &.{
                                                     .{
                                                         .VarDeclaration = .{
                                                             .name = "tmp",
@@ -1904,7 +1902,7 @@ test "parse program" {
                     .Print = &.{
                         .Call = .{
                             .function = &.{ .Identifier = "fib" },
-                            .args = try test_utils.list(parser.FunctionArg, arena.allocator(), &.{
+                            .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
                                 .{
                                     .Positional = &.{ .Integer = 30 },
                                 },
