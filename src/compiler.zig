@@ -421,8 +421,8 @@ pub const Compiler = struct {
                 self.markInitialized();
 
                 const loop_start = self.currentChunk().code.items.len;
-
                 const exit_jump = try self.emitJump(.JumpIfGreaterOrEq);
+                const local_count = self.local_count;
 
                 for (val.body.items) |item| {
                     try self.compileStatement(item);
@@ -434,11 +434,22 @@ pub const Compiler = struct {
                 try self.emitOpCode(.Add);
                 try self.emitOpCode(.SetLocal);
                 try self.emitU24(increment_var_index);
-                try self.emitOpCode(.Pop);
+
+                var i = self.local_count;
+                while (i > local_count) {
+                    try self.emitOpCode(.Pop);
+                    i -= 1;
+                }
 
                 try self.emitLoop(loop_start);
 
                 try self.patchJump(exit_jump);
+
+                // we already popped the locals on the last iteration and now
+                // need to reduce the local array accordingly
+                while (self.local_count > local_count) {
+                    self.local_count -= 1;
+                }
 
                 try self.endScope();
             },
