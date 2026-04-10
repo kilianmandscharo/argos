@@ -72,6 +72,7 @@ pub const Compiler = struct {
         func_type: FunctionType,
         enclosing: ?*Compiler,
         indent: usize,
+        name: ?[]const u8,
     ) !void {
         self.gpa = gpa;
         self.vm = vm;
@@ -89,6 +90,11 @@ pub const Compiler = struct {
         vm.current_compiler = self;
 
         self.function = try object.allocateFunction(vm);
+
+        if (name) |func_name| {
+            const obj = try object.copyString(vm, func_name);
+            self.function.?.name = obj.asString();
+        }
 
         const local = &self.locals[self.local_count];
         self.local_count += 1;
@@ -398,7 +404,9 @@ pub const Compiler = struct {
                         // TODO: this can be a list or a table
                         try self.compileExpression(index.left);
                         try self.compileExpression(index.index);
+                        try self.compileExpression(val.expression);
                         try self.emitOpCode(.ListSet);
+                        try self.emitOpCode(.Pop);
                     },
                 }
             },
@@ -570,6 +578,7 @@ pub const Compiler = struct {
                     .Function,
                     self,
                     self.indent,
+                    val.name,
                 );
 
                 new_compiler.vm.current_compiler = &new_compiler;
@@ -582,8 +591,8 @@ pub const Compiler = struct {
                             if (new_compiler.function.?.arity > 255) {
                                 return errorAt("Can't have more than 255 parameters.");
                             }
-                            try self.declareVariable(name);
-                            const constant = if (self.scope_depth > 0) 0 else try self.identifierConstant(name);
+                            try new_compiler.declareVariable(name);
+                            const constant = if (new_compiler.scope_depth > 0) 0 else try new_compiler.identifierConstant(name);
                             try new_compiler.defineVariable(constant);
                         },
                         .Default => unreachable,
@@ -617,6 +626,7 @@ pub const Compiler = struct {
                 if (count == 255) {
                     return errorAt("Can't have more than 255 arguments");
                 }
+                try self.compileExpression(val.function);
                 for (val.args.items) |arg| {
                     switch (arg) {
                         .Positional => |positional| try self.compileExpression(positional),

@@ -146,7 +146,7 @@ pub const VirtualMachine = struct {
         const ast = try parser.createAst(arena.allocator(), source);
 
         var c: compiler.Compiler = undefined;
-        try compiler.Compiler.init(&c, self, self.gpa, .Script, null, 0);
+        try compiler.Compiler.init(&c, self, self.gpa, .Script, null, 0, null);
         logDebug("Pre-compilation finished.", .{});
 
         self.current_compiler = &c;
@@ -472,12 +472,8 @@ pub const VirtualMachine = struct {
                     const val = self.pop();
                     const list = val.asObj().asList();
                     const count = self.readU24();
-                    // TODO: iterating twice is not ideal
-                    for (self.stack_top - count..self.stack_top) |i| {
-                        try list.data.append(self.gpa, self.stack[i]);
-                    }
                     for (0..count) |_| {
-                        _ = self.pop();
+                        try list.data.append(self.gpa, self.pop());
                     }
                     self.push(val);
                 },

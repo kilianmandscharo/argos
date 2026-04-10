@@ -16,7 +16,10 @@ pub const Parser = struct {
     scanner: *scanner.Scanner,
     arena: std.mem.Allocator,
     debug_indent: usize = 0,
-    ctx: struct { parse_loop_capture: bool },
+    ctx: struct {
+        parse_loop_capture: bool,
+        current_var_name: ?[]const u8,
+    },
 
     pub fn init(arena: std.mem.Allocator, s: *scanner.Scanner) !Parser {
         const current = try s.next();
@@ -28,7 +31,10 @@ pub const Parser = struct {
             .current = current,
             .previous = null,
             .arena = arena,
-            .ctx = .{ .parse_loop_capture = false },
+            .ctx = .{
+                .parse_loop_capture = false,
+                .current_var_name = null,
+            },
         };
     }
 
@@ -152,6 +158,7 @@ pub const Parser = struct {
         try self.consume(.Pipe, "Expect '|' after for loop capture.");
         self.ctx.parse_loop_capture = false;
 
+        // TODO: allow all statements here
         try self.consume(.LBrace, "Expect '{' after loop capture.");
         const body = try self.blockStatement();
 
@@ -204,9 +211,11 @@ pub const Parser = struct {
             return self.errorAtPrevious("Expect identifier after 'let'.");
         }
 
+        self.ctx.current_var_name = target.Identifier;
+        defer self.ctx.current_var_name = null;
+
         if (try self.match(.Assign)) {
             const value = try self.parseExpression();
-            try self.expectLineEnd();
             return .{
                 .VarDeclaration = .{
                     .name = target.Identifier,
@@ -463,10 +472,16 @@ fn parseFunction(parser: *Parser) !ast.Expression {
         .RParen,
     );
 
+    const name = parser.ctx.current_var_name;
+
     if (try parser.match(.LBrace)) {
         const body = try parser.blockStatement();
         return .{
-            .Function = .{ .params = params, .body = .{ .Block = body.Block } },
+            .Function = .{
+                .params = params,
+                .body = .{ .Block = body.Block },
+                .name = name,
+            },
         };
     }
 
@@ -475,6 +490,7 @@ fn parseFunction(parser: *Parser) !ast.Expression {
         .Function = .{
             .params = params,
             .body = .{ .Expression = body },
+            .name = name,
         },
     };
 }

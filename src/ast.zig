@@ -128,6 +128,7 @@ const Prefix = struct {
 const Function = struct {
     params: std.ArrayList(FunctionParam),
     body: FunctionBody,
+    name: ?[]const u8 = null,
 };
 
 const FunctionBody = union(enum) {

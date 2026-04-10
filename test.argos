@@ -1,2 +1,5 @@
-let foo = 5 + 6
-print(foo)
+let foo = fn() {
+    print("Hello, World!")
+}
+
+foo()

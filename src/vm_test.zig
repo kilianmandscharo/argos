@@ -528,126 +528,126 @@ test "vm tests" {
             \\assert(a == 3)
             ,
         },
-        // .{
-        //     .description = "function calls no return",
-        //     .source =
-        //     \\let foo = fn() {
-        //     \\    print("Hello, World!")
-        //     \\}
-        //     \\
-        //     \\let result = foo()
-        //     \\
-        //     \\assert(result == null)
-        //     ,
-        // },
-        // .{
-        //     .description = "function calls with return",
-        //     .source =
-        //     \\let foo = fn(a, b) {
-        //     \\    return a + b
-        //     \\}
-        //     \\
-        //     \\let result = foo(25, 11)
-        //     \\
-        //     \\assert result == 36
-        //     ,
-        // },
-        // .{
-        //     .description = "nested functions",
-        //     .source =
-        //     \\let foo = fn() {
-        //     \\    let bar = fn(a, b) {
-        //     \\        return a + b
-        //     \\    }
-        //     \\    return bar(2, 7)
-        //     \\}
-        //     \\
-        //     \\let result = foo()
-        //     \\
-        //     \\assert result == 9
-        //     ,
-        // },
-        // .{
-        //     .description = "closure",
-        //     .source =
-        //     \\let foo = fn() {
-        //     \\    let x = 2
-        //     \\    let bar = fn(a) {
-        //     \\        return a + x
-        //     \\    }
-        //     \\    return bar
-        //     \\}
-        //     \\
-        //     \\let func = foo()
-        //     \\let result = func(10)
-        //     \\
-        //     \\assert result == 12
-        //     ,
-        // },
-        // .{
-        //     .description = "deep closure",
-        //     .source =
-        //     \\let foo = fn() {
-        //     \\    let x = 1
-        //     \\    let bar = fn() {
-        //     \\        let y = 2
-        //     \\        let baz = fn() {
-        //     \\            let z = 3
-        //     \\            return x + y + z
-        //     \\        }
-        //     \\        return baz
-        //     \\    }
-        //     \\    return bar
-        //     \\}
-        //     \\
-        //     \\let bar = foo()
-        //     \\let baz = bar()
-        //     \\let result = baz()
-        //     \\
-        //     \\assert result == 6
-        //     ,
-        // },
-        // .{
-        //     .description = "string concatenation",
-        //     .source =
-        //     \\let foo = "foo"
-        //     \\let bar = "bar"
-        //     \\let result = foo + bar
-        //     \\
-        //     \\assert result == "foobar"
-        //     ,
-        // },
-        // .{
-        //     .description = "list index",
-        //     .source =
-        //     \\let foo = List{1, 2, 3, 4, 5}
-        //     \\let result = foo[0] + foo[-1]
-        //     \\
-        //     \\assert result == 6
-        //     ,
-        // },
-        // .{
-        //     .description = "list index assignment",
-        //     .source =
-        //     \\let foo = List{1, 2, 3, 4, 5}
-        //     \\foo[0] = 42
-        //     \\
-        //     \\assert foo[0] == 42
-        //     ,
-        // },
-        // .{
-        //     .description = "local list index assignment",
-        //     .source =
-        //     \\let foo = fn(index) {
-        //     \\    let l = List{1, 2, 3}
-        //     \\    return l[index]
-        //     \\}
-        //     \\
-        //     \\let result = foo(1)
-        //     \\
-        //     \\assert result == 2
-        //     ,
-        // },
+        .{
+            .description = "function calls no return",
+            .source =
+            \\let foo = fn() {
+            \\    print("Hello, World!")
+            \\}
+            \\
+            \\let result = foo()
+            \\
+            \\assert(result == null)
+            ,
+        },
+        .{
+            .description = "function calls with return",
+            .source =
+            \\let foo = fn(a, b) {
+            \\    return a + b
+            \\}
+            \\
+            \\let result = foo(25, 11)
+            \\
+            \\assert(result == 36)
+            ,
+        },
+        .{
+            .description = "nested functions",
+            .source =
+            \\let foo = fn() {
+            \\    let bar = fn(a, b) {
+            \\        return a + b
+            \\    }
+            \\    return bar(2, 7)
+            \\}
+            \\
+            \\let result = foo()
+            \\
+            \\assert(result == 9)
+            ,
+        },
+        .{
+            .description = "closure",
+            .source =
+            \\let foo = fn() {
+            \\    let x = 2
+            \\    let bar = fn(a) {
+            \\        return a + x
+            \\    }
+            \\    return bar
+            \\}
+            \\
+            \\let func = foo()
+            \\let result = func(10)
+            \\
+            \\assert(result == 12)
+            ,
+        },
+        .{
+            .description = "deep closure",
+            .source =
+            \\let foo = fn() {
+            \\    let x = 1
+            \\    let bar = fn() {
+            \\        let y = 2
+            \\        let baz = fn() {
+            \\            let z = 3
+            \\            return x + y + z
+            \\        }
+            \\        return baz
+            \\    }
+            \\    return bar
+            \\}
+            \\
+            \\let bar = foo()
+            \\let baz = bar()
+            \\let result = baz()
+            \\
+            \\assert(result == 6)
+            ,
+        },
+        .{
+            .description = "string concatenation",
+            .source =
+            \\let foo = "foo"
+            \\let bar = "bar"
+            \\let result = foo + bar
+            \\
+            \\assert(result == "foobar")
+            ,
+        },
+        .{
+            .description = "list index",
+            .source =
+            \\let foo = List{1, 2, 3, 4, 5}
+            \\let result = foo[0] + foo[-1]
+            \\
+            \\assert(result == 6)
+            ,
+        },
+        .{
+            .description = "list index assignment",
+            .source =
+            \\let foo = List{1, 2, 3, 4, 5}
+            \\foo[0] = 42
+            \\
+            \\assert(foo[0] == 42)
+            ,
+        },
+        .{
+            .description = "local list index assignment",
+            .source =
+            \\let foo = fn(index) {
+            \\    let l = List{1, 2, 3}
+            \\    return l[index]
+            \\}
+            \\
+            \\let result = foo(1)
+            \\
+            \\assert(result == 2)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate vm tests", &test_cases, run);

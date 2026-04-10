@@ -81,6 +81,11 @@ fn expectExpression(expected: ast.Expression, actual: ast.Expression) !void {
             try expectExpression(expr.right.*, actual.Infix.right.*);
         },
         .Function => |expr| {
+            if (expr.name) |name| {
+                try std.testing.expectEqualStrings(name, actual.Function.name.?);
+            } else {
+                try std.testing.expect(actual.Function.name == null);
+            }
             try std.testing.expectEqual(expr.params.items.len, actual.Function.params.items.len);
             for (0..expr.params.items.len) |i| {
                 const first = expr.params.items[i];
@@ -1828,6 +1833,7 @@ test "parse program" {
                         .name = "fib",
                         .expression = &.{
                             .Function = .{
+                                .name = "fib",
                                 .params = try test_utils.list(ast.FunctionParam, arena.allocator(), &.{
                                     .{ .Positional = "n" },
                                 }),
