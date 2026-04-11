@@ -23,7 +23,8 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
 }
 
 const CallFrame = struct {
-    closure: *object.ObjClosure,
+    function: *object.ObjFunction,
+    upvalues: ?[]?*object.ObjUpvalue,
     ip: usize,
     slot: usize,
 };
@@ -158,10 +159,7 @@ pub const VirtualMachine = struct {
 
         logDebug("Setting up global function...", .{});
         self.push(value.wrapObj(&function.obj));
-        const closure = try object.allocateClosure(self, function);
-        _ = self.pop();
-        self.push(value.wrapObj(&closure.obj));
-        try self.call(closure, 0);
+        try self.call(function, 0, null);
         logDebug("Global function set up.", .{});
 
         logDebug("Running byte code...", .{});
@@ -174,7 +172,7 @@ pub const VirtualMachine = struct {
     }
 
     pub inline fn readByte(self: *VirtualMachine) u8 {
-        const instruction = self.frame.closure.function.chunk.code.items[self.frame.ip];
+        const instruction = self.frame.function.chunk.code.items[self.frame.ip];
         self.frame.ip += 1;
         return instruction;
     }
@@ -185,7 +183,7 @@ pub const VirtualMachine = struct {
         var i: i32 = @as(i32, @intCast(self.frame_count)) - 1;
         while (i >= 0) : (i -= 1) {
             const frame = self.frames[@intCast(i)];
-            const function = frame.closure.function;
+            const function = frame.function;
             const instruction = frame.ip - 1;
             std.debug.print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
             if (function.name) |name| {
@@ -216,7 +214,7 @@ pub const VirtualMachine = struct {
     }
 
     fn readConstant(self: *VirtualMachine) value.Value {
-        return self.frame.closure.function.chunk.constants.items[self.readU24()];
+        return self.frame.function.chunk.constants.items[self.readU24()];
     }
 
     fn readString(self: *VirtualMachine) *object.ObjString {
@@ -236,7 +234,11 @@ pub const VirtualMachine = struct {
         switch (callee) {
             .Obj => |obj| {
                 switch (obj.type) {
-                    .Closure => try self.call(obj.asClosure(), argCount),
+                    .Closure => {
+                        const closure = obj.asClosure();
+                        try self.call(closure.function, argCount, closure.upvalues);
+                    },
+                    .Function => try self.call(obj.asFunction(), argCount, null),
                     .NativeFn => {
                         const native_fn = obj.asNative();
                         const start = self.stack_top - argCount;
@@ -282,16 +284,17 @@ pub const VirtualMachine = struct {
         }
     }
 
-    fn call(self: *VirtualMachine, closure: *object.ObjClosure, argCount: u8) !void {
-        if (argCount != closure.function.arity) {
-            return self.runtimeError("Expected {d} arguments but got {d}", .{ closure.function.arity, argCount });
+    fn call(self: *VirtualMachine, function: *object.ObjFunction, argCount: u8, upvalues: ?[]?*object.ObjUpvalue) !void {
+        if (argCount != function.arity) {
+            return self.runtimeError("Expected {d} arguments but got {d}", .{ function.arity, argCount });
         }
         if (self.frame_count == constants.frames_max) {
             return self.runtimeError("Stack overflow.", .{});
         }
         const frame = &self.frames[self.frame_count];
         self.frame_count += 1;
-        frame.closure = closure;
+        frame.function = function;
+        frame.upvalues = upvalues;
         frame.ip = 0;
         frame.slot = self.stack_top - argCount - 1;
     }
@@ -315,7 +318,7 @@ pub const VirtualMachine = struct {
                     std.debug.print("[ {f} ]", .{self.stack[index]});
                 }
                 std.debug.print("\n", .{});
-                _ = self.frame.closure.function.chunk.disassembleInstruction(self.frame.ip);
+                _ = self.frame.function.chunk.disassembleInstruction(self.frame.ip);
             }
             const instruction = self.readByte();
             switch (@as(chunk.OpCode, @enumFromInt(instruction))) {
@@ -452,17 +455,17 @@ pub const VirtualMachine = struct {
                             const slot = self.frame.slot + index;
                             closure.upvalues[i] = try self.captureUpvalue(&self.stack[slot]);
                         } else {
-                            closure.upvalues[i] = self.frame.closure.upvalues[index];
+                            closure.upvalues[i] = self.frame.upvalues.?[index];
                         }
                     }
                 },
                 .GetUpvalue => {
                     const slot = self.readByte();
-                    self.push(self.frame.closure.upvalues[slot].?.location.*);
+                    self.push(self.frame.upvalues.?[slot].?.location.*);
                 },
                 .SetUpvalue => {
                     const slot = self.readByte();
-                    self.frame.closure.upvalues[slot].?.location.* = self.pop();
+                    self.frame.upvalues.?[slot].?.location.* = self.pop();
                 },
                 .CloseUpvalue => {
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);

@@ -117,7 +117,7 @@ fn markRoots(vm: *virtual_machine.VirtualMachine) !void {
     }
 
     for (0..vm.frame_count) |i| {
-        try markObject(vm, &vm.frames[i].closure.obj);
+        try markObject(vm, &vm.frames[i].function.obj);
     }
 
     var upvalue = vm.open_upvalues;

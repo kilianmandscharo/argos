@@ -24,6 +24,8 @@ pub fn build(b: *std.Build) void {
 
     const test_files = [_][]const u8{
         "src/vm_test.zig",
+        "src/parser_test.zig",
+        "src/scanner_test.zig",
     };
 
     for (test_files) |file| {

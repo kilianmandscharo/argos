@@ -610,9 +610,13 @@ pub const Compiler = struct {
 
                 const function = try new_compiler.endCompiler();
 
-                const constant = try self.makeConstant(value.wrapObj(&function.obj));
-                try self.emitOpCode(.Closure);
-                try self.emitU24(constant);
+                if (function.upvalue_count > 0) {
+                    const constant = try self.makeConstant(value.wrapObj(&function.obj));
+                    try self.emitOpCode(.Closure);
+                    try self.emitU24(constant);
+                } else {
+                    try self.emitConstant(value.wrapObj(&function.obj));
+                }
 
                 for (0..function.upvalue_count) |i| {
                     try self.emitByte(@intFromBool(new_compiler.upvalues[i].is_local));
