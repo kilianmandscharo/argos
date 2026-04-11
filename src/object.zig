@@ -50,6 +50,12 @@ pub fn allocateList(vm: *virtual_machine.VirtualMachine) !*Obj {
     return &list.obj;
 }
 
+pub fn allocateTable(vm: *virtual_machine.VirtualMachine) !*Obj {
+    const table = try allocateObject(vm, ObjTable);
+    table.data = .{};
+    return &table.obj;
+}
+
 pub fn allocateUpvalue(vm: *virtual_machine.VirtualMachine, slot: *value.Value) !*ObjUpvalue {
     const upvalue = try allocateObject(vm, ObjUpvalue);
     upvalue.location = slot;
@@ -104,7 +110,7 @@ pub const ObjType = enum {
     Closure,
     Upvalue,
     List,
-    // Table, TODO: implement
+    Table,
 };
 
 pub const Obj = struct {
@@ -127,6 +133,7 @@ pub const Obj = struct {
             .Closure => try self.asClosure().format(writer),
             .Upvalue => try self.asUpvalue().format(writer),
             .List => try self.asList().format(writer),
+            .Table => try self.asTable().format(writer),
         }
     }
 
@@ -172,6 +179,12 @@ pub const Obj = struct {
                 gpa.destroy(list_obj);
                 vm.bytes_allocated -= @sizeOf(ObjList);
             },
+            .Table => {
+                const table_obj = self.asTable();
+                table_obj.data.deinit(gpa);
+                gpa.destroy(table_obj);
+                vm.bytes_allocated -= @sizeOf(ObjList);
+            },
         }
     }
 
@@ -196,6 +209,10 @@ pub const Obj = struct {
     }
 
     pub inline fn asList(self: *@This()) *ObjList {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    pub inline fn asTable(self: *@This()) *ObjTable {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 };
@@ -293,5 +310,32 @@ pub const ObjList = struct {
     ) std.Io.Writer.Error!void {
         _ = self;
         try writer.print("<List>", .{});
+    }
+};
+
+const TableContext = struct {
+    pub fn hash(_: @This(), key: *ObjString) u64 {
+        return key.hash;
+    }
+
+    pub fn eql(_: @This(), a: *ObjString, b: *ObjString) bool {
+        return a == b;
+    }
+};
+
+pub const TableData = std.HashMapUnmanaged(*ObjString, value.Value, TableContext, 80);
+
+pub const ObjTable = struct {
+    pub const KIND = ObjType.Table;
+
+    obj: Obj = undefined,
+    data: TableData,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        _ = self;
+        try writer.print("<Table>", .{});
     }
 };

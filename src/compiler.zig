@@ -401,11 +401,10 @@ pub const Compiler = struct {
                         }
                     },
                     .Index => |index| {
-                        // TODO: this can be a list or a table
                         try self.compileExpression(index.left);
                         try self.compileExpression(index.index);
                         try self.compileExpression(val.expression);
-                        try self.emitOpCode(.ListSet);
+                        try self.emitOpCode(.IndexSet);
                         try self.emitOpCode(.Pop);
                     },
                 }
@@ -650,11 +649,21 @@ pub const Compiler = struct {
                 try self.emitOpCode(.ListInit);
                 try self.emitU24(val.items.len);
             },
-            .Table => unreachable,
+            .Table => |val| {
+                var index = val.items.len;
+                while (index > 0) {
+                    index -= 1;
+                    try self.compileExpression(val.items[index].value);
+                    try self.compileExpression(val.items[index].key);
+                }
+                try self.emitConstant(value.wrapObj(try object.allocateTable(self.vm)));
+                try self.emitOpCode(.TableInit);
+                try self.emitU24(val.items.len);
+            },
             .Index => |val| {
                 try self.compileExpression(val.left);
                 try self.compileExpression(val.index);
-                try self.emitOpCode(.ListGet);
+                try self.emitOpCode(.IndexGet);
             },
             .Match => |val| {
                 const has_target = val.target != null;

@@ -648,6 +648,49 @@ test "vm tests" {
             \\assert(result == 2)
             ,
         },
+        .{
+            .description = "table index",
+            .source =
+            \\let foo = Table{"a" = 1, "b" = 2}
+            \\let result = foo["a"] + foo["b"]
+            \\
+            \\assert(result == 3)
+            ,
+        },
+        .{
+            .description = "table index assignment",
+            .source =
+            \\let foo = Table{"a" = 1, "b" = 2}
+            \\foo["a"] = 10
+            \\
+            \\assert(foo["a"] == 10)
+            ,
+        },
+        .{
+            .description = "local table index assignment",
+            .source =
+            \\let foo = fn(key) {
+            \\    let t = Table{"a" = 10, "b" = 11}
+            \\    return t[key]
+            \\}
+            \\
+            \\let result = foo("b")
+            \\
+            \\assert(result == 11)
+            ,
+        },
+        .{
+            .description = "var as table key",
+            .source =
+            \\let first = "a"
+            \\let second = "b"
+            \\
+            \\let foo = Table{first = 10, second = 11}
+            \\let result = foo[first] + foo["b"]
+            \\
+            \\assert(result == 21)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate vm tests", &test_cases, run);

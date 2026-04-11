@@ -42,8 +42,9 @@ pub const OpCode = enum(u8) {
     SetUpvalue,
     CloseUpvalue,
     ListInit,
-    ListGet,
-    ListSet,
+    TableInit,
+    IndexGet,
+    IndexSet,
 };
 
 pub const OpByte = union(enum) {
@@ -164,8 +165,9 @@ pub const Chunk = struct {
                 return curr_offset;
             },
             .ListInit => return threeByteInstruction(self, "OP_LIST_INIT", offset),
-            .ListGet => return simpleInstruction("OP_LIST_GET", offset),
-            .ListSet => return simpleInstruction("OP_LIST_SET", offset),
+            .TableInit => return threeByteInstruction(self, "OP_TABLE_INIT", offset),
+            .IndexGet => return simpleInstruction("OP_INDEX_GET", offset),
+            .IndexSet => return simpleInstruction("OP_INDEX_SET", offset),
         }
     }
 };
