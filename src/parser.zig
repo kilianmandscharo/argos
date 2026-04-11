@@ -3,6 +3,7 @@ const logging = @import("logging.zig");
 const scanner = @import("scanner.zig");
 const test_utils = @import("test_utils.zig");
 const ast = @import("ast.zig");
+const constants = @import("constants.zig");
 
 pub fn createAst(arena: std.mem.Allocator, source: []const u8) !ast.Program {
     var scan = scanner.Scanner.init(source);
@@ -84,8 +85,10 @@ pub const Parser = struct {
     }
 
     fn printStatement(self: *Parser) !ast.Statement {
-        self.log("print statement", .{});
-        defer self.log("end print statement", .{});
+        if (comptime constants.debug_parser) {
+            self.log("print statement", .{});
+            defer self.log("end print statement", .{});
+        }
 
         try self.consume(.LParen, "Expect '(' after print.");
         const expression = try self.parseExpression();
@@ -97,8 +100,10 @@ pub const Parser = struct {
     }
 
     fn assertStatement(self: *Parser) !ast.Statement {
-        self.log("assert statement", .{});
-        defer self.log("end assert statement", .{});
+        if (comptime constants.debug_parser) {
+            self.log("assert statement", .{});
+            defer self.log("end assert statement", .{});
+        }
 
         try self.consume(.LParen, "Expect '(' after assert.");
         const expression = try self.parseExpression();
@@ -110,8 +115,10 @@ pub const Parser = struct {
     }
 
     fn whileStatement(self: *Parser) !ast.Statement {
-        self.log("while statement", .{});
-        defer self.log("end while statement", .{});
+        if (comptime constants.debug_parser) {
+            self.log("while statement", .{});
+            defer self.log("end while statement", .{});
+        }
 
         try self.consume(.LParen, "Expect '(' after 'while'.");
         const expression = try self.parseExpression();
@@ -126,8 +133,10 @@ pub const Parser = struct {
     }
 
     fn forStatement(self: *Parser) !ast.Statement {
-        self.log("for statement", .{});
-        defer self.log("end for statement", .{});
+        if (comptime constants.debug_parser) {
+            self.log("for statement", .{});
+            defer self.log("end for statement", .{});
+        }
 
         try self.consume(.LParen, "Expect '(' after 'for'.");
         const expression = try self.parseExpression();
@@ -173,8 +182,10 @@ pub const Parser = struct {
     }
 
     fn returnStatement(self: *Parser) !ast.Statement {
-        self.log("return statement", .{});
-        defer self.log("end return statement", .{});
+        if (comptime constants.debug_parser) {
+            self.log("return statement", .{});
+            defer self.log("end return statement", .{});
+        }
 
         if (self.isLineEnd()) {
             const expression = try self.arena.create(ast.Expression);
@@ -188,8 +199,10 @@ pub const Parser = struct {
     }
 
     fn blockStatement(self: *Parser) !ast.Statement {
-        self.log("block statement", .{});
-        defer self.log("end block statement", .{});
+        if (comptime constants.debug_parser) {
+            self.log("block statement", .{});
+            defer self.log("end block statement", .{});
+        }
 
         try self.chopNewlines();
         var statements: std.ArrayList(ast.Statement) = .{};
@@ -203,8 +216,10 @@ pub const Parser = struct {
     }
 
     fn varDeclaration(self: *Parser) !ast.Statement {
-        self.log("var declaration", .{});
-        defer self.log("end var declaration", .{});
+        if (comptime constants.debug_parser) {
+            self.log("var declaration", .{});
+            defer self.log("end var declaration", .{});
+        }
 
         const target = try self.parseExpression();
         if (target.* != .Identifier) {
@@ -258,8 +273,10 @@ pub const Parser = struct {
     fn parsePrecedence(self: *Parser, precedence: Precedence) !*const ast.Expression {
         try self.advance();
 
-        self.log("expression on {s}", .{self.previous.?.toString()});
-        self.debug_indent += 1;
+        if (comptime constants.debug_parser) {
+            self.log("expression on {s}", .{self.previous.?.toString()});
+            self.debug_indent += 1;
+        }
 
         if (getRule(self.previous.?.type).prefix) |prefixFn| {
             var left = try prefixFn(self);
@@ -267,8 +284,10 @@ pub const Parser = struct {
 
             defer {
                 left_owned.* = left;
-                self.debug_indent -= 1;
-                self.log("parsed {s}", .{@tagName(left_owned.*)});
+                if (comptime constants.debug_parser) {
+                    self.debug_indent -= 1;
+                    self.log("parsed {s}", .{@tagName(left_owned.*)});
+                }
             }
 
             while (@intFromEnum(precedence) < getRulePrecedenceValue(self, self.current.type)) {

@@ -1,5 +1,12 @@
-let foo = fn() {
-    print("Hello, World!")
+let fib = fn (n) {
+    let a = 0
+    let b = 1
+    for (0..n) |_| {
+        let tmp = a
+        a = b
+        b = b + tmp
+    }
+    return a
 }
 
-foo()
+print(fib(75))

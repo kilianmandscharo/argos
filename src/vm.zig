@@ -68,7 +68,9 @@ pub const VirtualMachine = struct {
     next_gc: usize,
 
     pub fn init(gpa: std.mem.Allocator) !VirtualMachine {
-        logDebug("Init vm...", .{});
+        if (comptime constants.debug_trace_execution) {
+            logDebug("Init vm...", .{});
+        }
 
         var vm = VirtualMachine{
             .gpa = gpa,
@@ -89,7 +91,9 @@ pub const VirtualMachine = struct {
 
         try vm.defineNative("clock", native.clockNative);
 
-        logDebug("Vm initialized.", .{});
+        if (comptime constants.debug_trace_execution) {
+            logDebug("Vm initialized.", .{});
+        }
 
         return vm;
     }
@@ -141,32 +145,49 @@ pub const VirtualMachine = struct {
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
-        logDebug("Starting pre-compilation...", .{});
+        if (comptime constants.debug_trace_execution) {
+            logDebug("Starting pre-compilation...", .{});
+        }
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
         const ast = try parser.createAst(arena.allocator(), source);
 
         var c: compiler.Compiler = undefined;
         try compiler.Compiler.init(&c, self, self.gpa, .Script, null, 0, null);
-        logDebug("Pre-compilation finished.", .{});
+        if (comptime constants.debug_trace_execution) {
+            logDebug("Pre-compilation finished.", .{});
+        }
 
         self.current_compiler = &c;
 
-        logDebug("Compiling...", .{});
+        if (comptime constants.debug_trace_execution) {
+            logDebug("Compiling...", .{});
+        }
         const function = try c.compile(ast);
         arena.deinit();
-        logDebug("Compilation finished.", .{});
+        if (comptime constants.debug_trace_execution) {
+            logDebug("Compilation finished.", .{});
+        }
 
-        logDebug("Setting up global function...", .{});
+        if (comptime constants.debug_trace_execution) {
+            logDebug("Setting up global function...", .{});
+        }
         self.push(value.wrapObj(&function.obj));
         try self.call(function, 0, null);
-        logDebug("Global function set up.", .{});
 
-        logDebug("Running byte code...", .{});
+        if (comptime constants.debug_trace_execution) {
+            logDebug("Global function set up.", .{});
+        }
+
+        if (comptime constants.debug_trace_execution) {
+            logDebug("Running byte code...", .{});
+        }
         _ = self.run() catch {
             return .RuntimeError;
         };
-        logDebug("Script finished.", .{});
+        if (comptime constants.debug_trace_execution) {
+            logDebug("Script finished.", .{});
+        }
 
         return .Ok;
     }
