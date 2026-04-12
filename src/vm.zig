@@ -90,6 +90,8 @@ pub const VirtualMachine = struct {
         };
 
         try vm.defineNative("clock", native.clockNative);
+        try vm.defineNative("print", native.printNative);
+        try vm.defineNative("assert", native.assertNative);
 
         if (comptime constants.debug_trace_execution) {
             logDebug("Vm initialized.", .{});
@@ -198,7 +200,7 @@ pub const VirtualMachine = struct {
         return instruction;
     }
 
-    fn runtimeError(self: *VirtualMachine, comptime format: []const u8, args: anytype) anyerror {
+    pub fn runtimeError(self: *VirtualMachine, comptime format: []const u8, args: anytype) anyerror {
         std.debug.print(format, args);
         std.debug.print("\n", .{});
         var i: i32 = @as(i32, @intCast(self.frame_count)) - 1;
@@ -252,25 +254,24 @@ pub const VirtualMachine = struct {
     }
 
     fn callValue(self: *VirtualMachine, callee: value.Value, argCount: u8) !void {
-        switch (callee) {
-            .Obj => |obj| {
-                switch (obj.type) {
-                    .Closure => {
-                        const closure = obj.asClosure();
-                        try self.call(closure.function, argCount, closure.upvalues);
-                    },
-                    .Function => try self.call(obj.asFunction(), argCount, null),
-                    .NativeFn => {
-                        const native_fn = obj.asNative();
-                        const start = self.stack_top - argCount;
-                        const result = native_fn.function(argCount, self.stack[start..self.stack_top]);
-                        self.stack_top -= argCount + 1;
-                        self.push(result);
-                    },
-                    else => return self.runtimeError("Can't call object of type '{s}'", .{obj.getType()}),
-                }
+        if (callee != .Obj) {
+            return self.runtimeError("Can't call value of type '{s}'", .{callee.getType()});
+        }
+        const obj = callee.Obj;
+        switch (obj.type) {
+            .Closure => {
+                const closure = obj.asClosure();
+                try self.call(closure.function, argCount, closure.upvalues);
             },
-            else => return self.runtimeError("Can't call value of type '{s}'", .{callee.getType()}),
+            .Function => try self.call(obj.asFunction(), argCount, null),
+            .NativeFn => {
+                const native_fn = obj.asNative();
+                const start = self.stack_top - argCount;
+                const result = try native_fn.function(self, argCount, self.stack[start..self.stack_top]);
+                self.stack_top -= argCount + 1;
+                self.push(result);
+            },
+            else => return self.runtimeError("Can't call object of type '{s}'", .{obj.getType()}),
         }
     }
 
@@ -393,15 +394,6 @@ pub const VirtualMachine = struct {
                     const b = self.pop();
                     const a = self.peek(0);
                     self.swapInPlace(value.wrapBool(try self.less(a, b)), 0);
-                },
-                .Print => {
-                    const val = self.pop();
-                    std.debug.print("{f}\n", .{val});
-                },
-                .Assert => {
-                    const val = self.pop();
-                    if (val != .Bool) return self.runtimeError("Expected Boolean, got {s}", .{val.getType()});
-                    if (!val.Bool) return self.runtimeError("Assertion failed", .{});
                 },
                 .Pop => {
                     _ = self.pop();

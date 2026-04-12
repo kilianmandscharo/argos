@@ -249,7 +249,7 @@ pub const ObjFunction = struct {
     }
 };
 
-pub const NativeFn = *const fn (arg_count: usize, args: []value.Value) value.Value;
+pub const NativeFn = *const fn (vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) anyerror!value.Value;
 
 pub const ObjNative = struct {
     pub const KIND = ObjType.NativeFn;

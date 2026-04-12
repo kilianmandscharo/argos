@@ -16,8 +16,6 @@ pub const Statement = union(enum) {
     For: For,
     While: While,
     Return: *const Expression,
-    Assert: *const Expression,
-    Print: *const Expression,
     Expression: *const Expression,
 
     pub fn format(

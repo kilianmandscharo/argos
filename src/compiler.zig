@@ -483,14 +483,6 @@ pub const Compiler = struct {
                 try self.compileExpression(val);
                 try self.emitOpCode(.Return);
             },
-            .Assert => |val| {
-                try self.compileExpression(val);
-                try self.emitOpCode(.Assert);
-            },
-            .Print => |val| {
-                try self.compileExpression(val);
-                try self.emitOpCode(.Print);
-            },
             .Expression => |val| {
                 try self.compileExpression(val);
                 if (!self.ctx.suppress_pop) {

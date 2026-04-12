@@ -49,12 +49,6 @@ fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void
         .Return => |stmt| {
             try expectExpression(stmt.*, actual.Return.*);
         },
-        .Assert => |stmt| {
-            try expectExpression(stmt.*, actual.Assert.*);
-        },
-        .Print => |stmt| {
-            try expectExpression(stmt.*, actual.Print.*);
-        },
         .Expression => |stmt| {
             try expectExpression(stmt.*, actual.Expression.*);
         },
@@ -263,24 +257,6 @@ test "statements" {
             },
         },
         .{
-            .description = "print",
-            .input =
-            \\print(5)
-            ,
-            .expected_statement = .{
-                .Print = &.{ .Integer = 5 },
-            },
-        },
-        .{
-            .description = "assert",
-            .input =
-            \\assert(5)
-            ,
-            .expected_statement = .{
-                .Assert = &.{ .Integer = 5 },
-            },
-        },
-        .{
             .description = "expression",
             .input =
             \\5 + 5
@@ -326,12 +302,16 @@ test "statements" {
         .{
             .description = "block single line",
             .input =
-            \\{ print(1) }
+            \\{ 5 + 5 }
             ,
             .expected_statement = .{
                 .Block = try test_utils.list(ast.Statement, arena.allocator(), &.{
                     .{
-                        .Print = &.{ .Integer = 1 },
+                        .Expression = &.{ .Infix = .{
+                            .left = &.{ .Integer = 5 },
+                            .right = &.{ .Integer = 5 },
+                            .operator = .Plus,
+                        } },
                     },
                 }),
             },
@@ -408,7 +388,16 @@ test "statements" {
                     .index = null,
                     .body = try test_utils.list(ast.Statement, arena.allocator(), &.{
                         .{
-                            .Print = &.{ .Identifier = "i" },
+                            .Expression = &.{
+                                .Call = .{
+                                    .function = &.{ .Identifier = "print" },
+                                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
+                                        .{
+                                            .Positional = &.{ .Identifier = "i" },
+                                        },
+                                    }),
+                                },
+                            },
                         },
                     }),
                 },
@@ -430,7 +419,16 @@ test "statements" {
                     .index = "i",
                     .body = try test_utils.list(ast.Statement, arena.allocator(), &.{
                         .{
-                            .Print = &.{ .Identifier = "i" },
+                            .Expression = &.{
+                                .Call = .{
+                                    .function = &.{ .Identifier = "print" },
+                                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
+                                        .{
+                                            .Positional = &.{ .Identifier = "i" },
+                                        },
+                                    }),
+                                },
+                            },
                         },
                     }),
                 },
@@ -1753,9 +1751,9 @@ test "match expression" {
             .description = "multiple arms",
             .input =
             \\match(foo) {
-            \\     1 ->    print("a")
-            \\     2 ->    print("b")
-            \\     _ ->    print("c")
+            \\     1 ->    return "a"
+            \\     2 ->    return "b"
+            \\     _ ->    return "c"
             \\}
             ,
             .expected_expression = .{
@@ -1765,15 +1763,15 @@ test "match expression" {
                         .Multiple = try test_utils.list(ast.MatchArm, arena.allocator(), &.{
                             .{
                                 .pattern = &.{ .Integer = 1 },
-                                .body = .{ .Print = &.{ .String = "a" } },
+                                .body = .{ .Return = &.{ .String = "a" } },
                             },
                             .{
                                 .pattern = &.{ .Integer = 2 },
-                                .body = .{ .Print = &.{ .String = "b" } },
+                                .body = .{ .Return = &.{ .String = "b" } },
                             },
                             .{
                                 .pattern = &.{ .Identifier = "_" },
-                                .body = .{ .Print = &.{ .String = "c" } },
+                                .body = .{ .Return = &.{ .String = "c" } },
                             },
                         }),
                     },
@@ -1905,12 +1903,21 @@ test "parse program" {
                     },
                 },
                 .{
-                    .Print = &.{
+                    .Expression = &.{
                         .Call = .{
-                            .function = &.{ .Identifier = "fib" },
+                            .function = &.{ .Identifier = "print" },
                             .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
                                 .{
-                                    .Positional = &.{ .Integer = 30 },
+                                    .Positional = &.{
+                                        .Call = .{
+                                            .function = &.{ .Identifier = "fib" },
+                                            .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
+                                                .{
+                                                    .Positional = &.{ .Integer = 30 },
+                                                },
+                                            }),
+                                        },
+                                    },
                                 },
                             }),
                         },

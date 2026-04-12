@@ -60,12 +60,6 @@ pub const Parser = struct {
 
     fn parseStatement(self: *Parser) anyerror!ast.Statement {
         try self.chopNewlines();
-        if (try self.match(.Print)) {
-            return try self.printStatement();
-        }
-        if (try self.match(.Assert)) {
-            return try self.assertStatement();
-        }
         if (try self.match(.While)) {
             return try self.whileStatement();
         }
@@ -82,36 +76,6 @@ pub const Parser = struct {
             return try self.varDeclaration();
         }
         return try self.expressionStatement();
-    }
-
-    fn printStatement(self: *Parser) !ast.Statement {
-        if (comptime constants.debug_parser) {
-            self.log("print statement", .{});
-            defer self.log("end print statement", .{});
-        }
-
-        try self.consume(.LParen, "Expect '(' after print.");
-        const expression = try self.parseExpression();
-        try self.consume(.RParen, "Expect ')' after print expression.");
-
-        _ = try self.match(.NewLine);
-
-        return .{ .Print = expression };
-    }
-
-    fn assertStatement(self: *Parser) !ast.Statement {
-        if (comptime constants.debug_parser) {
-            self.log("assert statement", .{});
-            defer self.log("end assert statement", .{});
-        }
-
-        try self.consume(.LParen, "Expect '(' after assert.");
-        const expression = try self.parseExpression();
-        try self.consume(.RParen, "Expect ')' after assert expression.");
-
-        _ = try self.match(.NewLine);
-
-        return .{ .Assert = expression };
     }
 
     fn whileStatement(self: *Parser) !ast.Statement {
@@ -259,10 +223,10 @@ pub const Parser = struct {
                 else => return self.errorAtPrevious("Invalid assign target."),
             };
             const value = try self.parseExpression();
-            try self.expectLineEnd();
+            try self.matchLineEnd();
             return .{ .Assignment = .{ .target = target, .expression = value } };
         }
-        try self.expectLineEnd();
+        try self.matchLineEnd();
         return .{ .Expression = expression };
     }
 
@@ -355,6 +319,12 @@ pub const Parser = struct {
     fn isLineEnd(self: *Parser) bool {
         const token_type = self.current.type;
         return token_type == .NewLine or token_type == .Eof;
+    }
+
+    fn matchLineEnd(self: *Parser) !void {
+        if (self.isLineEnd()) {
+            try self.advance();
+        }
     }
 
     fn expectLineEnd(self: *Parser) !void {
@@ -695,8 +665,6 @@ fn initRules() [token_count]ParseRule {
             .Tilde => .{ .prefix = parseUnary, .infix = null, .precedence = .Prefix },
             .LeftShift => .{ .prefix = null, .infix = parseBinary, .precedence = .Shift },
             .RightShift => .{ .prefix = null, .infix = parseBinary, .precedence = .Shift },
-            .Print => .{ .prefix = null, .infix = null, .precedence = null },
-            .Assert => .{ .prefix = null, .infix = null, .precedence = null },
             .Let => .{ .prefix = null, .infix = null, .precedence = null },
             .Match => .{ .prefix = parseMatch, .infix = null, .precedence = null },
             .While => .{ .prefix = null, .infix = null, .precedence = null },
