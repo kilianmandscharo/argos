@@ -5,6 +5,10 @@ const test_utils = @import("test_utils.zig");
 const parser = @import("parser.zig");
 const ast = @import("ast.zig");
 
+fn e(data: ast.ExpressionData) ast.Expression {
+    return .init(data, scanner.Token.dummy());
+}
+
 fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void {
     try expectTag(expected, actual);
 
@@ -14,6 +18,7 @@ fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void
             try expectExpression(stmt.expression.*, actual.VarDeclaration.expression.*);
         },
         .Block => |stmt| {
+            try std.testing.expectEqual(stmt.items.len, actual.Block.items.len);
             for (0..stmt.items.len) |i| {
                 try expectStatement(stmt.items[i], actual.Block.items[i]);
             }
@@ -36,12 +41,14 @@ fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void
             } else {
                 try std.testing.expect(actual.For.index == null);
             }
+            try std.testing.expectEqual(stmt.body.items.len, actual.For.body.items.len);
             for (0..stmt.body.items.len) |i| {
                 try expectStatement(stmt.body.items[i], actual.For.body.items[i]);
             }
         },
         .While => |stmt| {
             try expectExpression(stmt.expression.*, actual.While.expression.*);
+            try std.testing.expectEqual(stmt.body.items.len, actual.While.body.items.len);
             for (0..stmt.body.items.len) |i| {
                 try expectStatement(stmt.body.items[i], actual.While.body.items[i]);
             }
@@ -59,12 +66,20 @@ fn expectTag(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(std.meta.activeTag(expected), std.meta.activeTag(actual));
 }
 
-fn expectExpression(expected: ast.Expression, actual: ast.Expression) !void {
+fn expectExpression(expected: ast.Expression, actual: ast.Expression) anyerror!void {
+    try expectExpressionData(expected.data, actual.data);
+}
+
+fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData) !void {
     try expectTag(expected, actual);
 
     switch (expected) {
         .Identifier => |ident| try std.testing.expectEqualStrings(ident, actual.Identifier),
         .String => |string| try std.testing.expectEqualStrings(string, actual.String),
+        .Integer => |n| try std.testing.expectEqual(n, actual.Integer),
+        .Float => |f| try std.testing.expectEqual(f, actual.Float),
+        .Boolean => |b| try std.testing.expectEqual(b, actual.Boolean),
+        .Null => {},
         .Prefix => |expr| {
             try std.testing.expectEqual(expr.operator, actual.Prefix.operator);
             try expectExpression(expr.expression.*, actual.Prefix.expression.*);
@@ -96,6 +111,7 @@ fn expectExpression(expected: ast.Expression, actual: ast.Expression) !void {
             if (expr.body == .Expression) {
                 try expectExpression(expr.body.Expression.*, actual.Function.body.Expression.*);
             } else {
+                try std.testing.expectEqual(expr.body.Block.items.len, actual.Function.body.Block.items.len);
                 for (0..expr.body.Block.items.len) |i| {
                     try expectStatement(expr.body.Block.items[i], actual.Function.body.Block.items[i]);
                 }
@@ -157,7 +173,6 @@ fn expectExpression(expected: ast.Expression, actual: ast.Expression) !void {
                 }
             }
         },
-        else => try std.testing.expectEqual(expected, actual),
     }
 }
 
@@ -183,6 +198,7 @@ fn runStatementTest(arena: std.mem.Allocator, test_case: StatementTestCase) anye
 test "statements" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+    const a = arena.allocator();
 
     const test_cases = [_]StatementTestCase{
         .{
@@ -193,7 +209,7 @@ test "statements" {
             .expected_statement = .{
                 .VarDeclaration = .{
                     .name = "foo",
-                    .expression = &.{ .Integer = 5 },
+                    .expression = &e(.{ .Integer = 5 }),
                 },
             },
         },
@@ -205,7 +221,7 @@ test "statements" {
             .expected_statement = .{
                 .VarDeclaration = .{
                     .name = "foo",
-                    .expression = &.{ .Null = {} },
+                    .expression = &e(.Null),
                 },
             },
         },
@@ -217,7 +233,7 @@ test "statements" {
             .expected_statement = .{
                 .Assignment = .{
                     .target = .{ .Identifier = "foo" },
-                    .expression = &.{ .Integer = 5 },
+                    .expression = &e(.{ .Integer = 5 }),
                 },
             },
         },
@@ -230,11 +246,11 @@ test "statements" {
                 .Assignment = .{
                     .target = .{
                         .Index = .{
-                            .left = &.{ .Identifier = "foo" },
-                            .index = &.{ .Integer = 0 },
+                            .left = &e(.{ .Identifier = "foo" }),
+                            .index = &e(.{ .Integer = 0 }),
                         },
                     },
-                    .expression = &.{ .Integer = 5 },
+                    .expression = &e(.{ .Integer = 5 }),
                 },
             },
         },
@@ -243,18 +259,14 @@ test "statements" {
             .input =
             \\return 5
             ,
-            .expected_statement = .{
-                .Return = &.{ .Integer = 5 },
-            },
+            .expected_statement = .{ .Return = &e(.{ .Integer = 5 }) },
         },
         .{
             .description = "return empty",
             .input =
             \\return
             ,
-            .expected_statement = .{
-                .Return = &.{ .Null = {} },
-            },
+            .expected_statement = .{ .Return = &e(.Null) },
         },
         .{
             .description = "expression",
@@ -262,13 +274,13 @@ test "statements" {
             \\5 + 5
             ,
             .expected_statement = .{
-                .Expression = &.{
+                .Expression = &e(.{
                     .Infix = .{
-                        .left = &.{ .Integer = 5 },
-                        .right = &.{ .Integer = 5 },
+                        .left = &e(.{ .Integer = 5 }),
+                        .right = &e(.{ .Integer = 5 }),
                         .operator = .Plus,
                     },
-                },
+                }),
             },
         },
         .{
@@ -280,21 +292,21 @@ test "statements" {
             \\}
             ,
             .expected_statement = .{
-                .Block = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                .Block = try test_utils.list(ast.Statement, a, &.{
                     .{
                         .VarDeclaration = .{
                             .name = "foo",
-                            .expression = &.{ .Integer = 5 },
+                            .expression = &e(.{ .Integer = 5 }),
                         },
                     },
                     .{
-                        .Expression = &.{
+                        .Expression = &e(.{
                             .Infix = .{
-                                .left = &.{ .Identifier = "foo" },
-                                .right = &.{ .Integer = 2 },
+                                .left = &e(.{ .Identifier = "foo" }),
+                                .right = &e(.{ .Integer = 2 }),
                                 .operator = .Plus,
                             },
-                        },
+                        }),
                     },
                 }),
             },
@@ -305,13 +317,15 @@ test "statements" {
             \\{ 5 + 5 }
             ,
             .expected_statement = .{
-                .Block = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                .Block = try test_utils.list(ast.Statement, a, &.{
                     .{
-                        .Expression = &.{ .Infix = .{
-                            .left = &.{ .Integer = 5 },
-                            .right = &.{ .Integer = 5 },
-                            .operator = .Plus,
-                        } },
+                        .Expression = &e(.{
+                            .Infix = .{
+                                .left = &e(.{ .Integer = 5 }),
+                                .right = &e(.{ .Integer = 5 }),
+                                .operator = .Plus,
+                            },
+                        }),
                     },
                 }),
             },
@@ -321,9 +335,7 @@ test "statements" {
             .input =
             \\{}
             ,
-            .expected_statement = .{
-                .Block = .{},
-            },
+            .expected_statement = .{ .Block = .{} },
         },
         .{
             .description = "block empty multiple lines",
@@ -332,9 +344,7 @@ test "statements" {
             \\
             \\}
             ,
-            .expected_statement = .{
-                .Block = .{},
-            },
+            .expected_statement = .{ .Block = .{} },
         },
         .{
             .description = "while",
@@ -345,24 +355,24 @@ test "statements" {
             ,
             .expected_statement = .{
                 .While = .{
-                    .expression = &.{
+                    .expression = &e(.{
                         .Infix = .{
-                            .left = &.{ .Identifier = "foo" },
-                            .right = &.{ .Integer = 5 },
+                            .left = &e(.{ .Identifier = "foo" }),
+                            .right = &e(.{ .Integer = 5 }),
                             .operator = .Lt,
                         },
-                    },
-                    .body = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                    }),
+                    .body = try test_utils.list(ast.Statement, a, &.{
                         .{
                             .Assignment = .{
                                 .target = .{ .Identifier = "foo" },
-                                .expression = &.{
+                                .expression = &e(.{
                                     .Infix = .{
-                                        .left = &.{ .Identifier = "foo" },
-                                        .right = &.{ .Integer = 1 },
+                                        .left = &e(.{ .Identifier = "foo" }),
+                                        .right = &e(.{ .Integer = 1 }),
                                         .operator = .Plus,
                                     },
-                                },
+                                }),
                             },
                         },
                     }),
@@ -378,26 +388,24 @@ test "statements" {
             ,
             .expected_statement = .{
                 .For = .{
-                    .expression = &.{
+                    .expression = &e(.{
                         .Range = .{
-                            .start = &.{ .Integer = 0 },
-                            .end = &.{ .Integer = 5 },
+                            .start = &e(.{ .Integer = 0 }),
+                            .end = &e(.{ .Integer = 5 }),
                         },
-                    },
+                    }),
                     .capture = "i",
                     .index = null,
-                    .body = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                    .body = try test_utils.list(ast.Statement, a, &.{
                         .{
-                            .Expression = &.{
+                            .Expression = &e(.{
                                 .Call = .{
-                                    .function = &.{ .Identifier = "print" },
-                                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
-                                        .{
-                                            .Positional = &.{ .Identifier = "i" },
-                                        },
+                                    .function = &e(.{ .Identifier = "print" }),
+                                    .args = try test_utils.list(ast.FunctionArg, a, &.{
+                                        .{ .Positional = &e(.{ .Identifier = "i" }) },
                                     }),
                                 },
-                            },
+                            }),
                         },
                     }),
                 },
@@ -412,23 +420,19 @@ test "statements" {
             ,
             .expected_statement = .{
                 .For = .{
-                    .expression = &.{
-                        .Identifier = "foo",
-                    },
+                    .expression = &e(.{ .Identifier = "foo" }),
                     .capture = "item",
                     .index = "i",
-                    .body = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                    .body = try test_utils.list(ast.Statement, a, &.{
                         .{
-                            .Expression = &.{
+                            .Expression = &e(.{
                                 .Call = .{
-                                    .function = &.{ .Identifier = "print" },
-                                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
-                                        .{
-                                            .Positional = &.{ .Identifier = "i" },
-                                        },
+                                    .function = &e(.{ .Identifier = "print" }),
+                                    .args = try test_utils.list(ast.FunctionArg, a, &.{
+                                        .{ .Positional = &e(.{ .Identifier = "i" }) },
                                     }),
                                 },
-                            },
+                            }),
                         },
                     }),
                 },
@@ -456,7 +460,7 @@ test "statements" {
 const ExpressionTestCase = struct {
     description: []const u8,
     input: []const u8,
-    expected_expression: ?ast.Expression = null,
+    expected_expression: ?ast.ExpressionData = null,
     expect_error: bool = false,
 };
 
@@ -469,7 +473,7 @@ fn runExpressionTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) an
         const program = try result;
         try std.testing.expectEqual(program.items.len, 1);
         try std.testing.expect(program.items[0] == .Expression);
-        try expectExpression(test_case.expected_expression.?, program.items[0].Expression.*);
+        try expectExpressionData(test_case.expected_expression.?, program.items[0].Expression.*.data);
     }
 }
 
@@ -534,9 +538,7 @@ test "prefix expressions" {
             .input = "!true",
             .expected_expression = .{
                 .Prefix = .{
-                    .expression = &.{
-                        .Boolean = true,
-                    },
+                    .expression = &e(.{ .Boolean = true }),
                     .operator = .Bang,
                 },
             },
@@ -546,9 +548,7 @@ test "prefix expressions" {
             .input = "!false",
             .expected_expression = .{
                 .Prefix = .{
-                    .expression = &.{
-                        .Boolean = false,
-                    },
+                    .expression = &e(.{ .Boolean = false }),
                     .operator = .Bang,
                 },
             },
@@ -558,9 +558,7 @@ test "prefix expressions" {
             .input = "~false",
             .expected_expression = .{
                 .Prefix = .{
-                    .expression = &.{
-                        .Boolean = false,
-                    },
+                    .expression = &e(.{ .Boolean = false }),
                     .operator = .Tilde,
                 },
             },
@@ -570,9 +568,7 @@ test "prefix expressions" {
             .input = "+5",
             .expected_expression = .{
                 .Prefix = .{
-                    .expression = &.{
-                        .Integer = 5,
-                    },
+                    .expression = &e(.{ .Integer = 5 }),
                     .operator = .Plus,
                 },
             },
@@ -582,9 +578,7 @@ test "prefix expressions" {
             .input = "-2",
             .expected_expression = .{
                 .Prefix = .{
-                    .expression = &.{
-                        .Integer = 2,
-                    },
+                    .expression = &e(.{ .Integer = 2 }),
                     .operator = .Minus,
                 },
             },
@@ -594,9 +588,7 @@ test "prefix expressions" {
             .input = "~5",
             .expected_expression = .{
                 .Prefix = .{
-                    .expression = &.{
-                        .Integer = 5,
-                    },
+                    .expression = &e(.{ .Integer = 5 }),
                     .operator = .Tilde,
                 },
             },
@@ -606,9 +598,7 @@ test "prefix expressions" {
             .input = "+5.41",
             .expected_expression = .{
                 .Prefix = .{
-                    .expression = &.{
-                        .Float = 5.41,
-                    },
+                    .expression = &e(.{ .Float = 5.41 }),
                     .operator = .Plus,
                 },
             },
@@ -618,9 +608,7 @@ test "prefix expressions" {
             .input = "-2.1234",
             .expected_expression = .{
                 .Prefix = .{
-                    .expression = &.{
-                        .Float = 2.1234,
-                    },
+                    .expression = &e(.{ .Float = 2.1234 }),
                     .operator = .Minus,
                 },
             },
@@ -642,8 +630,8 @@ test "infix expression" {
             .input = "1 + 1",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 1 },
-                    .right = &.{ .Integer = 1 },
+                    .left = &e(.{ .Integer = 1 }),
+                    .right = &e(.{ .Integer = 1 }),
                     .operator = .Plus,
                 },
             },
@@ -653,8 +641,8 @@ test "infix expression" {
             .input = "1.1 + 1.35",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Float = 1.1 },
-                    .right = &.{ .Float = 1.35 },
+                    .left = &e(.{ .Float = 1.1 }),
+                    .right = &e(.{ .Float = 1.35 }),
                     .operator = .Plus,
                 },
             },
@@ -664,8 +652,8 @@ test "infix expression" {
             .input = "40 - 22",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 40 },
-                    .right = &.{ .Integer = 22 },
+                    .left = &e(.{ .Integer = 40 }),
+                    .right = &e(.{ .Integer = 22 }),
                     .operator = .Minus,
                 },
             },
@@ -675,8 +663,8 @@ test "infix expression" {
             .input = "40.54 - 22.33",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Float = 40.54 },
-                    .right = &.{ .Float = 22.33 },
+                    .left = &e(.{ .Float = 40.54 }),
+                    .right = &e(.{ .Float = 22.33 }),
                     .operator = .Minus,
                 },
             },
@@ -686,8 +674,8 @@ test "infix expression" {
             .input = "5 * 66",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 5 },
-                    .right = &.{ .Integer = 66 },
+                    .left = &e(.{ .Integer = 5 }),
+                    .right = &e(.{ .Integer = 66 }),
                     .operator = .Asterisk,
                 },
             },
@@ -697,8 +685,8 @@ test "infix expression" {
             .input = "33 % 2",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 33 },
-                    .right = &.{ .Integer = 2 },
+                    .left = &e(.{ .Integer = 33 }),
+                    .right = &e(.{ .Integer = 2 }),
                     .operator = .Percent,
                 },
             },
@@ -708,18 +696,14 @@ test "infix expression" {
             .input = "3 * 4 / 3",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{
+                    .left = &e(.{
                         .Infix = .{
-                            .left = &.{
-                                .Integer = 3,
-                            },
-                            .right = &.{
-                                .Integer = 4,
-                            },
+                            .left = &e(.{ .Integer = 3 }),
+                            .right = &e(.{ .Integer = 4 }),
                             .operator = .Asterisk,
                         },
-                    },
-                    .right = &.{ .Integer = 3 },
+                    }),
+                    .right = &e(.{ .Integer = 3 }),
                     .operator = .Slash,
                 },
             },
@@ -729,18 +713,14 @@ test "infix expression" {
             .input = "(3 * 4) / 3",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{
+                    .left = &e(.{
                         .Infix = .{
-                            .left = &.{
-                                .Integer = 3,
-                            },
-                            .right = &.{
-                                .Integer = 4,
-                            },
+                            .left = &e(.{ .Integer = 3 }),
+                            .right = &e(.{ .Integer = 4 }),
                             .operator = .Asterisk,
                         },
-                    },
-                    .right = &.{ .Integer = 3 },
+                    }),
+                    .right = &e(.{ .Integer = 3 }),
                     .operator = .Slash,
                 },
             },
@@ -750,18 +730,14 @@ test "infix expression" {
             .input = "3 * (4 / 3)",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 3 },
-                    .right = &.{
+                    .left = &e(.{ .Integer = 3 }),
+                    .right = &e(.{
                         .Infix = .{
-                            .left = &.{
-                                .Integer = 4,
-                            },
-                            .right = &.{
-                                .Integer = 3,
-                            },
+                            .left = &e(.{ .Integer = 4 }),
+                            .right = &e(.{ .Integer = 3 }),
                             .operator = .Slash,
                         },
-                    },
+                    }),
                     .operator = .Asterisk,
                 },
             },
@@ -771,8 +747,8 @@ test "infix expression" {
             .input = "5.3 * 66.5",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Float = 5.3 },
-                    .right = &.{ .Float = 66.5 },
+                    .left = &e(.{ .Float = 5.3 }),
+                    .right = &e(.{ .Float = 66.5 }),
                     .operator = .Asterisk,
                 },
             },
@@ -782,8 +758,8 @@ test "infix expression" {
             .input = "1.1 % 5.3",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Float = 1.1 },
-                    .right = &.{ .Float = 5.3 },
+                    .left = &e(.{ .Float = 1.1 }),
+                    .right = &e(.{ .Float = 5.3 }),
                     .operator = .Percent,
                 },
             },
@@ -793,8 +769,8 @@ test "infix expression" {
             .input = "6 / 2",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 6 },
-                    .right = &.{ .Integer = 2 },
+                    .left = &e(.{ .Integer = 6 }),
+                    .right = &e(.{ .Integer = 2 }),
                     .operator = .Slash,
                 },
             },
@@ -804,8 +780,8 @@ test "infix expression" {
             .input = "6.55 / 2.413",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Float = 6.55 },
-                    .right = &.{ .Float = 2.413 },
+                    .left = &e(.{ .Float = 6.55 }),
+                    .right = &e(.{ .Float = 2.413 }),
                     .operator = .Slash,
                 },
             },
@@ -815,8 +791,8 @@ test "infix expression" {
             .input = "1 < 5",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 1 },
-                    .right = &.{ .Integer = 5 },
+                    .left = &e(.{ .Integer = 1 }),
+                    .right = &e(.{ .Integer = 5 }),
                     .operator = .Lt,
                 },
             },
@@ -826,8 +802,8 @@ test "infix expression" {
             .input = "1 <= 5",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 1 },
-                    .right = &.{ .Integer = 5 },
+                    .left = &e(.{ .Integer = 1 }),
+                    .right = &e(.{ .Integer = 5 }),
                     .operator = .LtOrEq,
                 },
             },
@@ -837,8 +813,8 @@ test "infix expression" {
             .input = "1 > 5",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 1 },
-                    .right = &.{ .Integer = 5 },
+                    .left = &e(.{ .Integer = 1 }),
+                    .right = &e(.{ .Integer = 5 }),
                     .operator = .Gt,
                 },
             },
@@ -848,8 +824,8 @@ test "infix expression" {
             .input = "1 >= 5",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 1 },
-                    .right = &.{ .Integer = 5 },
+                    .left = &e(.{ .Integer = 1 }),
+                    .right = &e(.{ .Integer = 5 }),
                     .operator = .GtOrEq,
                 },
             },
@@ -859,8 +835,8 @@ test "infix expression" {
             .input = "3 == 3",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 3 },
-                    .right = &.{ .Integer = 3 },
+                    .left = &e(.{ .Integer = 3 }),
+                    .right = &e(.{ .Integer = 3 }),
                     .operator = .Eq,
                 },
             },
@@ -870,8 +846,8 @@ test "infix expression" {
             .input = "3 != 3",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 3 },
-                    .right = &.{ .Integer = 3 },
+                    .left = &e(.{ .Integer = 3 }),
+                    .right = &e(.{ .Integer = 3 }),
                     .operator = .NotEq,
                 },
             },
@@ -881,8 +857,8 @@ test "infix expression" {
             .input = "3 | 3",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 3 },
-                    .right = &.{ .Integer = 3 },
+                    .left = &e(.{ .Integer = 3 }),
+                    .right = &e(.{ .Integer = 3 }),
                     .operator = .Pipe,
                 },
             },
@@ -892,8 +868,8 @@ test "infix expression" {
             .input = "3 & 3",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 3 },
-                    .right = &.{ .Integer = 3 },
+                    .left = &e(.{ .Integer = 3 }),
+                    .right = &e(.{ .Integer = 3 }),
                     .operator = .Ampersand,
                 },
             },
@@ -903,8 +879,8 @@ test "infix expression" {
             .input = "3 ^ 3",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 3 },
-                    .right = &.{ .Integer = 3 },
+                    .left = &e(.{ .Integer = 3 }),
+                    .right = &e(.{ .Integer = 3 }),
                     .operator = .Caret,
                 },
             },
@@ -914,8 +890,8 @@ test "infix expression" {
             .input = "3 << 3",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 3 },
-                    .right = &.{ .Integer = 3 },
+                    .left = &e(.{ .Integer = 3 }),
+                    .right = &e(.{ .Integer = 3 }),
                     .operator = .LeftShift,
                 },
             },
@@ -925,8 +901,8 @@ test "infix expression" {
             .input = "3 >> 3",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Integer = 3 },
-                    .right = &.{ .Integer = 3 },
+                    .left = &e(.{ .Integer = 3 }),
+                    .right = &e(.{ .Integer = 3 }),
                     .operator = .RightShift,
                 },
             },
@@ -936,8 +912,8 @@ test "infix expression" {
             .input = "true == false",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Boolean = true },
-                    .right = &.{ .Boolean = false },
+                    .left = &e(.{ .Boolean = true }),
+                    .right = &e(.{ .Boolean = false }),
                     .operator = .Eq,
                 },
             },
@@ -947,8 +923,8 @@ test "infix expression" {
             .input = "true != false",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Boolean = true },
-                    .right = &.{ .Boolean = false },
+                    .left = &e(.{ .Boolean = true }),
+                    .right = &e(.{ .Boolean = false }),
                     .operator = .NotEq,
                 },
             },
@@ -958,8 +934,8 @@ test "infix expression" {
             .input = "true or false",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Boolean = true },
-                    .right = &.{ .Boolean = false },
+                    .left = &e(.{ .Boolean = true }),
+                    .right = &e(.{ .Boolean = false }),
                     .operator = .Or,
                 },
             },
@@ -969,8 +945,8 @@ test "infix expression" {
             .input = "true and false",
             .expected_expression = .{
                 .Infix = .{
-                    .left = &.{ .Boolean = true },
-                    .right = &.{ .Boolean = false },
+                    .left = &e(.{ .Boolean = true }),
+                    .right = &e(.{ .Boolean = false }),
                     .operator = .And,
                 },
             },
@@ -994,12 +970,8 @@ test "range expression" {
             ,
             .expected_expression = .{
                 .Range = .{
-                    .start = &.{
-                        .Integer = 0,
-                    },
-                    .end = &.{
-                        .Integer = 10,
-                    },
+                    .start = &e(.{ .Integer = 0 }),
+                    .end = &e(.{ .Integer = 10 }),
                 },
             },
         },
@@ -1010,28 +982,20 @@ test "range expression" {
             ,
             .expected_expression = .{
                 .Range = .{
-                    .start = &.{
+                    .start = &e(.{
                         .Infix = .{
                             .operator = .Plus,
-                            .left = &.{
-                                .Integer = 2,
-                            },
-                            .right = &.{
-                                .Integer = 3,
-                            },
+                            .left = &e(.{ .Integer = 2 }),
+                            .right = &e(.{ .Integer = 3 }),
                         },
-                    },
-                    .end = &.{
+                    }),
+                    .end = &e(.{
                         .Infix = .{
                             .operator = .Minus,
-                            .left = &.{
-                                .Integer = 50,
-                            },
-                            .right = &.{
-                                .Integer = 10,
-                            },
+                            .left = &e(.{ .Integer = 50 }),
+                            .right = &e(.{ .Integer = 10 }),
                         },
-                    },
+                    }),
                 },
             },
         },
@@ -1042,22 +1006,18 @@ test "range expression" {
             ,
             .expected_expression = .{
                 .Range = .{
-                    .start = &.{
+                    .start = &e(.{
                         .Call = .{
                             .args = .{},
-                            .function = &.{
-                                .Identifier = "start",
-                            },
+                            .function = &e(.{ .Identifier = "start" }),
                         },
-                    },
-                    .end = &.{
+                    }),
+                    .end = &e(.{
                         .Call = .{
                             .args = .{},
-                            .function = &.{
-                                .Identifier = "end",
-                            },
+                            .function = &e(.{ .Identifier = "end" }),
                         },
-                    },
+                    }),
                 },
             },
         },
@@ -1074,6 +1034,7 @@ test "range expression" {
 test "list literal" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+    const a = arena.allocator();
 
     const test_cases = [_]ExpressionTestCase{
         .{
@@ -1081,9 +1042,7 @@ test "list literal" {
             .input =
             \\List{}
             ,
-            .expected_expression = .{
-                .List = .{},
-            },
+            .expected_expression = .{ .List = .{} },
         },
         .{
             .description = "empty list with new line",
@@ -1092,9 +1051,7 @@ test "list literal" {
             \\
             \\}
             ,
-            .expected_expression = .{
-                .List = .{},
-            },
+            .expected_expression = .{ .List = .{} },
         },
         .{
             .description = "list one line",
@@ -1102,9 +1059,9 @@ test "list literal" {
             \\List{1, 2}
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
-                    &.{ .Integer = 1 },
-                    &.{ .Integer = 2 },
+                .List = try test_utils.list(*const ast.Expression, a, &.{
+                    &e(.{ .Integer = 1 }),
+                    &e(.{ .Integer = 2 }),
                 }),
             },
         },
@@ -1114,9 +1071,9 @@ test "list literal" {
             \\List{1, 2,}
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
-                    &.{ .Integer = 1 },
-                    &.{ .Integer = 2 },
+                .List = try test_utils.list(*const ast.Expression, a, &.{
+                    &e(.{ .Integer = 1 }),
+                    &e(.{ .Integer = 2 }),
                 }),
             },
         },
@@ -1129,9 +1086,9 @@ test "list literal" {
             \\}
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
-                    &.{ .Integer = 1 },
-                    &.{ .Integer = 2 },
+                .List = try test_utils.list(*const ast.Expression, a, &.{
+                    &e(.{ .Integer = 1 }),
+                    &e(.{ .Integer = 2 }),
                 }),
             },
         },
@@ -1144,9 +1101,9 @@ test "list literal" {
             \\}
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
-                    &.{ .Integer = 1 },
-                    &.{ .Integer = 2 },
+                .List = try test_utils.list(*const ast.Expression, a, &.{
+                    &e(.{ .Integer = 1 }),
+                    &e(.{ .Integer = 2 }),
                 }),
             },
         },
@@ -1162,9 +1119,9 @@ test "list literal" {
             \\}
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
-                    &.{ .Integer = 1 },
-                    &.{ .Integer = 2 },
+                .List = try test_utils.list(*const ast.Expression, a, &.{
+                    &e(.{ .Integer = 1 }),
+                    &e(.{ .Integer = 2 }),
                 }),
             },
         },
@@ -1180,24 +1137,9 @@ test "list literal" {
             \\}
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
-                    &.{ .Integer = 1 },
-                    &.{ .Integer = 2 },
-                }),
-            },
-        },
-        .{
-            .description = "list of lists",
-            .input =
-            \\List{ 
-            \\    1,
-            \\    2,
-            \\}
-            ,
-            .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
-                    &.{ .Integer = 1 },
-                    &.{ .Integer = 2 },
+                .List = try test_utils.list(*const ast.Expression, a, &.{
+                    &e(.{ .Integer = 1 }),
+                    &e(.{ .Integer = 2 }),
                 }),
             },
         },
@@ -1234,23 +1176,19 @@ test "list literal" {
             \\}
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, arena.allocator(), &.{
-                    &.{ .List = try test_utils.list(
-                        *const ast.Expression,
-                        arena.allocator(),
-                        &.{
-                            &.{ .Integer = 1 },
-                            &.{ .Integer = 2 },
-                        },
-                    ) },
-                    &.{ .List = try test_utils.list(
-                        *const ast.Expression,
-                        arena.allocator(),
-                        &.{
-                            &.{ .Integer = 3 },
-                            &.{ .Integer = 4 },
-                        },
-                    ) },
+                .List = try test_utils.list(*const ast.Expression, a, &.{
+                    &e(.{
+                        .List = try test_utils.list(*const ast.Expression, a, &.{
+                            &e(.{ .Integer = 1 }),
+                            &e(.{ .Integer = 2 }),
+                        }),
+                    }),
+                    &e(.{
+                        .List = try test_utils.list(*const ast.Expression, a, &.{
+                            &e(.{ .Integer = 3 }),
+                            &e(.{ .Integer = 4 }),
+                        }),
+                    }),
                 }),
             },
         },
@@ -1267,6 +1205,7 @@ test "list literal" {
 test "table literal" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+    const a = arena.allocator();
 
     const test_cases = [_]ExpressionTestCase{
         .{
@@ -1274,9 +1213,7 @@ test "table literal" {
             .input =
             \\Table{}
             ,
-            .expected_expression = .{
-                .Table = .{},
-            },
+            .expected_expression = .{ .Table = .{} },
         },
         .{
             .description = "empty table with new line",
@@ -1285,9 +1222,7 @@ test "table literal" {
             \\
             \\}
             ,
-            .expected_expression = .{
-                .Table = .{},
-            },
+            .expected_expression = .{ .Table = .{} },
         },
         .{
             .description = "table one line",
@@ -1295,9 +1230,9 @@ test "table literal" {
             \\Table{"a" = 1, "b" = 2}
             ,
             .expected_expression = .{
-                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
-                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
-                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
+                .Table = try test_utils.list(ast.TablePair, a, &.{
+                    .{ .key = &e(.{ .String = "a" }), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = &e(.{ .String = "b" }), .value = &e(.{ .Integer = 2 }) },
                 }),
             },
         },
@@ -1307,9 +1242,9 @@ test "table literal" {
             \\Table{"a" = 1, "b" = 2,}
             ,
             .expected_expression = .{
-                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
-                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
-                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
+                .Table = try test_utils.list(ast.TablePair, a, &.{
+                    .{ .key = &e(.{ .String = "a" }), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = &e(.{ .String = "b" }), .value = &e(.{ .Integer = 2 }) },
                 }),
             },
         },
@@ -1322,9 +1257,9 @@ test "table literal" {
             \\}
             ,
             .expected_expression = .{
-                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
-                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
-                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
+                .Table = try test_utils.list(ast.TablePair, a, &.{
+                    .{ .key = &e(.{ .String = "a" }), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = &e(.{ .String = "b" }), .value = &e(.{ .Integer = 2 }) },
                 }),
             },
         },
@@ -1337,9 +1272,9 @@ test "table literal" {
             \\}
             ,
             .expected_expression = .{
-                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
-                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
-                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
+                .Table = try test_utils.list(ast.TablePair, a, &.{
+                    .{ .key = &e(.{ .String = "a" }), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = &e(.{ .String = "b" }), .value = &e(.{ .Integer = 2 }) },
                 }),
             },
         },
@@ -1355,9 +1290,9 @@ test "table literal" {
             \\}
             ,
             .expected_expression = .{
-                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
-                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
-                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
+                .Table = try test_utils.list(ast.TablePair, a, &.{
+                    .{ .key = &e(.{ .String = "a" }), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = &e(.{ .String = "b" }), .value = &e(.{ .Integer = 2 }) },
                 }),
             },
         },
@@ -1373,9 +1308,9 @@ test "table literal" {
             \\}
             ,
             .expected_expression = .{
-                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
-                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
-                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
+                .Table = try test_utils.list(ast.TablePair, a, &.{
+                    .{ .key = &e(.{ .String = "a" }), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = &e(.{ .String = "b" }), .value = &e(.{ .Integer = 2 }) },
                 }),
             },
         },
@@ -1412,32 +1347,24 @@ test "table literal" {
             \\}
             ,
             .expected_expression = .{
-                .Table = try test_utils.list(ast.TablePair, arena.allocator(), &.{
+                .Table = try test_utils.list(ast.TablePair, a, &.{
                     .{
-                        .key = &.{ .String = "a" },
-                        .value = &.{
-                            .Table = try test_utils.list(
-                                ast.TablePair,
-                                arena.allocator(),
-                                &.{
-                                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 1 } },
-                                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 2 } },
-                                },
-                            ),
-                        },
+                        .key = &e(.{ .String = "a" }),
+                        .value = &e(.{
+                            .Table = try test_utils.list(ast.TablePair, a, &.{
+                                .{ .key = &e(.{ .String = "a" }), .value = &e(.{ .Integer = 1 }) },
+                                .{ .key = &e(.{ .String = "b" }), .value = &e(.{ .Integer = 2 }) },
+                            }),
+                        }),
                     },
                     .{
-                        .key = &.{ .String = "b" },
-                        .value = &.{
-                            .Table = try test_utils.list(
-                                ast.TablePair,
-                                arena.allocator(),
-                                &.{
-                                    .{ .key = &.{ .String = "a" }, .value = &.{ .Integer = 3 } },
-                                    .{ .key = &.{ .String = "b" }, .value = &.{ .Integer = 4 } },
-                                },
-                            ),
-                        },
+                        .key = &e(.{ .String = "b" }),
+                        .value = &e(.{
+                            .Table = try test_utils.list(ast.TablePair, a, &.{
+                                .{ .key = &e(.{ .String = "a" }), .value = &e(.{ .Integer = 3 }) },
+                                .{ .key = &e(.{ .String = "b" }), .value = &e(.{ .Integer = 4 }) },
+                            }),
+                        }),
                     },
                 }),
             },
@@ -1455,6 +1382,7 @@ test "table literal" {
 test "function call" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+    const a = arena.allocator();
 
     const test_cases = [_]ExpressionTestCase{
         .{
@@ -1464,9 +1392,7 @@ test "function call" {
             ,
             .expected_expression = .{
                 .Call = .{
-                    .function = &.{
-                        .Identifier = "test",
-                    },
+                    .function = &e(.{ .Identifier = "test" }),
                     .args = .{},
                 },
             },
@@ -1478,12 +1404,10 @@ test "function call" {
             ,
             .expected_expression = .{
                 .Call = .{
-                    .function = &.{
-                        .Identifier = "test",
-                    },
-                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
-                        .{ .Positional = &.{ .Integer = 1 } },
-                        .{ .Positional = &.{ .Integer = 2 } },
+                    .function = &e(.{ .Identifier = "test" }),
+                    .args = try test_utils.list(ast.FunctionArg, a, &.{
+                        .{ .Positional = &e(.{ .Integer = 1 }) },
+                        .{ .Positional = &e(.{ .Integer = 2 }) },
                     }),
                 },
             },
@@ -1495,12 +1419,10 @@ test "function call" {
             ,
             .expected_expression = .{
                 .Call = .{
-                    .function = &.{
-                        .Identifier = "test",
-                    },
-                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
-                        .{ .Positional = &.{ .Integer = 1 } },
-                        .{ .Positional = &.{ .Integer = 2 } },
+                    .function = &e(.{ .Identifier = "test" }),
+                    .args = try test_utils.list(ast.FunctionArg, a, &.{
+                        .{ .Positional = &e(.{ .Integer = 1 }) },
+                        .{ .Positional = &e(.{ .Integer = 2 }) },
                     }),
                 },
             },
@@ -1515,12 +1437,10 @@ test "function call" {
             ,
             .expected_expression = .{
                 .Call = .{
-                    .function = &.{
-                        .Identifier = "test",
-                    },
-                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
-                        .{ .Positional = &.{ .Integer = 1 } },
-                        .{ .Positional = &.{ .Integer = 2 } },
+                    .function = &e(.{ .Identifier = "test" }),
+                    .args = try test_utils.list(ast.FunctionArg, a, &.{
+                        .{ .Positional = &e(.{ .Integer = 1 }) },
+                        .{ .Positional = &e(.{ .Integer = 2 }) },
                     }),
                 },
             },
@@ -1535,12 +1455,10 @@ test "function call" {
             ,
             .expected_expression = .{
                 .Call = .{
-                    .function = &.{
-                        .Identifier = "test",
-                    },
-                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
-                        .{ .Positional = &.{ .Integer = 1 } },
-                        .{ .Positional = &.{ .Integer = 2 } },
+                    .function = &e(.{ .Identifier = "test" }),
+                    .args = try test_utils.list(ast.FunctionArg, a, &.{
+                        .{ .Positional = &e(.{ .Integer = 1 }) },
+                        .{ .Positional = &e(.{ .Integer = 2 }) },
                     }),
                 },
             },
@@ -1556,13 +1474,11 @@ test "function call" {
             ,
             .expected_expression = .{
                 .Call = .{
-                    .function = &.{
-                        .Identifier = "test",
-                    },
-                    .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
-                        .{ .Positional = &.{ .Integer = 1 } },
-                        .{ .Named = .{ .name = "c", .value = &.{ .Integer = 2 } } },
-                        .{ .Named = .{ .name = "b", .value = &.{ .Integer = 3 } } },
+                    .function = &e(.{ .Identifier = "test" }),
+                    .args = try test_utils.list(ast.FunctionArg, a, &.{
+                        .{ .Positional = &e(.{ .Integer = 1 }) },
+                        .{ .Named = .{ .name = "c", .value = &e(.{ .Integer = 2 }) } },
+                        .{ .Named = .{ .name = "b", .value = &e(.{ .Integer = 3 }) } },
                     }),
                 },
             },
@@ -1580,6 +1496,7 @@ test "function call" {
 test "function literal" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+    const a = arena.allocator();
 
     const test_cases = [_]ExpressionTestCase{
         .{
@@ -1602,20 +1519,20 @@ test "function literal" {
             ,
             .expected_expression = .{
                 .Function = .{
-                    .params = try test_utils.list(ast.FunctionParam, arena.allocator(), &.{
+                    .params = try test_utils.list(ast.FunctionParam, a, &.{
                         .{ .Positional = "a" },
                         .{ .Positional = "b" },
                     }),
                     .body = .{
-                        .Block = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                        .Block = try test_utils.list(ast.Statement, a, &.{
                             .{
-                                .Return = &.{
+                                .Return = &e(.{
                                     .Infix = .{
-                                        .left = &.{ .Identifier = "a" },
+                                        .left = &e(.{ .Identifier = "a" }),
                                         .operator = .Plus,
-                                        .right = &.{ .Identifier = "b" },
+                                        .right = &e(.{ .Identifier = "b" }),
                                     },
-                                },
+                                }),
                             },
                         }),
                     },
@@ -1629,18 +1546,18 @@ test "function literal" {
             ,
             .expected_expression = .{
                 .Function = .{
-                    .params = try test_utils.list(ast.FunctionParam, arena.allocator(), &.{
+                    .params = try test_utils.list(ast.FunctionParam, a, &.{
                         .{ .Positional = "a" },
                         .{ .Positional = "b" },
                     }),
                     .body = .{
-                        .Expression = &.{
+                        .Expression = &e(.{
                             .Infix = .{
-                                .left = &.{ .Identifier = "a" },
+                                .left = &e(.{ .Identifier = "a" }),
                                 .operator = .Plus,
-                                .right = &.{ .Identifier = "b" },
+                                .right = &e(.{ .Identifier = "b" }),
                             },
-                        },
+                        }),
                     },
                 },
             },
@@ -1652,18 +1569,18 @@ test "function literal" {
             ,
             .expected_expression = .{
                 .Function = .{
-                    .params = try test_utils.list(ast.FunctionParam, arena.allocator(), &.{
-                        .{ .Default = .{ .name = "a", .value = &.{ .Integer = 11 } } },
-                        .{ .Default = .{ .name = "b", .value = &.{ .Integer = 12 } } },
+                    .params = try test_utils.list(ast.FunctionParam, a, &.{
+                        .{ .Default = .{ .name = "a", .value = &e(.{ .Integer = 11 }) } },
+                        .{ .Default = .{ .name = "b", .value = &e(.{ .Integer = 12 }) } },
                     }),
                     .body = .{
-                        .Expression = &.{
+                        .Expression = &e(.{
                             .Infix = .{
-                                .left = &.{ .Identifier = "a" },
+                                .left = &e(.{ .Identifier = "a" }),
                                 .operator = .Plus,
-                                .right = &.{ .Identifier = "b" },
+                                .right = &e(.{ .Identifier = "b" }),
                             },
-                        },
+                        }),
                     },
                 },
             },
@@ -1687,8 +1604,8 @@ test "index expression" {
             ,
             .expected_expression = .{
                 .Index = .{
-                    .left = &.{ .Identifier = "a" },
-                    .index = &.{ .Integer = 2 },
+                    .left = &e(.{ .Identifier = "a" }),
+                    .index = &e(.{ .Integer = 2 }),
                 },
             },
         },
@@ -1705,6 +1622,7 @@ test "index expression" {
 test "match expression" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+    const a = arena.allocator();
 
     const test_cases = [_]ExpressionTestCase{
         .{
@@ -1714,11 +1632,11 @@ test "match expression" {
             ,
             .expected_expression = .{
                 .Match = .{
-                    .target = &.{ .Identifier = "foo" },
+                    .target = &e(.{ .Identifier = "foo" }),
                     .body = .{
                         .Single = .{
-                            .pattern = &.{ .Boolean = true },
-                            .body = .{ .Return = &.{ .String = "bar" } },
+                            .pattern = &e(.{ .Boolean = true }),
+                            .body = .{ .Return = &e(.{ .String = "bar" }) },
                         },
                     },
                 },
@@ -1734,14 +1652,14 @@ test "match expression" {
                     .target = null,
                     .body = .{
                         .Single = .{
-                            .pattern = &.{
+                            .pattern = &e(.{
                                 .Infix = .{
-                                    .left = &.{ .Identifier = "foo" },
-                                    .right = &.{ .Integer = 10 },
+                                    .left = &e(.{ .Identifier = "foo" }),
+                                    .right = &e(.{ .Integer = 10 }),
                                     .operator = .Lt,
                                 },
-                            },
-                            .body = .{ .Return = &.{ .String = "bar" } },
+                            }),
+                            .body = .{ .Return = &e(.{ .String = "bar" }) },
                         },
                     },
                 },
@@ -1758,20 +1676,20 @@ test "match expression" {
             ,
             .expected_expression = .{
                 .Match = .{
-                    .target = &.{ .Identifier = "foo" },
+                    .target = &e(.{ .Identifier = "foo" }),
                     .body = .{
-                        .Multiple = try test_utils.list(ast.MatchArm, arena.allocator(), &.{
+                        .Multiple = try test_utils.list(ast.MatchArm, a, &.{
                             .{
-                                .pattern = &.{ .Integer = 1 },
-                                .body = .{ .Return = &.{ .String = "a" } },
+                                .pattern = &e(.{ .Integer = 1 }),
+                                .body = .{ .Return = &e(.{ .String = "a" }) },
                             },
                             .{
-                                .pattern = &.{ .Integer = 2 },
-                                .body = .{ .Return = &.{ .String = "b" } },
+                                .pattern = &e(.{ .Integer = 2 }),
+                                .body = .{ .Return = &e(.{ .String = "b" }) },
                             },
                             .{
-                                .pattern = &.{ .Identifier = "_" },
-                                .body = .{ .Return = &.{ .String = "c" } },
+                                .pattern = &e(.{ .Identifier = "_" }),
+                                .body = .{ .Return = &e(.{ .String = "c" }) },
                             },
                         }),
                     },
@@ -1807,6 +1725,7 @@ test "parse program" {
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+    const a = arena.allocator();
 
     const test_cases = [_]ProgramTestCase{
         .{
@@ -1825,103 +1744,95 @@ test "parse program" {
             \\
             \\print(fib(30))
             ,
-            .expected = try test_utils.list(ast.Statement, arena.allocator(), &.{
+            .expected = try test_utils.list(ast.Statement, a, &.{
                 .{
                     .VarDeclaration = .{
                         .name = "fib",
-                        .expression = &.{
+                        .expression = &e(.{
                             .Function = .{
                                 .name = "fib",
-                                .params = try test_utils.list(ast.FunctionParam, arena.allocator(), &.{
+                                .params = try test_utils.list(ast.FunctionParam, a, &.{
                                     .{ .Positional = "n" },
                                 }),
                                 .body = .{
-                                    .Block = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                                    .Block = try test_utils.list(ast.Statement, a, &.{
                                         .{
                                             .VarDeclaration = .{
                                                 .name = "a",
-                                                .expression = &.{ .Integer = 0 },
+                                                .expression = &e(.{ .Integer = 0 }),
                                             },
                                         },
                                         .{
                                             .VarDeclaration = .{
                                                 .name = "b",
-                                                .expression = &.{ .Integer = 1 },
+                                                .expression = &e(.{ .Integer = 1 }),
                                             },
                                         },
                                         .{
                                             .For = .{
-                                                .expression = &.{
+                                                .expression = &e(.{
                                                     .Range = .{
-                                                        .start = &.{ .Integer = 0 },
-                                                        .end = &.{ .Identifier = "n" },
+                                                        .start = &e(.{ .Integer = 0 }),
+                                                        .end = &e(.{ .Identifier = "n" }),
                                                     },
-                                                },
+                                                }),
                                                 .capture = "_",
                                                 .index = null,
-                                                .body = try test_utils.list(ast.Statement, arena.allocator(), &.{
+                                                .body = try test_utils.list(ast.Statement, a, &.{
                                                     .{
                                                         .VarDeclaration = .{
                                                             .name = "tmp",
-                                                            .expression = &.{ .Identifier = "b" },
+                                                            .expression = &e(.{ .Identifier = "b" }),
                                                         },
                                                     },
                                                     .{
                                                         .Assignment = .{
                                                             .target = .{ .Identifier = "b" },
-                                                            .expression = &.{
+                                                            .expression = &e(.{
                                                                 .Infix = .{
-                                                                    .left = &.{
-                                                                        .Identifier = "a",
-                                                                    },
-                                                                    .right = &.{
-                                                                        .Identifier = "b",
-                                                                    },
+                                                                    .left = &e(.{ .Identifier = "a" }),
+                                                                    .right = &e(.{ .Identifier = "b" }),
                                                                     .operator = .Plus,
                                                                 },
-                                                            },
+                                                            }),
                                                         },
                                                     },
                                                     .{
                                                         .Assignment = .{
                                                             .target = .{ .Identifier = "a" },
-                                                            .expression = &.{
-                                                                .Identifier = "tmp",
-                                                            },
+                                                            .expression = &e(.{ .Identifier = "tmp" }),
                                                         },
                                                     },
                                                 }),
                                             },
                                         },
                                         .{
-                                            .Return = &.{ .Identifier = "a" },
+                                            .Return = &e(.{ .Identifier = "a" }),
                                         },
                                     }),
                                 },
                             },
-                        },
+                        }),
                     },
                 },
                 .{
-                    .Expression = &.{
+                    .Expression = &e(.{
                         .Call = .{
-                            .function = &.{ .Identifier = "print" },
-                            .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
+                            .function = &e(.{ .Identifier = "print" }),
+                            .args = try test_utils.list(ast.FunctionArg, a, &.{
                                 .{
-                                    .Positional = &.{
+                                    .Positional = &e(.{
                                         .Call = .{
-                                            .function = &.{ .Identifier = "fib" },
-                                            .args = try test_utils.list(ast.FunctionArg, arena.allocator(), &.{
-                                                .{
-                                                    .Positional = &.{ .Integer = 30 },
-                                                },
+                                            .function = &e(.{ .Identifier = "fib" }),
+                                            .args = try test_utils.list(ast.FunctionArg, a, &.{
+                                                .{ .Positional = &e(.{ .Integer = 30 }) },
                                             }),
                                         },
-                                    },
+                                    }),
                                 },
                             }),
                         },
-                    },
+                    }),
                 },
             }),
         },

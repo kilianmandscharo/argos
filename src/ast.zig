@@ -29,8 +29,6 @@ pub const Statement = union(enum) {
             .For => try writer.print("For", .{}),
             .While => try writer.print("While", .{}),
             .Return => try writer.print("Return", .{}),
-            .Assert => try writer.print("Assert", .{}),
-            .Print => try writer.print("Print", .{}),
             .Expression => |val| try writer.print("Expression {f}", .{val}),
         }
     }
@@ -65,7 +63,19 @@ const While = struct {
     body: Block,
 };
 
-pub const Expression = union(enum) {
+pub const Expression = struct {
+    location: scanner.Token,
+    data: ExpressionData,
+
+    pub fn init(data: ExpressionData, token: scanner.Token) @This() {
+        return .{
+            .data = data,
+            .location = token,
+        };
+    }
+};
+
+pub const ExpressionData = union(enum) {
     Identifier: []const u8,
     String: []const u8,
     Integer: i64,

@@ -363,9 +363,6 @@ pub const Compiler = struct {
     }
 
     fn errorAt(message: []const u8) anyerror {
-        // std.debug.print("[line {d}] Error", .{line});
-        // std.debug.print(" at '{s}'", .{name});
-        // std.debug.print(": {s}\n", .{message});
         std.debug.print("{s}", .{message});
         return error.CompileError;
     }
@@ -411,12 +408,12 @@ pub const Compiler = struct {
             },
             .For => |val| {
                 self.beginScope();
-                if (val.expression.* != .Range) {
+                if (val.expression.data != .Range) {
                     return errorAt("Only range expressions are supported for now.");
                 }
 
-                try self.compileExpression(val.expression.Range.start);
-                try self.compileExpression(val.expression.Range.end);
+                try self.compileExpression(val.expression.data.Range.start);
+                try self.compileExpression(val.expression.data.Range.end);
 
                 try self.declareVariable(val.capture);
                 self.markInitialized();
@@ -493,7 +490,7 @@ pub const Compiler = struct {
     }
 
     fn compileExpression(self: *Compiler, expr: *const ast.Expression) anyerror!void {
-        switch (expr.*) {
+        switch (expr.data) {
             .Identifier => |name| {
                 if (try self.resolveLocal(name)) |local| {
                     try self.emitOpCode(.GetLocal);
@@ -693,7 +690,7 @@ pub const Compiler = struct {
 
                 const arms = val.body.Multiple.items;
                 for (arms) |arm| {
-                    if (arm.pattern.* == .Identifier and std.mem.eql(u8, arm.pattern.Identifier, "_")) {
+                    if (arm.pattern.data == .Identifier and std.mem.eql(u8, arm.pattern.data.Identifier, "_")) {
                         break;
                     }
 
@@ -714,7 +711,7 @@ pub const Compiler = struct {
                 const last_arm: ?ast.MatchArm = if (arms.len > 0) arms[arms.len - 1] else null;
                 var else_arm: ?ast.MatchArm = null;
                 if (last_arm) |arm| {
-                    if (arm.pattern.* == .Identifier and std.mem.eql(u8, arm.pattern.Identifier, "_")) {
+                    if (arm.pattern.data == .Identifier and std.mem.eql(u8, arm.pattern.data.Identifier, "_")) {
                         else_arm = arm;
                     }
                 }

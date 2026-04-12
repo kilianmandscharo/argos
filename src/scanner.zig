@@ -1,5 +1,6 @@
 const std = @import("std");
 const test_utils = @import("test_utils.zig");
+const ast = @import("ast.zig");
 
 pub const TokenType = enum {
     LParen,
@@ -68,6 +69,18 @@ pub const Token = struct {
     start: usize,
     length: usize,
     line: usize,
+    column: usize,
+
+    pub fn dummy() @This() {
+        return .{
+            .source = "",
+            .type = .Eof,
+            .start = 0,
+            .length = 0,
+            .line = 0,
+            .column = 0,
+        };
+    }
 
     pub fn toString(self: Token) []const u8 {
         if (self.type == .NewLine) return "<newline>";
@@ -81,6 +94,46 @@ pub const Token = struct {
     ) !void {
         try writer.print("{s} {s}", .{ @tagName(self.type), self.source[self.start .. self.start + self.length] });
     }
+
+    fn getLineSlice(self: @This()) []const u8 {
+        const start = self.findLineStart();
+        const end = self.findLineEnd();
+        return self.source[start..end];
+    }
+
+    fn findLineStart(self: @This()) usize {
+        var line_start = self.start;
+        while (line_start - 1 > 0 and self.source[line_start - 1] != '\n') {
+            line_start -= 1;
+        }
+        return line_start;
+    }
+
+    fn findLineEnd(self: @This()) usize {
+        var line_end = self.start;
+        while (line_end < self.source.len and self.source[line_end] != '\n') {
+            line_end += 1;
+        }
+        return line_end;
+    }
+
+    pub fn printError(self: @This(), message: []const u8) void {
+        std.debug.print("[line {d}, column {d}] Error", .{ self.line, self.column });
+
+        switch (self.type) {
+            .Eof => std.debug.print(" at end", .{}),
+            else => std.debug.print(" at '{s}'", .{self.toString()}),
+        }
+
+        std.debug.print(": {s}\n", .{message});
+        std.debug.print("\n{s}\n", .{self.getLineSlice()});
+
+        for (0..self.column - 1) |_| {
+            std.debug.print(" ", .{});
+        }
+
+        std.debug.print("^\n", .{});
+    }
 };
 
 pub const Scanner = struct {
@@ -88,6 +141,7 @@ pub const Scanner = struct {
     start: usize,
     current: usize,
     line: usize,
+    column: usize,
 
     pub fn init(source: []const u8) Scanner {
         return Scanner{
@@ -95,6 +149,7 @@ pub const Scanner = struct {
             .start = 0,
             .current = 0,
             .line = 1,
+            .column = 1,
         };
     }
 
@@ -105,6 +160,7 @@ pub const Scanner = struct {
             .start = self.start,
             .length = self.current - self.start,
             .line = self.line,
+            .column = self.column,
         };
     }
 
@@ -114,6 +170,7 @@ pub const Scanner = struct {
     }
 
     pub fn advance(self: *Scanner) u8 {
+        self.column += 1;
         self.current += 1;
         return self.source[self.current - 1];
     }
@@ -180,6 +237,7 @@ pub const Scanner = struct {
             '%' => return self.makeToken(.Percent),
             '\n' => {
                 self.line += 1;
+                self.column = 1;
                 return self.makeToken(.NewLine);
             },
             '-' => return if (self.match('>')) self.makeToken(.Arrow) else self.makeToken(.Minus),
