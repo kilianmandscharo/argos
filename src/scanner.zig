@@ -236,9 +236,10 @@ pub const Scanner = struct {
             '~' => return self.makeToken(.Tilde),
             '%' => return self.makeToken(.Percent),
             '\n' => {
+                const token = self.makeToken(.NewLine);
                 self.line += 1;
                 self.column = 1;
-                return self.makeToken(.NewLine);
+                return token;
             },
             '-' => return if (self.match('>')) self.makeToken(.Arrow) else self.makeToken(.Minus),
             '!' => return if (self.match('=')) self.makeToken(.NotEq) else self.makeToken(.Bang),
