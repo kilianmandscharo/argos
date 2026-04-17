@@ -229,11 +229,19 @@ pub const VirtualMachine = struct {
     }
 
     fn readU24(self: *VirtualMachine) usize {
-        return chunk.u24ToIndex(self.readByte(), self.readByte(), self.readByte());
+        const code = self.frame.function.chunk.code.items;
+        const ip = self.frame.ip;
+        const val = chunk.u24ToIndex(code[ip], code[ip + 1], code[ip + 2]);
+        self.frame.ip += 3;
+        return val;
     }
 
     fn readU16(self: *VirtualMachine) usize {
-        return chunk.u16ToIndex(self.readByte(), self.readByte());
+        const code = self.frame.function.chunk.code.items;
+        const ip = self.frame.ip;
+        const val = chunk.u16ToIndex(code[ip], code[ip + 1]);
+        self.frame.ip += 2;
+        return val;
     }
 
     fn readConstant(self: *VirtualMachine) value.Value {

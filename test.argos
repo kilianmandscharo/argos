@@ -9,4 +9,6 @@ let fib = fn (n) {
     return a
 }
 
-print(fib(75))
+for (0..1000000) |_| {
+    fib(50)
+}
