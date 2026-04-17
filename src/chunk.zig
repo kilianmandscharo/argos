@@ -83,16 +83,15 @@ pub const Chunk = struct {
 
     pub fn writeConstant(self: *Chunk, gpa: std.mem.Allocator, val: value.Value, line: usize) !void {
         const constant = try self.addConstant(gpa, val);
-        const bytes = indexToU24(constant);
+        const bytes = indexToU16(constant);
         try self.write(gpa, OpByte{ .Op = .Constant }, line);
         try self.write(gpa, OpByte{ .Byte = bytes[0] }, line);
         try self.write(gpa, OpByte{ .Byte = bytes[1] }, line);
-        try self.write(gpa, OpByte{ .Byte = bytes[2] }, line);
     }
 
-    pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, val: value.Value) !usize {
+    pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, val: value.Value) !u16 {
         try self.constants.append(gpa, val);
-        return self.constants.items.len - 1;
+        return @intCast(self.constants.items.len - 1);
     }
 
     pub fn disassemble(self: *Chunk, name: []const u8) void {
@@ -129,8 +128,8 @@ pub const Chunk = struct {
             .Constant => return constantInstruction(self, "OP_CONSTANT", offset),
             .GetGlobal => return constantInstruction(self, "OP_GET_GLOBAL", offset),
             .SetGlobal => return constantInstruction(self, "OP_SET_GLOBAL", offset),
-            .GetLocal => return threeByteInstruction(self, "OP_GET_LOCAL", offset),
-            .SetLocal => return threeByteInstruction(self, "OP_SET_LOCAL", offset),
+            .GetLocal => return simpleInstruction("OP_GET_LOCAL", offset),
+            .SetLocal => return simpleInstruction("OP_SET_LOCAL", offset),
             .JumpIfFalse => return jumpByteInstruction(self, "OP_JUMP_IF_FALSE", offset, 1),
             .JumpIfNotEq => return jumpByteInstruction(self, "OP_JUMP_IF_NOT_EQ", offset, 1),
             .JumpIfGreaterOrEq => return jumpByteInstruction(self, "OP_JUMP_IF_GREATER_OR_EQ", offset, 1),
@@ -142,10 +141,9 @@ pub const Chunk = struct {
             .CloseUpvalue => return simpleInstruction("OP_CLOSE_UPVALUE", offset),
             .Closure => {
                 var curr_offset = offset;
-                const constant = u24ToIndex(
+                const constant = u16ToIndex(
                     self.code.items[curr_offset + 1],
                     self.code.items[curr_offset + 2],
-                    self.code.items[curr_offset + 3],
                 );
                 curr_offset += 4;
                 const val = self.constants.items[constant];
@@ -160,31 +158,19 @@ pub const Chunk = struct {
                 }
                 return curr_offset;
             },
-            .ListInit => return threeByteInstruction(self, "OP_LIST_INIT", offset),
-            .TableInit => return threeByteInstruction(self, "OP_TABLE_INIT", offset),
+            .ListInit => return twoByteInstruction(self, "OP_LIST_INIT", offset),
+            .TableInit => return twoByteInstruction(self, "OP_TABLE_INIT", offset),
             .IndexGet => return simpleInstruction("OP_INDEX_GET", offset),
             .IndexSet => return simpleInstruction("OP_INDEX_SET", offset),
         }
     }
 };
 
-pub inline fn indexToU24(index: usize) [3]u8 {
-    return .{
-        @intCast((index >> 16) & 0xFF),
-        @intCast((index >> 8) & 0xFF),
-        @intCast((index & 0xFF)),
-    };
-}
-
 pub inline fn indexToU16(index: usize) [2]u8 {
     return .{
         @intCast((index >> 8) & 0xFF),
         @intCast((index & 0xFF)),
     };
-}
-
-pub inline fn u24ToIndex(first: u8, second: u8, third: u8) usize {
-    return (@as(usize, @intCast(first)) << 16) | (@as(usize, @intCast(second)) << 8) | (@as(usize, @intCast(third)));
 }
 
 pub inline fn u16ToIndex(first: u8, second: u8) usize {
@@ -197,24 +183,22 @@ fn simpleInstruction(name: []const u8, offset: usize) usize {
 }
 
 fn constantInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
-    const constant = u24ToIndex(
+    const constant = u16ToIndex(
         chunk.code.items[offset + 1],
         chunk.code.items[offset + 2],
-        chunk.code.items[offset + 3],
     );
     const val = chunk.constants.items[constant];
     std.debug.print("{s:<18}{d:4} {f}\n", .{ name, constant, val });
-    return offset + 4;
+    return offset + 3;
 }
 
-fn threeByteInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
-    const index = u24ToIndex(
+fn twoByteInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {
+    const index = u16ToIndex(
         chunk.code.items[offset + 1],
         chunk.code.items[offset + 2],
-        chunk.code.items[offset + 3],
     );
     std.debug.print("{s:<18}{d:4}\n", .{ name, index });
-    return offset + 4;
+    return offset + 3;
 }
 
 fn byteInstruction(chunk: *Chunk, name: []const u8, offset: usize) usize {

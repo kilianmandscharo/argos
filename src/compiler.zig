@@ -43,7 +43,7 @@ pub const Compiler = struct {
     gpa: std.mem.Allocator,
     vm: *virtual_machine.VirtualMachine,
     locals: [UINT8_COUNT]Local,
-    local_count: u32,
+    local_count: u8,
     scope_depth: u32,
     function: ?*object.ObjFunction,
     type: FunctionType,
@@ -140,17 +140,16 @@ pub const Compiler = struct {
     }
 
     fn emitReturn(self: *Compiler) !void {
-        try self.emitOpCode(.Null);
-        try self.emitOpCode(.Return);
+        try self.emitOp(.Null);
+        try self.emitOp(.Return);
     }
 
-    fn defineVariable(self: *Compiler, global: usize) !void {
+    fn defineVariable(self: *Compiler, global: u16) !void {
         if (self.scope_depth > 0) {
             self.markInitialized();
             return;
         }
-        try self.emitOpCode(.DefineGlobal);
-        try self.emitU24(global);
+        try self.emitOpU16(.DefineGlobal, global);
     }
 
     fn markInitialized(self: *Compiler) void {
@@ -158,7 +157,7 @@ pub const Compiler = struct {
         self.locals[self.local_count - 1].depth = self.scope_depth;
     }
 
-    fn getVariable(self: *Compiler, name: []const u8) !usize {
+    fn getVariable(self: *Compiler, name: []const u8) !u16 {
         try self.declareVariable(name);
         if (self.scope_depth > 0) return 0;
         return try self.identifierConstant(name);
@@ -194,13 +193,13 @@ pub const Compiler = struct {
         local.is_captured = false;
     }
 
-    fn identifierConstant(self: *Compiler, name: []const u8) !usize {
+    fn identifierConstant(self: *Compiler, name: []const u8) !u16 {
         const obj = try object.copyString(self.vm, name);
         return try self.makeConstant(value.wrapObj(obj));
     }
 
     fn emitLoop(self: *Compiler, loop_start: usize) !void {
-        try self.emitOpCode(.Loop);
+        try self.emitOp(.Loop);
 
         const offset = self.currentChunk().code.items.len - loop_start + 2;
         if (offset > std.math.maxInt(u16)) {
@@ -211,7 +210,7 @@ pub const Compiler = struct {
     }
 
     fn emitJump(self: *Compiler, instruction: chunk.OpCode) !usize {
-        try self.emitOpCode(instruction);
+        try self.emitOp(instruction);
         try self.emitByte(0xff);
         try self.emitByte(0xff);
         return self.currentChunk().code.items.len - 2;
@@ -287,24 +286,25 @@ pub const Compiler = struct {
             self.locals[self.local_count - 1].depth.? > self.scope_depth)
         {
             if (self.locals[self.local_count - 1].is_captured) {
-                try self.emitOpCode(.CloseUpvalue);
+                try self.emitOp(.CloseUpvalue);
             } else {
-                try self.emitOpCode(.Pop);
+                try self.emitOp(.Pop);
             }
             self.local_count -= 1;
         }
     }
 
-    fn resolveLocal(self: *Compiler, name: []const u8) !?usize {
+    fn resolveLocal(self: *Compiler, name: []const u8) !?u8 {
         if (self.local_count == 0) return null;
         var i = self.local_count;
-        while (i > 0) : (i -= 1) {
-            const local = &self.locals[i - 1];
+        while (i > 0) {
+            i -= 1;
+            const local = &self.locals[i];
             if (Compiler.identifiersEqual(name, local.name)) {
                 if (local.depth == null) {
                     return errorAt("Can't read local variable in its own initializer.");
                 }
-                return i - 1;
+                return i;
             }
         }
         return null;
@@ -319,7 +319,7 @@ pub const Compiler = struct {
         try self.currentChunk().writeConstant(self.gpa, val, 0);
     }
 
-    fn makeConstant(self: *Compiler, val: value.Value) !usize {
+    fn makeConstant(self: *Compiler, val: value.Value) !u16 {
         return try self.currentChunk().addConstant(self.gpa, val);
     }
 
@@ -327,24 +327,18 @@ pub const Compiler = struct {
         return &self.function.?.chunk;
     }
 
-    fn emitBytes(self: *Compiler, first: chunk.OpCode, second: u8) !void {
-        try self.emitOpCode(first);
+    fn emitOpU8(self: *Compiler, first: chunk.OpCode, second: u8) !void {
+        try self.emitOp(first);
         try self.emitByte(second);
     }
 
-    fn emitOpByte(self: *Compiler, op_byte: chunk.OpByte) !void {
-        try self.currentChunk().write(self.gpa, op_byte, 0);
+    fn emitOpU16(self: *Compiler, first: chunk.OpCode, second: u16) !void {
+        try self.emitOp(first);
+        try self.emitU16(second);
     }
 
     fn emitByte(self: *Compiler, byte: u8) !void {
         try self.currentChunk().write(self.gpa, chunk.OpByte{ .Byte = byte }, 0);
-    }
-
-    fn emitU24(self: *Compiler, index: usize) !void {
-        const bytes = chunk.indexToU24(index);
-        try self.emitByte(bytes[0]);
-        try self.emitByte(bytes[1]);
-        try self.emitByte(bytes[2]);
     }
 
     fn emitU16(self: *Compiler, index: usize) !void {
@@ -353,8 +347,8 @@ pub const Compiler = struct {
         try self.emitByte(bytes[1]);
     }
 
-    fn emitOpCode(self: *Compiler, op_code: chunk.OpCode) !void {
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = op_code }, 0);
+    fn emitOp(self: *Compiler, op: chunk.OpCode) !void {
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = op }, 0);
     }
 
     fn emitOpCodes(self: *Compiler, a: chunk.OpCode, b: chunk.OpCode) !void {
@@ -386,23 +380,21 @@ pub const Compiler = struct {
                     .Identifier => |name| {
                         try self.compileExpression(val.expression);
                         if (try self.resolveLocal(name)) |local| {
-                            try self.emitOpCode(.SetLocal);
-                            try self.emitU24(local);
+                            try self.emitOpU8(.SetLocal, local);
                         } else if (try self.resolveUpvalue(name)) |upvalue| {
-                            try self.emitOpCode(.SetUpvalue);
+                            try self.emitOp(.SetUpvalue);
                             try self.emitByte(upvalue);
                         } else {
                             const constant = try self.identifierConstant(name);
-                            try self.emitOpCode(.SetGlobal);
-                            try self.emitU24(constant);
+                            try self.emitOpU16(.SetGlobal, constant);
                         }
                     },
                     .Index => |index| {
                         try self.compileExpression(index.left);
                         try self.compileExpression(index.index);
                         try self.compileExpression(val.expression);
-                        try self.emitOpCode(.IndexSet);
-                        try self.emitOpCode(.Pop);
+                        try self.emitOp(.IndexSet);
+                        try self.emitOp(.Pop);
                     },
                 }
             },
@@ -432,16 +424,14 @@ pub const Compiler = struct {
                     try self.compileStatement(item);
                 }
 
-                try self.emitOpCode(.GetLocal);
-                try self.emitU24(increment_var_index);
+                try self.emitOpU8(.GetLocal, increment_var_index);
                 try self.emitConstant(value.wrapInt(1));
-                try self.emitOpCode(.Add);
-                try self.emitOpCode(.SetLocal);
-                try self.emitU24(increment_var_index);
+                try self.emitOp(.Add);
+                try self.emitOpU8(.SetLocal, increment_var_index);
 
                 var i = self.local_count;
                 while (i > local_count) {
-                    try self.emitOpCode(.Pop);
+                    try self.emitOp(.Pop);
                     i -= 1;
                 }
 
@@ -462,7 +452,7 @@ pub const Compiler = struct {
                 try self.compileExpression(val.expression);
 
                 const exit_jump = try self.emitJump(.JumpIfFalse);
-                try self.emitOpCode(.Pop);
+                try self.emitOp(.Pop);
 
                 for (val.body.items) |item| {
                     try self.compileStatement(item);
@@ -471,19 +461,19 @@ pub const Compiler = struct {
                 try self.emitLoop(loop_start);
 
                 try self.patchJump(exit_jump);
-                try self.emitOpCode(.Pop);
+                try self.emitOp(.Pop);
             },
             .Return => |val| {
                 if (self.type == .Script) {
                     return errorAt("Can't return from top-level code.");
                 }
                 try self.compileExpression(val);
-                try self.emitOpCode(.Return);
+                try self.emitOp(.Return);
             },
             .Expression => |val| {
                 try self.compileExpression(val);
                 if (!self.ctx.suppress_pop) {
-                    try self.emitOpCode(.Pop);
+                    try self.emitOp(.Pop);
                 }
             },
         }
@@ -493,15 +483,12 @@ pub const Compiler = struct {
         switch (expr.data) {
             .Identifier => |name| {
                 if (try self.resolveLocal(name)) |local| {
-                    try self.emitOpCode(.GetLocal);
-                    try self.emitU24(local);
+                    try self.emitOpU8(.GetLocal, local);
                 } else if (try self.resolveUpvalue(name)) |upvalue| {
-                    try self.emitOpCode(.GetUpvalue);
-                    try self.emitByte(upvalue);
+                    try self.emitOpU8(.GetUpvalue, upvalue);
                 } else {
                     const constant = try self.identifierConstant(name);
-                    try self.emitOpCode(.GetGlobal);
-                    try self.emitU24(constant);
+                    try self.emitOpU16(.GetGlobal, constant);
                 }
             },
             .String => |val| {
@@ -514,35 +501,35 @@ pub const Compiler = struct {
                 try self.emitConstant(value.wrapFloat(val));
             },
             .Boolean => |val| {
-                if (val) try self.emitOpCode(.True) else try self.emitOpCode(.False);
+                if (val) try self.emitOp(.True) else try self.emitOp(.False);
             },
             .Infix => |val| {
                 try self.compileExpression(val.left);
 
                 if (val.operator == .And) {
                     const end_jump = try self.emitJump(.JumpIfFalse);
-                    try self.emitOpCode(.Pop);
+                    try self.emitOp(.Pop);
                     try self.compileExpression(val.right);
                     try self.patchJump(end_jump);
                 } else if (val.operator == .Or) {
                     const else_jump = try self.emitJump(.JumpIfFalse);
                     const end_jump = try self.emitJump(.Jump);
                     try self.patchJump(else_jump);
-                    try self.emitOpCode(.Pop);
+                    try self.emitOp(.Pop);
                     try self.compileExpression(val.right);
                     try self.patchJump(end_jump);
                 } else {
                     try self.compileExpression(val.right);
                     switch (val.operator) {
-                        .Plus => try self.emitOpCode(.Add),
-                        .Minus => try self.emitOpCode(.Subtract),
-                        .Asterisk => try self.emitOpCode(.Multiply),
-                        .Slash => try self.emitOpCode(.Divide),
-                        .Eq => try self.emitOpCode(.Equal),
+                        .Plus => try self.emitOp(.Add),
+                        .Minus => try self.emitOp(.Subtract),
+                        .Asterisk => try self.emitOp(.Multiply),
+                        .Slash => try self.emitOp(.Divide),
+                        .Eq => try self.emitOp(.Equal),
                         .NotEq => try self.emitOpCodes(.Equal, .Not),
-                        .Gt => try self.emitOpCode(.Greater),
+                        .Gt => try self.emitOp(.Greater),
                         .GtOrEq => try self.emitOpCodes(.Less, .Not),
-                        .Lt => try self.emitOpCode(.Less),
+                        .Lt => try self.emitOp(.Less),
                         .LtOrEq => try self.emitOpCodes(.Greater, .Not),
                         else => unreachable,
                     }
@@ -551,8 +538,8 @@ pub const Compiler = struct {
             .Prefix => |val| {
                 try self.compileExpression(val.expression);
                 switch (val.operator) {
-                    .Minus => try self.emitOpCode(.Negate),
-                    .Bang => try self.emitOpCode(.Not),
+                    .Minus => try self.emitOp(.Negate),
+                    .Bang => try self.emitOp(.Not),
                     else => unreachable,
                 }
             },
@@ -600,8 +587,7 @@ pub const Compiler = struct {
 
                 if (function.upvalue_count > 0) {
                     const constant = try self.makeConstant(value.wrapObj(&function.obj));
-                    try self.emitOpCode(.Closure);
-                    try self.emitU24(constant);
+                    try self.emitOpU16(.Closure, constant);
                 } else {
                     try self.emitConstant(value.wrapObj(&function.obj));
                 }
@@ -625,7 +611,7 @@ pub const Compiler = struct {
                         .Named => unreachable,
                     }
                 }
-                try self.emitBytes(.Call, @intCast(count));
+                try self.emitOpU8(.Call, @intCast(count));
             },
             .Range => unreachable,
             .List => |val| {
@@ -635,8 +621,7 @@ pub const Compiler = struct {
                     try self.compileExpression(val.items[index]);
                 }
                 try self.emitConstant(value.wrapObj(try object.allocateList(self.vm)));
-                try self.emitOpCode(.ListInit);
-                try self.emitU24(val.items.len);
+                try self.emitOpU16(.ListInit, @intCast(val.items.len));
             },
             .Table => |val| {
                 var index = val.items.len;
@@ -646,13 +631,12 @@ pub const Compiler = struct {
                     try self.compileExpression(val.items[index].key);
                 }
                 try self.emitConstant(value.wrapObj(try object.allocateTable(self.vm)));
-                try self.emitOpCode(.TableInit);
-                try self.emitU24(val.items.len);
+                try self.emitOpU16(.TableInit, @intCast(val.items.len));
             },
             .Index => |val| {
                 try self.compileExpression(val.left);
                 try self.compileExpression(val.index);
-                try self.emitOpCode(.IndexGet);
+                try self.emitOp(.IndexGet);
             },
             .Match => |val| {
                 const has_target = val.target != null;
@@ -667,18 +651,18 @@ pub const Compiler = struct {
 
                     const then_jump = try self.emitJump(instruction);
 
-                    try self.emitOpCode(.Pop);
-                    if (has_target) try self.emitOpCode(.Pop);
+                    try self.emitOp(.Pop);
+                    if (has_target) try self.emitOp(.Pop);
                     try self.compileMatchArmBody(val.body.Single.body);
 
                     const end_jump = try self.emitJump(.Jump);
 
                     try self.patchJump(then_jump);
 
-                    try self.emitOpCode(.Pop);
-                    if (has_target) try self.emitOpCode(.Pop);
+                    try self.emitOp(.Pop);
+                    if (has_target) try self.emitOp(.Pop);
 
-                    try self.emitOpCode(.Null);
+                    try self.emitOp(.Null);
 
                     try self.patchJump(end_jump);
 
@@ -698,14 +682,14 @@ pub const Compiler = struct {
 
                     const then_jump = try self.emitJump(instruction);
 
-                    try self.emitOpCode(.Pop);
-                    if (has_target) try self.emitOpCode(.Pop);
+                    try self.emitOp(.Pop);
+                    if (has_target) try self.emitOp(.Pop);
                     try self.compileMatchArmBody(arm.body);
 
                     try end_jumps.append(self.gpa, try self.emitJump(.Jump));
 
                     try self.patchJump(then_jump);
-                    try self.emitOpCode(.Pop);
+                    try self.emitOp(.Pop);
                 }
 
                 const last_arm: ?ast.MatchArm = if (arms.len > 0) arms[arms.len - 1] else null;
@@ -716,11 +700,11 @@ pub const Compiler = struct {
                     }
                 }
                 if (else_arm) |arm| {
-                    if (has_target) try self.emitOpCode(.Pop);
+                    if (has_target) try self.emitOp(.Pop);
                     try self.compileMatchArmBody(arm.body);
                 } else {
-                    if (has_target) try self.emitOpCode(.Pop);
-                    try self.emitOpCode(.Null);
+                    if (has_target) try self.emitOp(.Pop);
+                    try self.emitOp(.Null);
                 }
 
                 for (end_jumps.items) |jump| {
@@ -730,7 +714,7 @@ pub const Compiler = struct {
                 end_jumps.deinit(self.gpa);
             },
             .Null => {
-                try self.emitOpCode(.Null);
+                try self.emitOp(.Null);
             },
         }
     }
@@ -743,7 +727,7 @@ pub const Compiler = struct {
 
         switch (body) {
             .Expression => {},
-            else => try self.emitOpCode(.Null),
+            else => try self.emitOp(.Null),
         }
     }
 };

@@ -128,21 +128,21 @@ pub const VirtualMachine = struct {
         self.frame_count = 0;
     }
 
-    fn push(self: *VirtualMachine, val: value.Value) void {
+    inline fn push(self: *VirtualMachine, val: value.Value) void {
         self.stack[self.stack_top] = val;
         self.stack_top += 1;
     }
 
-    fn pop(self: *VirtualMachine) value.Value {
+    inline fn pop(self: *VirtualMachine) value.Value {
         self.stack_top -= 1;
         return self.stack[self.stack_top];
     }
 
-    fn peek(self: *VirtualMachine, distance: usize) value.Value {
+    inline fn peek(self: *VirtualMachine, distance: usize) value.Value {
         return self.stack[self.stack_top - 1 - distance];
     }
 
-    fn swapInPlace(self: *VirtualMachine, val: value.Value, distance: usize) void {
+    inline fn swapInPlace(self: *VirtualMachine, val: value.Value, distance: usize) void {
         self.stack[self.stack_top - 1 - distance] = val;
     }
 
@@ -176,6 +176,7 @@ pub const VirtualMachine = struct {
         }
         self.push(value.wrapObj(&function.obj));
         try self.call(function, 0, null);
+        self.frame = &self.frames[self.frame_count - 1];
 
         if (comptime constants.debug_trace_execution) {
             logDebug("Global function set up.", .{});
@@ -228,15 +229,7 @@ pub const VirtualMachine = struct {
         _ = self.pop();
     }
 
-    fn readU24(self: *VirtualMachine) usize {
-        const code = self.frame.function.chunk.code.items;
-        const ip = self.frame.ip;
-        const val = chunk.u24ToIndex(code[ip], code[ip + 1], code[ip + 2]);
-        self.frame.ip += 3;
-        return val;
-    }
-
-    fn readU16(self: *VirtualMachine) usize {
+    inline fn readU16(self: *VirtualMachine) usize {
         const code = self.frame.function.chunk.code.items;
         const ip = self.frame.ip;
         const val = chunk.u16ToIndex(code[ip], code[ip + 1]);
@@ -244,11 +237,11 @@ pub const VirtualMachine = struct {
         return val;
     }
 
-    fn readConstant(self: *VirtualMachine) value.Value {
-        return self.frame.function.chunk.constants.items[self.readU24()];
+    inline fn readConstant(self: *VirtualMachine) value.Value {
+        return self.frame.function.chunk.constants.items[self.readU16()];
     }
 
-    fn readString(self: *VirtualMachine) *object.ObjString {
+    inline fn readString(self: *VirtualMachine) *object.ObjString {
         const constant = self.readConstant();
         return constant.Obj.asString();
     }
@@ -339,8 +332,6 @@ pub const VirtualMachine = struct {
     }
 
     pub fn run(self: *VirtualMachine) !void {
-        self.frame = &self.frames[self.frame_count - 1];
-
         while (true) {
             if (comptime constants.debug_trace_execution) {
                 std.debug.print("          ", .{});
@@ -428,11 +419,11 @@ pub const VirtualMachine = struct {
                     }
                 },
                 .GetLocal => {
-                    const slot = self.readU24();
+                    const slot = self.readByte();
                     self.push(self.getSlot(slot));
                 },
                 .SetLocal => {
-                    const slot = self.readU24();
+                    const slot = self.readByte();
                     self.setSlot(slot, self.pop());
                 },
                 .JumpIfFalse => {
@@ -495,7 +486,7 @@ pub const VirtualMachine = struct {
                 .ListInit => {
                     const val = self.pop();
                     const list = val.asObj().asList();
-                    const count = self.readU24();
+                    const count = self.readU16();
                     for (0..count) |_| {
                         try list.data.append(self.gpa, self.pop());
                     }
@@ -504,7 +495,7 @@ pub const VirtualMachine = struct {
                 .TableInit => {
                     const val = self.pop();
                     const table = val.asObj().asTable();
-                    const count = self.readU24();
+                    const count = self.readU16();
                     for (0..count) |_| {
                         try table.data.put(
                             self.gpa,
