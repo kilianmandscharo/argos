@@ -332,18 +332,32 @@ pub const VirtualMachine = struct {
     }
 
     pub fn run(self: *VirtualMachine) !void {
+        var frame = &self.frames[self.frame_count - 1];
+        var ip = frame.ip;
+
         while (true) {
             if (comptime constants.debug_trace_execution) {
+                frame.ip = ip;
                 std.debug.print("          ", .{});
                 for (0..self.stack_top) |index| {
                     std.debug.print("[ {f} ]", .{self.stack[index]});
                 }
                 std.debug.print("\n", .{});
-                _ = self.frame.function.chunk.disassembleInstruction(self.frame.ip);
+                _ = frame.function.chunk.disassembleInstruction(frame.ip);
             }
-            const instruction = self.readByte();
+
+            const instruction = frame.function.chunk.code.items[ip];
+            ip += 1;
+
             switch (@as(chunk.OpCode, @enumFromInt(instruction))) {
-                .Constant => self.push(self.readConstant()),
+                .Constant => {
+                    const idx = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
+                    self.push(frame.function.chunk.constants.items[idx]);
+                },
                 .Null => self.push(value.valueNull()),
                 .True => self.push(value.wrapBool(true)),
                 .False => self.push(value.wrapBool(false)),
@@ -398,86 +412,137 @@ pub const VirtualMachine = struct {
                     _ = self.pop();
                 },
                 .DefineGlobal => {
-                    const name = self.readString();
+                    const name_idx = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
+                    const name = frame.function.chunk.constants.items[name_idx].Obj.asString();
                     try self.globals.put(self.gpa, name, self.peek(0));
                     _ = self.pop();
                 },
                 .GetGlobal => {
-                    const name = self.readString();
+                    const name_idx = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
+                    const name = frame.function.chunk.constants.items[name_idx].Obj.asString();
                     if (self.globals.get(name)) |val| {
                         self.push(val);
                     } else {
+                        frame.ip = ip;
                         return self.runtimeError("Undefined variable '{s}'", .{name.chars});
                     }
                 },
                 .SetGlobal => {
-                    const name = self.readString();
+                    const name_idx = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
+                    const name = frame.function.chunk.constants.items[name_idx].Obj.asString();
                     if (self.globals.getPtr(name)) |val_ptr| {
                         val_ptr.* = self.pop();
                     } else {
+                        frame.ip = ip;
                         return self.runtimeError("Undefined variable '{s}'", .{name.chars});
                     }
                 },
                 .GetLocal => {
-                    const slot = self.readByte();
-                    self.push(self.getSlot(slot));
+                    const slot = frame.function.chunk.code.items[ip];
+                    ip += 1;
+                    self.push(self.stack[frame.slot + slot]);
                 },
                 .SetLocal => {
-                    const slot = self.readByte();
-                    self.setSlot(slot, self.pop());
+                    const slot = frame.function.chunk.code.items[ip];
+                    ip += 1;
+                    self.stack[frame.slot + slot] = self.pop();
                 },
                 .JumpIfFalse => {
-                    const offset = self.readU16();
-                    if (isFalsey(self.peek(0))) self.frame.ip += offset;
+                    const offset = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
+                    if (isFalsey(self.peek(0))) ip += offset;
                 },
                 .JumpIfNotEq => {
-                    const offset = self.readU16();
+                    const offset = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
                     if (!try isEqual(self.peek(1), self.peek(0))) {
-                        self.frame.ip += offset;
+                        ip += offset;
                     }
                 },
                 .JumpIfGreaterOrEq => {
-                    const offset = self.readU16();
+                    const offset = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
                     if (!try self.less(self.peek(1), self.peek(0))) {
-                        self.frame.ip += offset;
+                        ip += offset;
                     }
                 },
                 .Jump => {
-                    const offset = self.readU16();
-                    self.frame.ip += offset;
+                    const offset = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
+                    ip += offset;
                 },
                 .Loop => {
-                    const offset = self.readU16();
-                    self.frame.ip -= offset;
+                    const offset = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
+                    ip -= offset;
                 },
                 .Call => {
-                    const arg_count = self.readByte();
+                    const arg_count = frame.function.chunk.code.items[ip];
+                    ip += 1;
+                    // sync ip before call since callValue may trigger GC or errors
+                    frame.ip = ip;
                     try self.callValue(self.peek(arg_count), arg_count);
-                    self.frame = &self.frames[self.frame_count - 1];
+                    frame = &self.frames[self.frame_count - 1];
+                    ip = frame.ip;
                 },
                 .Closure => {
-                    const function = self.readConstant().asObj().asFunction();
+                    const fn_idx = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
+                    const function = frame.function.chunk.constants.items[fn_idx].asObj().asFunction();
                     const closure = try object.allocateClosure(self, function);
                     self.push(value.wrapObj(&closure.obj));
 
                     for (0..closure.upvalues.len) |i| {
-                        const is_local = self.readByte() == 1;
-                        const index = self.readByte();
+                        const is_local = frame.function.chunk.code.items[ip] == 1;
+                        ip += 1;
+                        const index = frame.function.chunk.code.items[ip];
+                        ip += 1;
                         if (is_local) {
-                            const slot = self.frame.slot + index;
-                            closure.upvalues[i] = try self.captureUpvalue(&self.stack[slot]);
+                            closure.upvalues[i] = try self.captureUpvalue(&self.stack[frame.slot + index]);
                         } else {
-                            closure.upvalues[i] = self.frame.upvalues.?[index];
+                            closure.upvalues[i] = frame.upvalues.?[index];
                         }
                     }
                 },
                 .GetUpvalue => {
-                    const slot = self.readByte();
-                    self.push(self.frame.upvalues.?[slot].?.location.*);
+                    const slot = frame.function.chunk.code.items[ip];
+                    ip += 1;
+                    self.push(frame.upvalues.?[slot].?.location.*);
                 },
                 .SetUpvalue => {
-                    const slot = self.readByte();
-                    self.frame.upvalues.?[slot].?.location.* = self.pop();
+                    const slot = frame.function.chunk.code.items[ip];
+                    ip += 1;
+                    frame.upvalues.?[slot].?.location.* = self.pop();
                 },
                 .CloseUpvalue => {
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);
@@ -486,7 +551,11 @@ pub const VirtualMachine = struct {
                 .ListInit => {
                     const val = self.pop();
                     const list = val.asObj().asList();
-                    const count = self.readU16();
+                    const count = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
                     for (0..count) |_| {
                         try list.data.append(self.gpa, self.pop());
                     }
@@ -495,7 +564,11 @@ pub const VirtualMachine = struct {
                 .TableInit => {
                     const val = self.pop();
                     const table = val.asObj().asTable();
-                    const count = self.readU16();
+                    const count = chunk.u16ToIndex(
+                        frame.function.chunk.code.items[ip],
+                        frame.function.chunk.code.items[ip + 1],
+                    );
+                    ip += 2;
                     for (0..count) |_| {
                         try table.data.put(
                             self.gpa,
@@ -511,6 +584,7 @@ pub const VirtualMachine = struct {
                         .Int => |number_index| {
                             const val = self.pop();
                             if (!val.isObjType(.List)) {
+                                frame.ip = ip;
                                 return self.runtimeError(
                                     "Invalid left side in index expression: {s}",
                                     .{val.getType()},
@@ -522,6 +596,7 @@ pub const VirtualMachine = struct {
                         },
                         .Obj => |key| {
                             if (key.type != .String) {
+                                frame.ip = ip;
                                 return self.runtimeError(
                                     "Invalid index type in index expression: {s}",
                                     .{index.Obj.getType()},
@@ -529,6 +604,7 @@ pub const VirtualMachine = struct {
                             }
                             const val = self.pop();
                             if (!val.isObjType(.Table)) {
+                                frame.ip = ip;
                                 return self.runtimeError(
                                     "Invalid left side in index expression: {s}",
                                     .{val.getType()},
@@ -541,10 +617,13 @@ pub const VirtualMachine = struct {
                                 self.push(value.valueNull());
                             }
                         },
-                        else => return self.runtimeError(
-                            "Invalid index type in index expression: {s}",
-                            .{index.getType()},
-                        ),
+                        else => {
+                            frame.ip = ip;
+                            return self.runtimeError(
+                                "Invalid index type in index expression: {s}",
+                                .{index.getType()},
+                            );
+                        },
                     }
                 },
                 .IndexSet => {
@@ -555,6 +634,7 @@ pub const VirtualMachine = struct {
                         .Int => |number_index| {
                             const list = self.peek(0);
                             if (!list.isObjType(.List)) {
+                                frame.ip = ip;
                                 return self.runtimeError(
                                     "Invalid left side in index expression: {s}",
                                     .{list.getType()},
@@ -566,6 +646,7 @@ pub const VirtualMachine = struct {
                         },
                         .Obj => |key| {
                             if (key.type != .String) {
+                                frame.ip = ip;
                                 return self.runtimeError(
                                     "Invalid index type in index expression: {s}",
                                     .{index.Obj.getType()},
@@ -573,6 +654,7 @@ pub const VirtualMachine = struct {
                             }
                             const table = self.peek(0);
                             if (!table.isObjType(.Table)) {
+                                frame.ip = ip;
                                 return self.runtimeError(
                                     "Invalid left side in index expression: {s}",
                                     .{table.getType()},
@@ -581,23 +663,27 @@ pub const VirtualMachine = struct {
                             const table_obj = table.asObj().asTable();
                             try table_obj.data.put(self.gpa, key.asString(), val);
                         },
-                        else => return self.runtimeError(
-                            "Invalid index type in index expression: {s}",
-                            .{index.getType()},
-                        ),
+                        else => {
+                            frame.ip = ip;
+                            return self.runtimeError(
+                                "Invalid index type in index expression: {s}",
+                                .{index.getType()},
+                            );
+                        },
                     }
                 },
                 .Return => {
                     const result = self.pop();
-                    self.closeUpvalues(&self.stack[self.frame.slot]);
+                    self.closeUpvalues(&self.stack[frame.slot]);
                     self.frame_count -= 1;
                     if (self.frame_count == 0) {
                         _ = self.pop();
                         return;
                     }
-                    self.stack_top = self.frame.slot;
+                    self.stack_top = frame.slot;
                     self.push(result);
-                    self.frame = &self.frames[self.frame_count - 1];
+                    frame = &self.frames[self.frame_count - 1];
+                    ip = frame.ip;
                 },
             }
         }
