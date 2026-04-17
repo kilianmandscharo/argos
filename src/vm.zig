@@ -174,6 +174,7 @@ pub const VirtualMachine = struct {
         if (comptime constants.debug_trace_execution) {
             logDebug("Setting up global function...", .{});
         }
+
         self.push(value.wrapObj(&function.obj));
         try self.call(function, 0, null);
         self.frame = &self.frames[self.frame_count - 1];
