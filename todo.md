@@ -1,12 +1,7 @@
 # todo
 
 - implement continue and break statements in loops
-- add bit shift
-- clean up token types
-- support trailing comma in func declaration and call
-- print the line of source code on a runtime error
 - implement "a -= 1" pattern
-- make match into an expression
 - implement ternary
 - implement orelse
 - fix line numbers
@@ -14,5 +9,4 @@
 - list iteration in for
 - appending to a list
 - getting the list length
-- implement two-stage compilation source -> ast -> byte code -> interpret
-- how to do the line handling with the new ast?
+- how to do the line handling in compiler and vm
