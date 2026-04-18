@@ -531,6 +531,12 @@ pub const Compiler = struct {
                         .GtOrEq => try self.emitOpCodes(.Less, .Not),
                         .Lt => try self.emitOp(.Less),
                         .LtOrEq => try self.emitOpCodes(.Greater, .Not),
+                        .Ampersand => try self.emitOp(.BitwiseAnd),
+                        .Pipe => try self.emitOp(.BitwiseOr),
+                        .Caret => try self.emitOp(.BitwiseXor),
+                        .LeftShift => try self.emitOp(.LeftShift),
+                        .RightShift => try self.emitOp(.RightShift),
+                        .Percent => try self.emitOp(.Mod),
                         else => unreachable,
                     }
                 }
@@ -540,6 +546,7 @@ pub const Compiler = struct {
                 switch (val.operator) {
                     .Minus => try self.emitOp(.Negate),
                     .Bang => try self.emitOp(.Not),
+                    .Tilde => try self.emitOp(.BitwiseNot),
                     else => unreachable,
                 }
             },

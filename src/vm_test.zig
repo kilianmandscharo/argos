@@ -691,6 +691,57 @@ test "vm tests" {
             \\assert(result == 21)
             ,
         },
+        .{
+            .description = "infix and prefix",
+            .source =
+            \\assert((5 + 5) == 10)
+            \\assert((10 - 20) == -10)
+            \\assert((10 * 54) == 540)
+            \\assert((2.5 * 10) == 25)
+            \\assert((20 * 4.5) == 90)
+            \\assert((10 / 5) == 2)
+            \\assert((10 / 2.5) == 4)
+            \\assert((20.5 / 2) == 10.25)
+            \\assert((100 % 30) == 10)
+            \\assert((30 % 100) == 30)
+            \\assert((1 & 1) == 1)
+            \\assert((1 & 0) == 0)
+            \\assert((1 | 1) == 1)
+            \\assert((1 | 0) == 1)
+            \\assert((1 ^ 1) == 0)
+            \\assert((0 ^ 1) == 1)
+            \\assert((2 << 2) == 8)
+            \\assert((16 >> 2) == 4)
+            \\assert((~10) == -11)
+            \\assert((5.5 % 3.1) == 2.4)
+            \\assert((5 > 3) == true)
+            \\assert((4 < 10) == true)
+            \\assert((3 <= 3) == true)
+            \\assert((2 <= 3) == true)
+            \\assert((2 >= 2) == true)
+            \\assert((2 >= 1) == true)
+            ,
+        },
+        .{
+            .description = "precedence",
+            .source =
+            \\assert(2 + 3 * 4 == 14)
+            \\assert(2 * 3 + 4 == 10)
+            \\assert(2 * (3 + 4) == 14)
+            \\assert(10 - 3 - 2 == 5)
+            \\assert(2 + 3 * 4 - 1 == 13)
+            \\assert(10 / 2 + 3 == 8)
+            \\assert(10 / (2 + 3) == 2.0)
+            \\assert(2 * 3 * 4 == 24)
+            \\assert(true and false or true == true)
+            \\assert(true or false and false == true)
+            \\assert(!false and true == true)
+            \\assert(1 | 2 | 4 == 7)
+            \\assert(7 & 6 & 4 == 4)
+            \\assert(1 << 1 << 1 == 4)
+            \\assert(16 >> 1 >> 1 == 4)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate vm tests", &test_cases, run);

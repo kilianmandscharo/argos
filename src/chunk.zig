@@ -43,6 +43,13 @@ pub const OpCode = enum(u8) {
     TableInit,
     IndexGet,
     IndexSet,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    Mod,
+    LeftShift,
+    RightShift,
 };
 
 pub const OpByte = union(enum) {
@@ -162,6 +169,13 @@ pub const Chunk = struct {
             .TableInit => return twoByteInstruction(self, "OP_TABLE_INIT", offset),
             .IndexGet => return simpleInstruction("OP_INDEX_GET", offset),
             .IndexSet => return simpleInstruction("OP_INDEX_SET", offset),
+            .BitwiseAnd => return simpleInstruction("OP_BITWISE_AND", offset),
+            .BitwiseOr => return simpleInstruction("OP_BITWISE_OR", offset),
+            .BitwiseXor => return simpleInstruction("OP_BITWISE_XOR", offset),
+            .BitwiseNot => return simpleInstruction("OP_BITWISE_NOT", offset),
+            .Mod => return simpleInstruction("OP_MOD", offset),
+            .LeftShift => return simpleInstruction("OP_LEFT_SHIFT", offset),
+            .RightShift => return simpleInstruction("OP_RIGHT_SHIFT", offset),
         }
     }
 };

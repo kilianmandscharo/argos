@@ -409,6 +409,43 @@ pub const VirtualMachine = struct {
                     const a = self.peek(0);
                     self.swapInPlace(value.wrapBool(try self.less(a, b)), 0);
                 },
+                .BitwiseAnd => {
+                    const b = self.pop();
+                    const a = self.peek(0);
+                    self.swapInPlace(try self.bitwiseInfix(a, b, .BitwiseAnd), 0);
+                },
+                .BitwiseOr => {
+                    const b = self.pop();
+                    const a = self.peek(0);
+                    self.swapInPlace(try self.bitwiseInfix(a, b, .BitwiseOr), 0);
+                },
+                .BitwiseXor => {
+                    const b = self.pop();
+                    const a = self.peek(0);
+                    self.swapInPlace(try self.bitwiseInfix(a, b, .BitwiseXor), 0);
+                },
+                .BitwiseNot => {
+                    const val = self.peek(0);
+                    if (val != .Int) {
+                        return self.runtimeError("Invalid type in bitwise not: {s}", .{val.getType()});
+                    }
+                    self.swapInPlace(value.wrapInt(~val.Int), 0);
+                },
+                .Mod => {
+                    const b = self.pop();
+                    const a = self.peek(0);
+                    self.swapInPlace(try self.mod(a, b), 0);
+                },
+                .LeftShift => {
+                    const b = self.pop();
+                    const a = self.peek(0);
+                    self.swapInPlace(try self.bitwiseInfix(a, b, .LeftShift), 0);
+                },
+                .RightShift => {
+                    const b = self.pop();
+                    const a = self.peek(0);
+                    self.swapInPlace(try self.bitwiseInfix(a, b, .RightShift), 0);
+                },
                 .Pop => {
                     _ = self.pop();
                 },
@@ -690,6 +727,43 @@ pub const VirtualMachine = struct {
         }
     }
 
+    fn mod(self: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {
+        switch (a) {
+            .Int => |left| {
+                switch (b) {
+                    .Int => |right| return value.wrapInt(@rem(left, right)),
+                    .Float => |right| return value.wrapFloat(@rem(@as(f64, @floatFromInt(left)), right)),
+                    else => return self.runtimeError("Right operand must be a number.", .{}),
+                }
+            },
+            .Float => |left| {
+                switch (b) {
+                    .Int => |right| return value.wrapFloat(@rem(left, @as(f64, @floatFromInt(right)))),
+                    .Float => |right| return value.wrapFloat(@rem(left, right)),
+                    else => return self.runtimeError("Right operand must be a number.", .{}),
+                }
+            },
+            else => return self.runtimeError("Operand must be a number", .{}),
+        }
+    }
+
+    fn bitwiseInfix(self: *VirtualMachine, a: value.Value, b: value.Value, op: chunk.OpCode) !value.Value {
+        if (a != .Int) {
+            return self.runtimeError("Invalid left side in operation {s}: {s}", .{ @tagName(op), a.getType() });
+        }
+        if (b != .Int) {
+            return self.runtimeError("Invalid right side in operation {s}: {s}", .{ @tagName(op), b.getType() });
+        }
+        return switch (op) {
+            .BitwiseAnd => value.wrapInt(a.Int & b.Int),
+            .BitwiseOr => value.wrapInt(a.Int | b.Int),
+            .BitwiseXor => value.wrapInt(a.Int ^ b.Int),
+            .LeftShift => value.wrapInt(a.Int << @intCast(b.Int)),
+            .RightShift => value.wrapInt(a.Int >> @intCast(b.Int)),
+            else => unreachable,
+        };
+    }
+
     fn concatenate(self: *VirtualMachine) !void {
         const left = self.peek(1).asObj().asString().chars;
         const right = self.peek(0).asObj().asString().chars;
@@ -847,7 +921,12 @@ pub const VirtualMachine = struct {
     }
 
     fn isEqual(a: value.Value, b: value.Value) !bool {
-        // TODO: should we really return false for 3 == 3.0?
+        if (a == .Int and b == .Float) {
+            return @as(f64, @floatFromInt(a.Int)) == b.Float;
+        }
+        if (a == .Float and b == .Int) {
+            return a.Float == @as(f64, @floatFromInt(b.Int));
+        }
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) {
             return false;
         }
