@@ -4,11 +4,12 @@ const scanner = @import("scanner.zig");
 const test_utils = @import("test_utils.zig");
 const ast = @import("ast.zig");
 const constants = @import("constants.zig");
+const vm = @import("vm.zig");
 
-pub fn createAst(arena: std.mem.Allocator, source: []const u8) !ast.Program {
-    var scan = scanner.Scanner.init(source);
-    var parser = try Parser.init(arena, &scan);
-    return try parser.parseProgram();
+pub fn createAst(arena: std.mem.Allocator, script_context: *vm.ScriptContext) !ast.Program {
+    var s = try scanner.Scanner.init(arena, script_context);
+    var p = try Parser.init(arena, &s, script_context);
+    return try p.parseProgram();
 }
 
 pub const Parser = struct {
@@ -17,17 +18,19 @@ pub const Parser = struct {
     scanner: *scanner.Scanner,
     arena: std.mem.Allocator,
     debug_indent: usize = 0,
+    script_context: *vm.ScriptContext,
     ctx: struct {
         parse_loop_capture: bool,
         current_var_name: ?[]const u8,
     },
 
-    pub fn init(arena: std.mem.Allocator, s: *scanner.Scanner) !Parser {
+    pub fn init(arena: std.mem.Allocator, s: *scanner.Scanner, script_context: *vm.ScriptContext) !Parser {
         const current = try s.next();
         if (current.type == .Eof) {
             return error.NoTokens;
         }
         return Parser{
+            .script_context = script_context,
             .scanner = s,
             .current = current,
             .previous = null,
@@ -88,11 +91,11 @@ pub const Parser = struct {
             defer self.log("end while statement", .{});
         }
 
-        try self.consume(.LParen, "Expect '(' after 'while'.");
+        try self.consume(.LParen, "expect '(' after 'while'");
         const expression = try self.parseExpression();
-        try self.consume(.RParen, "Expect ')' after condition.");
+        try self.consume(.RParen, "expect ')' after condition");
         // TODO: allow all statements here
-        try self.consume(.LBrace, "Expect '{' after while condition.");
+        try self.consume(.LBrace, "expect '{' after while condition");
         const body = try self.blockStatement();
 
         return .{
@@ -106,37 +109,37 @@ pub const Parser = struct {
             defer self.log("end for statement", .{});
         }
 
-        try self.consume(.LParen, "Expect '(' after 'for'.");
+        try self.consume(.LParen, "expect '(' after 'for'");
         const expression = try self.parseExpression();
-        try self.consume(.RParen, "Expect ')' after range.");
+        try self.consume(.RParen, "expect ')' after range");
 
-        try self.consume(.Pipe, "Expect '|' after loop range.");
+        try self.consume(.Pipe, "expect '|' after loop range");
         self.ctx.parse_loop_capture = true;
 
         const capture = try self.parseExpression();
         if (capture.data != .Identifier) {
-            return self.errorAtPrevious("Expect identifier in loop capture.");
+            return self.errorAtPrevious("expect identifier in loop capture");
         }
 
         var index: ?[]const u8 = null;
 
         if (!self.check(.Pipe)) {
             if (!try self.match(.Comma)) {
-                return self.errorAtCurrent("Expected comma.");
+                return self.errorAtCurrent("expected comma");
             }
 
             const second_capture = try self.parseExpression();
             if (second_capture.data != .Identifier) {
-                return self.errorAtPrevious("Expect identifier in loop capture.");
+                return self.errorAtPrevious("expect identifier in loop capture");
             }
             index = second_capture.data.Identifier;
         }
 
-        try self.consume(.Pipe, "Expect '|' after for loop capture.");
+        try self.consume(.Pipe, "expect '|' after for loop capture");
         self.ctx.parse_loop_capture = false;
 
         // TODO: allow all statements here
-        try self.consume(.LBrace, "Expect '{' after loop capture.");
+        try self.consume(.LBrace, "expect '{' after loop capture");
         const body = try self.blockStatement();
 
         return .{
@@ -178,7 +181,7 @@ pub const Parser = struct {
         while (!self.check(.RBrace) and !self.check(.Eof)) {
             try statements.append(self.arena, try self.parseStatement());
         }
-        try self.consume(.RBrace, "Expect '}' after block.");
+        try self.consume(.RBrace, "expect '}' after block");
         try self.expectLineEnd();
 
         return .{ .Block = statements };
@@ -192,7 +195,7 @@ pub const Parser = struct {
 
         const target = try self.parseExpression();
         if (target.data != .Identifier) {
-            return self.errorAtPrevious("Expect identifier after 'let'.");
+            return self.errorAtPrevious("expect identifier after 'let'");
         }
 
         self.ctx.current_var_name = target.data.Identifier;
@@ -269,7 +272,7 @@ pub const Parser = struct {
 
             return left_owned;
         } else {
-            return self.errorAtPrevious("Expect expression.");
+            return self.errorAtPrevious("expect expression");
         }
     }
 
@@ -283,7 +286,7 @@ pub const Parser = struct {
             if (try self.match(.Eof)) return self.errorAtCurrent("Reached EOF.");
             if (try self.match(delimiter)) break;
 
-            if (expectComma) return self.errorAtPrevious("Expected comma.");
+            if (expectComma) return self.errorAtPrevious("expected comma");
 
             try items.append(self.arena, try parseFn(self));
             if (!try self.match(.Comma)) expectComma = true;
@@ -337,19 +340,19 @@ pub const Parser = struct {
             try self.advance();
             return;
         }
-        return self.errorAtCurrent("Expected line end.");
+        return self.errorAtCurrent("expected line end");
     }
 
     fn errorAtCurrent(self: *Parser, message: []const u8) anyerror {
-        return errorAt(self.current, message);
+        return self.errorAt(self.current, message);
     }
 
     fn errorAtPrevious(self: *Parser, message: []const u8) anyerror {
-        return errorAt(self.getPrevious(), message);
+        return self.errorAt(self.getPrevious(), message);
     }
 
-    fn errorAt(token: scanner.Token, message: []const u8) anyerror {
-        token.printError(message);
+    fn errorAt(self: *Parser, token: scanner.Token, message: []const u8) anyerror {
+        token.printError(message, self.script_context, "Parser");
         return error.ParserError;
     }
 };
@@ -428,7 +431,7 @@ fn parseUnary(parser: *Parser) !ast.Expression {
 
 fn parseList(parser: *Parser) !ast.Expression {
     const token = parser.getPrevious();
-    try parser.consume(.LBrace, "Expect '{' after 'List'.");
+    try parser.consume(.LBrace, "expect '{' after 'List'");
     const items = try parser.parseCommaSeparated(
         *const ast.Expression,
         struct {
@@ -443,13 +446,13 @@ fn parseList(parser: *Parser) !ast.Expression {
 
 fn parseTable(parser: *Parser) !ast.Expression {
     const token = parser.getPrevious();
-    try parser.consume(.LBrace, "Expect '{' after 'Table'.");
+    try parser.consume(.LBrace, "expect '{' after 'Table'");
     const items = try parser.parseCommaSeparated(
         ast.TablePair,
         struct {
             fn parse(p: *Parser) !ast.TablePair {
                 const key = try p.parseExpression();
-                try p.consume(.Assign, "Expect '=' after table key.");
+                try p.consume(.Assign, "expect '=' after table key");
                 const value = try p.parseExpression();
                 return ast.TablePair{ .key = key, .value = value };
             }
@@ -461,7 +464,7 @@ fn parseTable(parser: *Parser) !ast.Expression {
 
 fn parseFunction(parser: *Parser) !ast.Expression {
     const token = parser.getPrevious();
-    try parser.consume(.LParen, "Expect '(' after 'fn'.");
+    try parser.consume(.LParen, "expect '(' after 'fn'");
     const params = try parser.parseCommaSeparated(
         ast.FunctionParam,
         struct {
@@ -517,7 +520,7 @@ fn parseFunction(parser: *Parser) !ast.Expression {
 
 fn parseGrouping(parser: *Parser) !ast.Expression {
     const expression = try parser.parseExpression();
-    try parser.consume(.RParen, "Expect ')' after expression.");
+    try parser.consume(.RParen, "expect ')' after expression");
     return expression.*;
 }
 
@@ -527,12 +530,12 @@ fn parseMatch(self: *Parser) !ast.Expression {
 
     if (try self.match(.LParen)) {
         target = try self.parseExpression();
-        try self.consume(.RParen, "Expect ')' after match target.");
+        try self.consume(.RParen, "expect ')' after match target");
     }
 
     if (!self.check(.LBrace)) {
         const pattern = try self.parseExpression();
-        try self.consume(.Arrow, "Expect '->' after match pattern.");
+        try self.consume(.Arrow, "expect '->' after match pattern");
         const body = try self.parseStatement();
         return .init(
             .{
@@ -548,7 +551,7 @@ fn parseMatch(self: *Parser) !ast.Expression {
     }
 
     try self.advance();
-    try self.consume(.NewLine, "Expect new line after '{' in match block.");
+    try self.consume(.NewLine, "expect new line after '{' in match block");
 
     var arms: std.ArrayList(ast.MatchArm) = .{};
 
@@ -556,13 +559,13 @@ fn parseMatch(self: *Parser) !ast.Expression {
         try self.chopNewlines();
 
         const pattern = try self.parseExpression();
-        try self.consume(.Arrow, "Expect '->' after match pattern.");
+        try self.consume(.Arrow, "expect '->' after match pattern");
         const body = try self.parseStatement();
 
         try arms.append(self.arena, .{ .pattern = pattern, .body = body });
     }
 
-    try self.consume(.RBrace, "Expect '}' at the end of match block.");
+    try self.consume(.RBrace, "expect '}' at the end of match block");
     try self.expectLineEnd();
 
     return .init(
@@ -640,7 +643,7 @@ fn parseCall(parser: *Parser, left: ast.Expression) !ast.Expression {
 
 fn parseIndex(parser: *Parser, left: ast.Expression) !ast.Expression {
     const expression = try parser.parseExpression();
-    try parser.consume(.RBracket, "Expect ']' after index expression.");
+    try parser.consume(.RBracket, "expect ']' after index expression");
 
     const left_owned = try parser.arena.create(ast.Expression);
     left_owned.* = left;

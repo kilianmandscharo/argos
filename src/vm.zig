@@ -15,6 +15,16 @@ const InterpretResult = enum {
     RuntimeError,
 };
 
+pub const ScriptContext = struct {
+    lines: std.ArrayList(scanner.Line),
+    source: []const u8,
+    file_name: []const u8,
+
+    pub fn deinit(self: *ScriptContext, arena: std.mem.Allocator) void {
+        self.lines.deinit(arena);
+    }
+};
+
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
     logging.log(fmt, args, .{
         .module = "VirtualMachine",
@@ -146,13 +156,22 @@ pub const VirtualMachine = struct {
         self.stack[self.stack_top - 1 - distance] = val;
     }
 
-    pub fn interpret(self: *VirtualMachine, source: []const u8) !InterpretResult {
+    pub fn interpret(self: *VirtualMachine, file_name: []const u8, source: []const u8) !InterpretResult {
         if (comptime constants.debug_trace_execution) {
             logDebug("Starting pre-compilation...", .{});
         }
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
-        const ast = try parser.createAst(arena.allocator(), source);
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        arena.deinit();
+
+        var script_context = ScriptContext{
+            .file_name = file_name,
+            .source = source,
+            .lines = .{},
+        };
+        defer script_context.deinit(arena.allocator());
+
+        const ast = try parser.createAst(arena.allocator(), &script_context);
 
         var c: compiler.Compiler = undefined;
         try compiler.Compiler.init(&c, self, self.gpa, .Script, null, 0, null);
@@ -166,7 +185,6 @@ pub const VirtualMachine = struct {
             logDebug("Compiling...", .{});
         }
         const function = try c.compile(ast);
-        arena.deinit();
         if (comptime constants.debug_trace_execution) {
             logDebug("Compilation finished.", .{});
         }

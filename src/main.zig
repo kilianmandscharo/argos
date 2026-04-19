@@ -1,5 +1,5 @@
 const std = @import("std");
-const virtual_machine = @import("vm.zig");
+const vm = @import("vm.zig");
 const chunck = @import("chunk.zig");
 const constants = @import("constants.zig");
 const parser = @import("parser.zig");
@@ -21,10 +21,10 @@ fn repl(allocator: std.mem.Allocator) !void {
         const source = try stdin.takeDelimiterExclusive('\n');
         stdin.toss(1);
 
-        var vm = try virtual_machine.VirtualMachine.init(allocator);
-        defer vm.deinit();
+        var virtual_machine = try vm.VirtualMachine.init(allocator);
+        defer virtual_machine.deinit();
 
-        _ = vm.interpret(source) catch |err| {
+        _ = virtual_machine.interpret("repl", source) catch |err| {
             if (constants.stack_trace_on_error) {
                 return err;
             }
@@ -52,15 +52,25 @@ fn runFile(allocator: std.mem.Allocator, emit_ast: bool) !void {
         var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
         const stdout = &stdout_writer.interface;
 
-        const program = try parser.createAst(arena.allocator(), source);
+        var script_context = vm.ScriptContext{
+            .file_name = file_path,
+            .source = source,
+            .lines = .{},
+        };
+        defer script_context.deinit(arena.allocator());
+
+        const program: ast.Program = parser.createAst(arena.allocator(), &script_context) catch |err| {
+            if (constants.stack_trace_on_error) return err;
+            return;
+        };
         try ast.printProgram(program, stdout);
 
         try stdout.flush();
     } else {
-        var vm = try virtual_machine.VirtualMachine.init(allocator);
-        defer vm.deinit();
+        var virtual_machine = try vm.VirtualMachine.init(allocator);
+        defer virtual_machine.deinit();
 
-        _ = vm.interpret(source) catch |err| {
+        _ = virtual_machine.interpret(source, file_path) catch |err| {
             if (constants.stack_trace_on_error) {
                 return err;
             }

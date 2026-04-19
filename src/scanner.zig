@@ -1,6 +1,7 @@
 const std = @import("std");
 const test_utils = @import("test_utils.zig");
 const ast = @import("ast.zig");
+const vm = @import("vm.zig");
 
 pub const TokenType = enum {
     LParen,
@@ -64,20 +65,16 @@ pub const TokenType = enum {
 };
 
 pub const Token = struct {
-    source: []const u8,
+    data: []const u8,
     type: TokenType,
-    start: usize,
-    length: usize,
-    line: usize,
+    line: *Line,
     column: usize,
 
     pub fn dummy() @This() {
         return .{
-            .source = "",
+            .data = "",
             .type = .Eof,
-            .start = 0,
-            .length = 0,
-            .line = 0,
+            .line = .{},
             .column = 0,
         };
     }
@@ -85,103 +82,108 @@ pub const Token = struct {
     pub fn toString(self: Token) []const u8 {
         if (self.type == .NewLine) return "<newline>";
         if (self.type == .Eof) return "EOF";
-        return self.source[self.start .. self.start + self.length];
+        return self.data;
     }
 
     pub fn format(
         self: @This(),
         writer: anytype,
     ) !void {
-        try writer.print("{s} {s}", .{ @tagName(self.type), self.source[self.start .. self.start + self.length] });
+        try writer.print("{s} {s}", .{ @tagName(self.type), self.data });
     }
 
-    fn getLineSlice(self: @This()) []const u8 {
-        const start = self.findLineStart();
-        const end = self.findLineEnd();
-        return self.source[start..end];
-    }
-
-    fn findLineStart(self: @This()) usize {
-        var line_start = self.start;
-        while (line_start - 1 > 0 and self.source[line_start - 1] != '\n') {
-            line_start -= 1;
-        }
-        return line_start;
-    }
-
-    fn findLineEnd(self: @This()) usize {
-        var line_end = self.start;
-        while (line_end < self.source.len and self.source[line_end] != '\n') {
-            line_end += 1;
-        }
-        return line_end;
-    }
-
-    pub fn printError(self: @This(), message: []const u8) void {
-        std.debug.print("[line {d}, column {d}] Error", .{ self.line, self.column });
-
-        switch (self.type) {
-            .Eof => std.debug.print(" at end", .{}),
-            else => std.debug.print(" at '{s}'", .{self.toString()}),
-        }
-
-        std.debug.print(": {s}\n", .{message});
-        std.debug.print("\n{s}\n", .{self.getLineSlice()});
+    pub fn printError(
+        self: @This(),
+        message: []const u8,
+        script_context: *vm.ScriptContext,
+        module: []const u8,
+    ) void {
+        std.debug.print("{s}:{d}:{d}: error: {s}\n{s}\n", .{
+            script_context.file_name,
+            self.line.no + 1,
+            self.column,
+            message,
+            script_context.source[self.line.start .. self.line.end - 1],
+        });
 
         for (0..self.column - 1) |_| {
             std.debug.print(" ", .{});
         }
 
-        std.debug.print("^\n", .{});
+        for (0..self.data.len) |_| {
+            std.debug.print("^", .{});
+        }
+
+        std.debug.print("\n{s}Error\n", .{module});
     }
 };
 
+pub const Line = struct {
+    start: u32,
+    end: u32,
+    no: u32,
+
+    pub fn init(start: u32, no: u32) @This() {
+        return .{
+            .start = start,
+            .end = 0,
+            .no = no,
+        };
+    }
+};
+
+pub const Lines = *std.ArrayList(Line);
+
 pub const Scanner = struct {
-    source: []const u8,
     start: usize,
     current: usize,
-    line: usize,
     column: usize,
+    arena: std.mem.Allocator,
+    script_context: *vm.ScriptContext,
 
-    pub fn init(source: []const u8) Scanner {
-        return Scanner{
-            .source = source,
+    pub fn init(arena: std.mem.Allocator, script_context: *vm.ScriptContext) !Scanner {
+        try script_context.lines.append(arena, .init(0, 0));
+
+        return .{
+            .arena = arena,
             .start = 0,
             .current = 0,
-            .line = 1,
-            .column = 1,
+            .column = 0,
+            .script_context = script_context,
         };
     }
 
     pub fn makeToken(self: *Scanner, token_type: TokenType) Token {
-        return Token{
-            .source = self.source,
+        return .{
+            .data = self.script_context.source[self.start..self.current],
             .type = token_type,
-            .start = self.start,
-            .length = self.current - self.start,
-            .line = self.line,
+            .line = self.currentLine(),
             .column = self.column,
         };
     }
 
+    fn currentLine(self: *Scanner) *Line {
+        return &self.script_context.lines.items[self.script_context.lines.items.len - 1];
+    }
+
     fn scannerError(self: *Scanner, message: []const u8) error{ScannerError} {
-        std.debug.print("Scanner error at line {d}: {s}\n", .{ self.line, message });
+        std.debug.print("Scanner error at line {d}: {s}\n", .{ self.currentLine().no + 1, message });
         return error.ScannerError;
     }
 
     pub fn advance(self: *Scanner) u8 {
         self.column += 1;
         self.current += 1;
-        return self.source[self.current - 1];
+        return self.script_context.source[self.current - 1];
     }
 
     pub fn isAtEnd(self: *Scanner) bool {
-        return self.current >= self.source.len;
+        return self.current >= self.script_context.source.len;
     }
 
     pub fn match(self: *Scanner, expected: u8) bool {
         if (self.isAtEnd()) return false;
-        if (self.source[self.current] != expected) return false;
+        if (self.script_context.source[self.current] != expected) return false;
         self.current += 1;
         return true;
     }
@@ -192,12 +194,12 @@ pub const Scanner = struct {
 
     fn peek(self: *Scanner) u8 {
         if (self.isAtEnd()) return '0';
-        return self.source[self.current];
+        return self.script_context.source[self.current];
     }
 
     fn peekNext(self: *Scanner) u8 {
         if (self.isAtEnd()) return '0';
-        return self.source[self.current + 1];
+        return self.script_context.source[self.current + 1];
     }
 
     fn chopWhiteSpace(self: *Scanner) void {
@@ -211,11 +213,20 @@ pub const Scanner = struct {
         }
     }
 
+    fn endLine(self: *Scanner) u32 {
+        const line = self.currentLine();
+        line.end = @intCast(self.current);
+        return line.no + 1;
+    }
+
     pub fn next(self: *Scanner) !Token {
         self.chopWhiteSpace();
         self.start = self.current;
 
-        if (self.isAtEnd()) return self.makeToken(.Eof);
+        if (self.isAtEnd()) {
+            _ = self.endLine();
+            return self.makeToken(.Eof);
+        }
 
         const char = self.advance();
 
@@ -237,8 +248,9 @@ pub const Scanner = struct {
             '%' => return self.makeToken(.Percent),
             '\n' => {
                 const token = self.makeToken(.NewLine);
-                self.line += 1;
-                self.column = 1;
+                const next_line_no = self.endLine();
+                try self.script_context.lines.append(self.arena, .init(@intCast(self.current), next_line_no));
+                self.column = 0;
                 return token;
             },
             '-' => return if (self.match('>')) self.makeToken(.Arrow) else self.makeToken(.Minus),
@@ -299,7 +311,7 @@ pub const Scanner = struct {
     }
 
     fn identifierType(self: *Scanner) TokenType {
-        switch (self.source[self.start]) {
+        switch (self.script_context.source[self.start]) {
             'a' => return self.checkKeyword(1, "nd", .And),
             'L' => return self.checkKeyword(1, "ist", .List),
             'l' => return self.checkKeyword(1, "et", .Let),
@@ -312,7 +324,7 @@ pub const Scanner = struct {
             'T' => return self.checkKeyword(1, "able", .Table),
             'f' => {
                 if (self.current - self.start > 1) {
-                    switch (self.source[self.start + 1]) {
+                    switch (self.script_context.source[self.start + 1]) {
                         'o' => return self.checkKeyword(2, "r", .For),
                         'a' => return self.checkKeyword(2, "lse", .False),
                         'n' => return self.checkKeyword(2, "", .Fn),
@@ -330,7 +342,7 @@ pub const Scanner = struct {
         if (!has_correct_length) return .Identifier;
 
         const start_index = self.start + start;
-        const matches = std.mem.eql(u8, self.source[start_index .. start_index + rest.len], rest);
+        const matches = std.mem.eql(u8, self.script_context.source[start_index .. start_index + rest.len], rest);
 
         return if (matches) token_type else .Identifier;
     }
