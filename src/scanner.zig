@@ -102,6 +102,7 @@ pub const Token = struct {
         var end = line.end;
 
         if (end == 0) {
+            end = line.start;
             while (end < script_context.source.len and script_context.source[end] != '\n') {
                 end += 1;
             }
@@ -110,12 +111,12 @@ pub const Token = struct {
         std.debug.print("{s}:{d}:{d}: error: {s}\n{s}\n", .{
             script_context.file_name,
             line.no + 1,
-            self.column,
+            self.column + 1,
             message,
             script_context.source[line.start .. end - 1],
         });
 
-        for (0..self.column - 1) |_| {
+        for (0..self.column) |_| {
             std.debug.print(" ", .{});
         }
 
@@ -167,7 +168,7 @@ pub const Scanner = struct {
             .data = self.script_context.source[self.start..self.current],
             .type = token_type,
             .line = self.currentLine().no,
-            .column = self.column,
+            .column = self.column - @as(u32, @intCast(self.current - self.start)) + 1,
         };
     }
 

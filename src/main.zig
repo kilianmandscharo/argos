@@ -6,33 +6,34 @@ const parser = @import("parser.zig");
 const ast = @import("ast.zig");
 
 fn repl(allocator: std.mem.Allocator) !void {
-    var stdin_buf: [1024]u8 = undefined;
-    var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
-    const stdin = &stdin_reader.interface;
-
-    var stdout_buf: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
-    const stdout = &stdout_writer.interface;
-
-    while (true) {
-        try stdout.writeAll(">> ");
-        try stdout.flush();
-
-        const source = try stdin.takeDelimiterExclusive('\n');
-        stdin.toss(1);
-
-        var virtual_machine = try vm.VirtualMachine.init(allocator);
-        defer virtual_machine.deinit();
-
-        _ = virtual_machine.interpret("repl", source) catch |err| {
-            if (constants.stack_trace_on_error) {
-                return err;
-            }
-        };
-
-        try stdout.writeAll("\n");
-        try stdout.flush();
-    }
+    _ = allocator;
+    // var stdin_buf: [1024]u8 = undefined;
+    // var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+    // const stdin = &stdin_reader.interface;
+    //
+    // var stdout_buf: [1024]u8 = undefined;
+    // var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    // const stdout = &stdout_writer.interface;
+    //
+    // while (true) {
+    //     try stdout.writeAll(">> ");
+    //     try stdout.flush();
+    //
+    //     const source = try stdin.takeDelimiterExclusive('\n');
+    //     stdin.toss(1);
+    //
+    //     var virtual_machine = try vm.VirtualMachine.init(allocator);
+    //     defer virtual_machine.deinit();
+    //
+    //     _ = virtual_machine.interpret("repl", source) catch |err| {
+    //         if (constants.stack_trace_on_error) {
+    //             return err;
+    //         }
+    //     };
+    //
+    //     try stdout.writeAll("\n");
+    //     try stdout.flush();
+    // }
 }
 
 fn runFile(allocator: std.mem.Allocator, emit_ast: bool) !void {
@@ -57,7 +58,6 @@ fn runFile(allocator: std.mem.Allocator, emit_ast: bool) !void {
             .source = source,
             .lines = .{},
         };
-        defer script_context.deinit(arena.allocator());
 
         const program: ast.Program = parser.createAst(arena.allocator(), &script_context) catch |err| {
             if (constants.stack_trace_on_error) return err;
@@ -67,10 +67,16 @@ fn runFile(allocator: std.mem.Allocator, emit_ast: bool) !void {
 
         try stdout.flush();
     } else {
-        var virtual_machine = try vm.VirtualMachine.init(allocator);
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+
+        // TODO: this segfaults when not heap allocated, debug this
+        const virtual_machine = try allocator.create(vm.VirtualMachine);
+        defer allocator.destroy(virtual_machine);
+        virtual_machine.* = try vm.VirtualMachine.init(allocator, arena.allocator());
         defer virtual_machine.deinit();
 
-        _ = virtual_machine.interpret(source, file_path) catch |err| {
+        _ = virtual_machine.interpret(file_path, source) catch |err| {
             if (constants.stack_trace_on_error) {
                 return err;
             }

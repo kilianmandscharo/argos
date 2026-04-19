@@ -20,7 +20,7 @@ fn printStatement(stmt: ast.Statement, writer: anytype, level: usize) anyerror!v
             try printIndent(writer, level + 1);
             try writer.print("name:\n", .{});
             try printIndent(writer, level + 2);
-            try writer.print("{s}\n", .{s.name});
+            try writer.print("{s}\n", .{s.name.data});
             try printIndent(writer, level + 1);
             try writer.print("expression:\n", .{});
             try printExpression(s.expression.data, writer, level + 2);
@@ -40,7 +40,7 @@ fn printStatement(stmt: ast.Statement, writer: anytype, level: usize) anyerror!v
             switch (s.target) {
                 .Identifier => |name| {
                     try printIndent(writer, level + 2);
-                    try writer.print("Identifier({s})\n", .{name});
+                    try writer.print("Identifier({s})\n", .{name.data});
                 },
                 .Index => |idx| {
                     try printIndent(writer, level + 2);
@@ -66,12 +66,12 @@ fn printStatement(stmt: ast.Statement, writer: anytype, level: usize) anyerror!v
             try printIndent(writer, level + 1);
             try writer.print("capture:\n", .{});
             try printIndent(writer, level + 2);
-            try writer.print("{s}\n", .{s.capture});
+            try writer.print("{s}\n", .{s.capture.data});
             if (s.index) |idx| {
                 try printIndent(writer, level + 1);
                 try writer.print("index:\n", .{});
                 try printIndent(writer, level + 2);
-                try writer.print("{s}\n", .{idx});
+                try writer.print("{s}\n", .{idx.data});
             }
             try printIndent(writer, level + 1);
             try writer.print("body:\n", .{});
@@ -170,7 +170,7 @@ fn printExpression(expr: ast.ExpressionData, writer: anytype, level: usize) !voi
                 switch (param) {
                     .Positional => |name| {
                         try printIndent(writer, level + 2);
-                        try writer.print("Positional({s})\n", .{name});
+                        try writer.print("Positional({s})\n", .{name.data});
                     },
                     .Default => |d| {
                         try printIndent(writer, level + 2);
@@ -178,7 +178,7 @@ fn printExpression(expr: ast.ExpressionData, writer: anytype, level: usize) !voi
                         try printIndent(writer, level + 3);
                         try writer.print("name:\n", .{});
                         try printIndent(writer, level + 4);
-                        try writer.print("{s}\n", .{d.name});
+                        try writer.print("{s}\n", .{d.name.data});
                         try printIndent(writer, level + 3);
                         try writer.print("value:\n", .{});
                         try printExpression(d.value.data, writer, level + 4);
@@ -223,7 +223,7 @@ fn printExpression(expr: ast.ExpressionData, writer: anytype, level: usize) !voi
                         try printIndent(writer, level + 3);
                         try writer.print("name:\n", .{});
                         try printIndent(writer, level + 4);
-                        try writer.print("{s}\n", .{a.name});
+                        try writer.print("{s}\n", .{a.name.data});
                         try printIndent(writer, level + 3);
                         try writer.print("value:\n", .{});
                         try printExpression(a.value.data, writer, level + 4);

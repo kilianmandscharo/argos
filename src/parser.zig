@@ -59,6 +59,7 @@ pub const Parser = struct {
         var statements: std.ArrayList(ast.Statement) = .{};
         while (self.current.type != .Eof) {
             try self.chopNewlines();
+            if (self.current.type == .Eof) break;
             const statement = try self.parseStatement();
             try statements.append(self.arena, statement);
         }
