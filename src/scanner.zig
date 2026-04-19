@@ -89,7 +89,7 @@ pub const Token = struct {
         self: @This(),
         writer: anytype,
     ) !void {
-        try writer.print("{s} {s}", .{ @tagName(self.type), self.data });
+        try writer.print("{s}({s}:{d}:{d})", .{ @tagName(self.type), self.data, self.line + 1, self.column + 1 });
     }
 
     pub fn printError(
@@ -168,7 +168,7 @@ pub const Scanner = struct {
             .data = self.script_context.source[self.start..self.current],
             .type = token_type,
             .line = self.currentLine().no,
-            .column = self.column - @as(u32, @intCast(self.current - self.start)) + 1,
+            .column = self.column - @as(u32, @intCast(self.current - self.start)),
         };
     }
 
@@ -194,7 +194,7 @@ pub const Scanner = struct {
     pub fn match(self: *Scanner, expected: u8) bool {
         if (self.isAtEnd()) return false;
         if (self.script_context.source[self.current] != expected) return false;
-        self.current += 1;
+        _ = self.advance();
         return true;
     }
 

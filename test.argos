@@ -1,4 +1,8 @@
 let foo = Table {
-    "a" = 1
+    "a" = 1,
     "b" = 2
+}
+
+for (0..5) |i| {
+    print(i)
 }
