@@ -13,12 +13,13 @@ test "vm tests" {
 
     const run = struct {
         fn runTest(test_case: TestCase) anyerror!void {
-            const allocator = std.testing.allocator;
+            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer arena.deinit();
 
-            var vm = try virtual_machine.VirtualMachine.init(allocator);
+            var vm = try virtual_machine.VirtualMachine.init(std.testing.allocator, arena.allocator());
             defer vm.deinit();
 
-            const result = try vm.interpret(test_case.source);
+            const result = try vm.interpret("test", test_case.source);
             try std.testing.expect(result == .Ok);
 
             if (vm.stack_top != 0) {

@@ -4,9 +4,16 @@ const scanner = @import("scanner.zig");
 const test_utils = @import("test_utils.zig");
 const parser = @import("parser.zig");
 const ast = @import("ast.zig");
+const vm = @import("vm.zig");
 
 fn e(data: ast.ExpressionData) ast.Expression {
     return .init(data, scanner.Token.dummy());
+}
+
+fn s(data: []const u8) scanner.Token {
+    var token = scanner.Token.dummy();
+    token.data = data;
+    return token;
 }
 
 fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void {
@@ -14,7 +21,7 @@ fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void
 
     switch (expected) {
         .VarDeclaration => |stmt| {
-            try std.testing.expectEqualStrings(stmt.name, actual.VarDeclaration.name);
+            try std.testing.expectEqualStrings(stmt.name.data, actual.VarDeclaration.name.data);
             try expectExpression(stmt.expression.*, actual.VarDeclaration.expression.*);
         },
         .Block => |stmt| {
@@ -26,7 +33,7 @@ fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void
         .Assignment => |stmt| {
             try expectTag(stmt.target, actual.Assignment.target);
             if (stmt.target == .Identifier) {
-                try std.testing.expectEqualStrings(stmt.target.Identifier, actual.Assignment.target.Identifier);
+                try std.testing.expectEqualStrings(stmt.target.Identifier.data, actual.Assignment.target.Identifier.data);
             } else {
                 try expectExpression(stmt.target.Index.left.*, actual.Assignment.target.Index.left.*);
                 try expectExpression(stmt.target.Index.index.*, actual.Assignment.target.Index.index.*);
@@ -35,9 +42,9 @@ fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void
         },
         .For => |stmt| {
             try expectExpression(stmt.expression.*, actual.For.expression.*);
-            try std.testing.expectEqualStrings(stmt.capture, actual.For.capture);
+            try std.testing.expectEqualStrings(stmt.capture.data, actual.For.capture.data);
             if (stmt.index) |index| {
-                try std.testing.expectEqualStrings(index, actual.For.index.?);
+                try std.testing.expectEqualStrings(index.data, actual.For.index.?.data);
             } else {
                 try std.testing.expect(actual.For.index == null);
             }
@@ -101,9 +108,9 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
                 const second = actual.Function.params.items[i];
                 try expectTag(first, second);
                 if (first == .Positional) {
-                    try std.testing.expectEqualStrings(first.Positional, second.Positional);
+                    try std.testing.expectEqualStrings(first.Positional.data, second.Positional.data);
                 } else {
-                    try std.testing.expectEqualStrings(first.Default.name, second.Default.name);
+                    try std.testing.expectEqualStrings(first.Default.name.data, second.Default.name.data);
                     try expectExpression(first.Default.value.*, second.Default.value.*);
                 }
             }
@@ -131,7 +138,7 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
                 if (first == .Positional) {
                     try expectExpression(first.Positional.*, second.Positional.*);
                 } else {
-                    try std.testing.expectEqualStrings(first.Named.name, second.Named.name);
+                    try std.testing.expectEqualStrings(first.Named.name.data, second.Named.name.data);
                     try expectExpression(first.Named.value.*, second.Named.value.*);
                 }
             }
@@ -184,7 +191,14 @@ const StatementTestCase = struct {
 };
 
 fn runStatementTest(arena: std.mem.Allocator, test_case: StatementTestCase) anyerror!void {
-    const result = parser.createAst(arena, test_case.input);
+    const ctx = try arena.create(vm.ScriptContext);
+    ctx.* = .{
+        .file_name = "scanner_test",
+        .source = test_case.input,
+        .lines = .{},
+    };
+
+    const result = parser.createAst(arena, ctx);
 
     if (test_case.expect_error) {
         try std.testing.expectError(error.ParserError, result);
@@ -208,7 +222,7 @@ test "statements" {
             ,
             .expected_statement = .{
                 .VarDeclaration = .{
-                    .name = "foo",
+                    .name = s("foo"),
                     .expression = &e(.{ .Integer = 5 }),
                 },
             },
@@ -220,7 +234,7 @@ test "statements" {
             ,
             .expected_statement = .{
                 .VarDeclaration = .{
-                    .name = "foo",
+                    .name = s("foo"),
                     .expression = &e(.Null),
                 },
             },
@@ -232,7 +246,7 @@ test "statements" {
             ,
             .expected_statement = .{
                 .Assignment = .{
-                    .target = .{ .Identifier = "foo" },
+                    .target = .{ .Identifier = s("foo") },
                     .expression = &e(.{ .Integer = 5 }),
                 },
             },
@@ -295,7 +309,7 @@ test "statements" {
                 .Block = try test_utils.list(ast.Statement, a, &.{
                     .{
                         .VarDeclaration = .{
-                            .name = "foo",
+                            .name = s("foo"),
                             .expression = &e(.{ .Integer = 5 }),
                         },
                     },
@@ -365,7 +379,7 @@ test "statements" {
                     .body = try test_utils.list(ast.Statement, a, &.{
                         .{
                             .Assignment = .{
-                                .target = .{ .Identifier = "foo" },
+                                .target = .{ .Identifier = s("foo") },
                                 .expression = &e(.{
                                     .Infix = .{
                                         .left = &e(.{ .Identifier = "foo" }),
@@ -394,7 +408,7 @@ test "statements" {
                             .end = &e(.{ .Integer = 5 }),
                         },
                     }),
-                    .capture = "i",
+                    .capture = s("i"),
                     .index = null,
                     .body = try test_utils.list(ast.Statement, a, &.{
                         .{
@@ -421,8 +435,8 @@ test "statements" {
             .expected_statement = .{
                 .For = .{
                     .expression = &e(.{ .Identifier = "foo" }),
-                    .capture = "item",
-                    .index = "i",
+                    .capture = s("item"),
+                    .index = s("i"),
                     .body = try test_utils.list(ast.Statement, a, &.{
                         .{
                             .Expression = &e(.{
@@ -465,7 +479,14 @@ const ExpressionTestCase = struct {
 };
 
 fn runExpressionTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) anyerror!void {
-    const result = parser.createAst(arena, test_case.input);
+    const ctx = try arena.create(vm.ScriptContext);
+    ctx.* = .{
+        .file_name = "scanner_test",
+        .source = test_case.input,
+        .lines = .{},
+    };
+
+    const result = parser.createAst(arena, ctx);
 
     if (test_case.expect_error) {
         try std.testing.expectError(error.ParserError, result);
@@ -1477,8 +1498,8 @@ test "function call" {
                     .function = &e(.{ .Identifier = "test" }),
                     .args = try test_utils.list(ast.FunctionArg, a, &.{
                         .{ .Positional = &e(.{ .Integer = 1 }) },
-                        .{ .Named = .{ .name = "c", .value = &e(.{ .Integer = 2 }) } },
-                        .{ .Named = .{ .name = "b", .value = &e(.{ .Integer = 3 }) } },
+                        .{ .Named = .{ .name = s("c"), .value = &e(.{ .Integer = 2 }) } },
+                        .{ .Named = .{ .name = s("b"), .value = &e(.{ .Integer = 3 }) } },
                     }),
                 },
             },
@@ -1520,8 +1541,8 @@ test "function literal" {
             .expected_expression = .{
                 .Function = .{
                     .params = try test_utils.list(ast.FunctionParam, a, &.{
-                        .{ .Positional = "a" },
-                        .{ .Positional = "b" },
+                        .{ .Positional = s("a") },
+                        .{ .Positional = s("b") },
                     }),
                     .body = .{
                         .Block = try test_utils.list(ast.Statement, a, &.{
@@ -1547,8 +1568,8 @@ test "function literal" {
             .expected_expression = .{
                 .Function = .{
                     .params = try test_utils.list(ast.FunctionParam, a, &.{
-                        .{ .Positional = "a" },
-                        .{ .Positional = "b" },
+                        .{ .Positional = s("a") },
+                        .{ .Positional = s("b") },
                     }),
                     .body = .{
                         .Expression = &e(.{
@@ -1570,8 +1591,8 @@ test "function literal" {
             .expected_expression = .{
                 .Function = .{
                     .params = try test_utils.list(ast.FunctionParam, a, &.{
-                        .{ .Default = .{ .name = "a", .value = &e(.{ .Integer = 11 }) } },
-                        .{ .Default = .{ .name = "b", .value = &e(.{ .Integer = 12 }) } },
+                        .{ .Default = .{ .name = s("a"), .value = &e(.{ .Integer = 11 }) } },
+                        .{ .Default = .{ .name = s("b"), .value = &e(.{ .Integer = 12 }) } },
                     }),
                     .body = .{
                         .Expression = &e(.{
@@ -1715,7 +1736,14 @@ test "parse program" {
 
     const run = struct {
         fn runTest(arena: std.mem.Allocator, test_case: ProgramTestCase) anyerror!void {
-            const program = try parser.createAst(arena, test_case.input);
+            const ctx = try arena.create(vm.ScriptContext);
+            ctx.* = .{
+                .file_name = "scanner_test",
+                .source = test_case.input,
+                .lines = .{},
+            };
+
+            const program = try parser.createAst(arena, ctx);
             try std.testing.expectEqual(test_case.expected.items.len, program.items.len);
             for (0..program.items.len) |i| {
                 try expectStatement(test_case.expected.items[i], program.items[i]);
@@ -1747,24 +1775,24 @@ test "parse program" {
             .expected = try test_utils.list(ast.Statement, a, &.{
                 .{
                     .VarDeclaration = .{
-                        .name = "fib",
+                        .name = s("fib"),
                         .expression = &e(.{
                             .Function = .{
                                 .name = "fib",
                                 .params = try test_utils.list(ast.FunctionParam, a, &.{
-                                    .{ .Positional = "n" },
+                                    .{ .Positional = s("n") },
                                 }),
                                 .body = .{
                                     .Block = try test_utils.list(ast.Statement, a, &.{
                                         .{
                                             .VarDeclaration = .{
-                                                .name = "a",
+                                                .name = s("a"),
                                                 .expression = &e(.{ .Integer = 0 }),
                                             },
                                         },
                                         .{
                                             .VarDeclaration = .{
-                                                .name = "b",
+                                                .name = s("b"),
                                                 .expression = &e(.{ .Integer = 1 }),
                                             },
                                         },
@@ -1776,18 +1804,18 @@ test "parse program" {
                                                         .end = &e(.{ .Identifier = "n" }),
                                                     },
                                                 }),
-                                                .capture = "_",
+                                                .capture = s("_"),
                                                 .index = null,
                                                 .body = try test_utils.list(ast.Statement, a, &.{
                                                     .{
                                                         .VarDeclaration = .{
-                                                            .name = "tmp",
+                                                            .name = s("tmp"),
                                                             .expression = &e(.{ .Identifier = "b" }),
                                                         },
                                                     },
                                                     .{
                                                         .Assignment = .{
-                                                            .target = .{ .Identifier = "b" },
+                                                            .target = .{ .Identifier = s("b") },
                                                             .expression = &e(.{
                                                                 .Infix = .{
                                                                     .left = &e(.{ .Identifier = "a" }),
@@ -1799,7 +1827,7 @@ test "parse program" {
                                                     },
                                                     .{
                                                         .Assignment = .{
-                                                            .target = .{ .Identifier = "a" },
+                                                            .target = .{ .Identifier = s("a") },
                                                             .expression = &e(.{ .Identifier = "tmp" }),
                                                         },
                                                     },

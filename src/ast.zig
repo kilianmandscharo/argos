@@ -327,7 +327,7 @@ pub const Statement = union(enum) {
 const Block = std.ArrayList(Statement);
 
 const VarDeclaration = struct {
-    name: []const u8,
+    name: scanner.Token,
     expression: *const Expression,
 };
 
@@ -337,14 +337,14 @@ const Assignment = struct {
 };
 
 pub const AssignTarget = union(enum) {
-    Identifier: []const u8,
+    Identifier: scanner.Token,
     Index: Index,
 };
 
 const For = struct {
     expression: *const Expression,
-    capture: []const u8,
-    index: ?[]const u8,
+    capture: scanner.Token,
+    index: ?scanner.Token,
     body: Block,
 };
 
@@ -354,13 +354,13 @@ const While = struct {
 };
 
 pub const Expression = struct {
-    location: scanner.Token,
+    token: scanner.Token,
     data: ExpressionData,
 
     pub fn init(data: ExpressionData, token: scanner.Token) @This() {
         return .{
             .data = data,
-            .location = token,
+            .token = token,
         };
     }
 };
@@ -406,12 +406,12 @@ const FunctionBody = union(enum) {
 };
 
 pub const FunctionParam = union(enum) {
-    Positional: []const u8,
+    Positional: scanner.Token,
     Default: FunctionParamDefault,
 };
 
 const FunctionParamDefault = struct {
-    name: []const u8,
+    name: scanner.Token,
     value: *const Expression,
 };
 
@@ -426,7 +426,7 @@ pub const FunctionArg = union(enum) {
 };
 
 const FunctionArgNamed = struct {
-    name: []const u8,
+    name: scanner.Token,
     value: *const Expression,
 };
 

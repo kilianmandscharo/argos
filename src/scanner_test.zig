@@ -1,4 +1,5 @@
 const std = @import("std");
+const vm = @import("vm.zig");
 const scanner = @import("scanner.zig");
 const test_utils = @import("test_utils.zig");
 
@@ -18,7 +19,19 @@ test "scanner" {
 
     const run = struct {
         fn runTest(test_case: TestCase) anyerror!void {
-            var s = scanner.Scanner.init(test_case.input);
+            const allocator = std.testing.allocator;
+
+            const ctx = try allocator.create(vm.ScriptContext);
+            ctx.* = .{
+                .file_name = "scanner_test",
+                .source = test_case.input,
+                .lines = .{},
+            };
+
+            defer allocator.destroy(ctx);
+            defer ctx.lines.deinit(allocator);
+
+            var s = try scanner.Scanner.init(std.testing.allocator, ctx);
 
             try assertTokenEquals(.Identifier, "a", try s.next());
             try assertTokenEquals(.Assign, "=", try s.next());

@@ -157,13 +157,13 @@ pub const Compiler = struct {
         self.locals[self.local_count - 1].depth = self.scope_depth;
     }
 
-    fn getVariable(self: *Compiler, name: []const u8) !u16 {
+    fn getVariable(self: *Compiler, name: scanner.Token) !u16 {
         try self.declareVariable(name);
         if (self.scope_depth > 0) return 0;
-        return try self.identifierConstant(name);
+        return try self.identifierConstant(name.data);
     }
 
-    fn declareVariable(self: *Compiler, name: []const u8) !void {
+    fn declareVariable(self: *Compiler, name: scanner.Token) !void {
         if (self.scope_depth == 0) return;
 
         if (self.local_count > 0) {
@@ -173,8 +173,8 @@ pub const Compiler = struct {
                 if (local.depth != null and local.depth.? < self.scope_depth) {
                     break;
                 }
-                if (Compiler.identifiersEqual(name, local.name)) {
-                    return errorAt("Already a variable with this name in this scope.");
+                if (Compiler.identifiersEqual(name.data, local.name)) {
+                    return self.errorAt(name, "Already a variable with this name in this scope.");
                 }
             }
         }
@@ -182,13 +182,13 @@ pub const Compiler = struct {
         try self.addLocal(name);
     }
 
-    fn addLocal(self: *Compiler, name: []const u8) !void {
+    fn addLocal(self: *Compiler, name: scanner.Token) !void {
         if (self.local_count == std.math.maxInt(u8) + 1) {
-            return errorAt("Too many local variables in block.");
+            return self.errorAt(name, "Too many local variables in block.");
         }
         const local = &self.locals[self.local_count];
         self.local_count += 1;
-        local.name = name;
+        local.name = name.data;
         local.depth = null;
         local.is_captured = false;
     }
@@ -203,7 +203,8 @@ pub const Compiler = struct {
 
         const offset = self.currentChunk().code.items.len - loop_start + 2;
         if (offset > std.math.maxInt(u16)) {
-            return errorAt("Loop body too large.");
+            // TODO: pass corrent token
+            return self.errorAt(scanner.Token.dummy(), "Loop body too large.");
         }
 
         try self.emitU16(offset);
@@ -220,7 +221,8 @@ pub const Compiler = struct {
         const cur_chunk = self.currentChunk();
         const jump = cur_chunk.code.items.len - offset - 2;
         if (jump > std.math.maxInt(u16)) {
-            return errorAt("Too much code to jump over.");
+            // TODO: pass corrent token
+            return self.errorAt(scanner.Token.dummy(), "Too much code to jump over.");
         }
         const bytes = chunk.indexToU16(jump);
         cur_chunk.code.items[offset] = bytes[0];
@@ -238,7 +240,7 @@ pub const Compiler = struct {
         }
 
         if (upvalue_count == UINT8_COUNT) {
-            return errorAt("Too many closure variables in function.");
+            return self.errorAt("Too many closure variables in function.");
         }
 
         self.upvalues[upvalue_count].is_local = is_local;
@@ -248,7 +250,7 @@ pub const Compiler = struct {
         return retVal;
     }
 
-    fn resolveUpvalue(self: *Compiler, name: []const u8) !?u8 {
+    fn resolveUpvalue(self: *Compiler, name: scanner.Token) !?u8 {
         if (self.enclosing == null) return null;
 
         const enclosing = self.enclosing.?;
@@ -294,15 +296,15 @@ pub const Compiler = struct {
         }
     }
 
-    fn resolveLocal(self: *Compiler, name: []const u8) !?u8 {
+    fn resolveLocal(self: *Compiler, name: scanner.Token) !?u8 {
         if (self.local_count == 0) return null;
         var i = self.local_count;
         while (i > 0) {
             i -= 1;
             const local = &self.locals[i];
-            if (Compiler.identifiersEqual(name, local.name)) {
+            if (Compiler.identifiersEqual(name.data, local.name)) {
                 if (local.depth == null) {
-                    return errorAt("Can't read local variable in its own initializer.");
+                    return self.errorAt(name, "Can't read local variable in its own initializer.");
                 }
                 return i;
             }
@@ -356,8 +358,8 @@ pub const Compiler = struct {
         try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = b }, 0);
     }
 
-    fn errorAt(message: []const u8) anyerror {
-        std.debug.print("{s}", .{message});
+    fn errorAt(self: *Compiler, token: scanner.Token, message: []const u8) anyerror {
+        token.printError(message, &self.vm.script_context, "Compiler");
         return error.CompileError;
     }
 
@@ -385,7 +387,7 @@ pub const Compiler = struct {
                             try self.emitOp(.SetUpvalue);
                             try self.emitByte(upvalue);
                         } else {
-                            const constant = try self.identifierConstant(name);
+                            const constant = try self.identifierConstant(name.data);
                             try self.emitOpU16(.SetGlobal, constant);
                         }
                     },
@@ -401,7 +403,7 @@ pub const Compiler = struct {
             .For => |val| {
                 self.beginScope();
                 if (val.expression.data != .Range) {
-                    return errorAt("Only range expressions are supported for now.");
+                    unreachable;
                 }
 
                 try self.compileExpression(val.expression.data.Range.start);
@@ -413,7 +415,7 @@ pub const Compiler = struct {
                 const increment_var_index = self.local_count - 1;
 
                 // a dummy local for the right side of the range
-                try self.addLocal("");
+                try self.addLocal(scanner.Token.dummy());
                 self.markInitialized();
 
                 const loop_start = self.currentChunk().code.items.len;
@@ -465,7 +467,7 @@ pub const Compiler = struct {
             },
             .Return => |val| {
                 if (self.type == .Script) {
-                    return errorAt("Can't return from top-level code.");
+                    return self.errorAt(val.token, "Can't return from top-level code.");
                 }
                 try self.compileExpression(val);
                 try self.emitOp(.Return);
@@ -482,9 +484,9 @@ pub const Compiler = struct {
     fn compileExpression(self: *Compiler, expr: *const ast.Expression) anyerror!void {
         switch (expr.data) {
             .Identifier => |name| {
-                if (try self.resolveLocal(name)) |local| {
+                if (try self.resolveLocal(expr.token)) |local| {
                     try self.emitOpU8(.GetLocal, local);
-                } else if (try self.resolveUpvalue(name)) |upvalue| {
+                } else if (try self.resolveUpvalue(expr.token)) |upvalue| {
                     try self.emitOpU8(.GetUpvalue, upvalue);
                 } else {
                     const constant = try self.identifierConstant(name);
@@ -571,10 +573,11 @@ pub const Compiler = struct {
                         .Positional => |name| {
                             new_compiler.function.?.arity += 1;
                             if (new_compiler.function.?.arity > 255) {
-                                return errorAt("Can't have more than 255 parameters.");
+                                // TODO: pass corrent token
+                                return self.errorAt(scanner.Token.dummy(), "Can't have more than 255 parameters.");
                             }
                             try new_compiler.declareVariable(name);
-                            const constant = if (new_compiler.scope_depth > 0) 0 else try new_compiler.identifierConstant(name);
+                            const constant = if (new_compiler.scope_depth > 0) 0 else try new_compiler.identifierConstant(name.data);
                             try new_compiler.defineVariable(constant);
                         },
                         .Default => unreachable,
@@ -609,7 +612,7 @@ pub const Compiler = struct {
             .Call => |val| {
                 const count = val.args.items.len;
                 if (count == 255) {
-                    return errorAt("Can't have more than 255 arguments");
+                    return self.errorAt(val.function.token, "Can't have more than 255 arguments");
                 }
                 try self.compileExpression(val.function);
                 for (val.args.items) |arg| {

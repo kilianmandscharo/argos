@@ -121,7 +121,7 @@ pub const Parser = struct {
             return self.errorAtPrevious("expect identifier in loop capture");
         }
 
-        var index: ?[]const u8 = null;
+        var index: ?scanner.Token = null;
 
         if (!self.check(.Pipe)) {
             if (!try self.match(.Comma)) {
@@ -132,7 +132,7 @@ pub const Parser = struct {
             if (second_capture.data != .Identifier) {
                 return self.errorAtPrevious("expect identifier in loop capture");
             }
-            index = second_capture.data.Identifier;
+            index = second_capture.token;
         }
 
         try self.consume(.Pipe, "expect '|' after for loop capture");
@@ -145,7 +145,7 @@ pub const Parser = struct {
         return .{
             .For = .{
                 .expression = expression,
-                .capture = capture.data.Identifier,
+                .capture = capture.token,
                 .index = index,
                 .body = body.Block,
             },
@@ -161,7 +161,7 @@ pub const Parser = struct {
         if (self.isLineEnd()) {
             const expression = try self.arena.create(ast.Expression);
             expression.data = .{ .Null = {} };
-            expression.location = self.getPrevious();
+            expression.token = self.getPrevious();
             return .{ .Return = expression };
         } else {
             const expression = try self.parseExpression();
@@ -205,7 +205,7 @@ pub const Parser = struct {
             const value = try self.parseExpression();
             return .{
                 .VarDeclaration = .{
-                    .name = target.data.Identifier,
+                    .name = target.token,
                     .expression = value,
                 },
             };
@@ -216,7 +216,7 @@ pub const Parser = struct {
         nullExpression.data = .Null;
         return .{
             .VarDeclaration = .{
-                .name = target.data.Identifier,
+                .name = target.token,
                 .expression = nullExpression,
             },
         };
@@ -226,7 +226,7 @@ pub const Parser = struct {
         const expression = try self.parseExpression();
         if (try self.match(.Assign)) {
             const target: ast.AssignTarget = switch (expression.data) {
-                .Identifier => |name| .{ .Identifier = name },
+                .Identifier => .{ .Identifier = expression.token },
                 .Index => |index| .{ .Index = index },
                 else => return self.errorAtPrevious("Invalid assign target."),
             };
@@ -476,13 +476,13 @@ fn parseFunction(parser: *Parser) !ast.Expression {
                     }
                     const right = try p.parseExpression();
                     return .{
-                        .Default = .{ .name = expression.data.Identifier, .value = right },
+                        .Default = .{ .name = expression.token, .value = right },
                     };
                 } else {
                     if (expression.data != .Identifier) {
                         return p.errorAtPrevious("Invalid function param.");
                     }
-                    return .{ .Positional = expression.data.Identifier };
+                    return .{ .Positional = expression.token };
                 }
             }
         }.parse,
@@ -591,7 +591,7 @@ fn parseBinary(parser: *Parser, left: ast.Expression) !ast.Expression {
                 .right = right,
             },
         },
-        left.location,
+        left.token,
     );
 }
 
@@ -601,7 +601,7 @@ fn parseDotDot(parser: *Parser, left: ast.Expression) !ast.Expression {
     left_owned.* = left;
     return .init(
         .{ .Range = .{ .start = left_owned, .end = right } },
-        left.location,
+        left.token,
     );
 }
 
@@ -617,7 +617,7 @@ fn parseCall(parser: *Parser, left: ast.Expression) !ast.Expression {
                     }
                     const right = try p.parseExpression();
                     return .{
-                        .Named = .{ .name = expression.data.Identifier, .value = right },
+                        .Named = .{ .name = expression.token, .value = right },
                     };
                 } else {
                     return .{ .Positional = expression };
@@ -637,7 +637,7 @@ fn parseCall(parser: *Parser, left: ast.Expression) !ast.Expression {
                 .args = args,
             },
         },
-        left.location,
+        left.token,
     );
 }
 
@@ -655,7 +655,7 @@ fn parseIndex(parser: *Parser, left: ast.Expression) !ast.Expression {
                 .index = expression,
             },
         },
-        left.location,
+        left.token,
     );
 }
 

@@ -19,10 +19,6 @@ pub const ScriptContext = struct {
     lines: std.ArrayList(scanner.Line),
     source: []const u8,
     file_name: []const u8,
-
-    pub fn deinit(self: *ScriptContext, arena: std.mem.Allocator) void {
-        self.lines.deinit(arena);
-    }
 };
 
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
@@ -63,6 +59,7 @@ pub const TableGlobals = std.HashMapUnmanaged(*object.ObjString, value.Value, St
 
 pub const VirtualMachine = struct {
     gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
     stack: [constants.stack_max]value.Value,
     stack_top: usize,
     frames: [constants.stack_max]CallFrame,
@@ -76,14 +73,16 @@ pub const VirtualMachine = struct {
     gray_stack: std.ArrayList(*object.Obj),
     bytes_allocated: usize,
     next_gc: usize,
+    script_context: ScriptContext,
 
-    pub fn init(gpa: std.mem.Allocator) !VirtualMachine {
+    pub fn init(gpa: std.mem.Allocator, arena: std.mem.Allocator) !VirtualMachine {
         if (comptime constants.debug_trace_execution) {
             logDebug("Init vm...", .{});
         }
 
         var vm = VirtualMachine{
             .gpa = gpa,
+            .arena = arena,
             .stack = undefined,
             .stack_top = 0,
             .frames = undefined,
@@ -97,6 +96,7 @@ pub const VirtualMachine = struct {
             .gray_stack = .{},
             .bytes_allocated = 0,
             .next_gc = 1024 * 1024,
+            .script_context = undefined,
         };
 
         try vm.defineNative("clock", native.clockNative);
@@ -161,17 +161,13 @@ pub const VirtualMachine = struct {
             logDebug("Starting pre-compilation...", .{});
         }
 
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        arena.deinit();
-
-        var script_context = ScriptContext{
+        self.script_context = ScriptContext{
             .file_name = file_name,
             .source = source,
             .lines = .{},
         };
-        defer script_context.deinit(arena.allocator());
 
-        const ast = try parser.createAst(arena.allocator(), &script_context);
+        const ast = try parser.createAst(self.arena, &self.script_context);
 
         var c: compiler.Compiler = undefined;
         try compiler.Compiler.init(&c, self, self.gpa, .Script, null, 0, null);

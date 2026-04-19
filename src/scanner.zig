@@ -67,14 +67,14 @@ pub const TokenType = enum {
 pub const Token = struct {
     data: []const u8,
     type: TokenType,
-    line: *Line,
-    column: usize,
+    line: u32,
+    column: u32,
 
     pub fn dummy() @This() {
         return .{
             .data = "",
             .type = .Eof,
-            .line = .{},
+            .line = 0,
             .column = 0,
         };
     }
@@ -98,12 +98,21 @@ pub const Token = struct {
         script_context: *vm.ScriptContext,
         module: []const u8,
     ) void {
+        const line = script_context.lines.items[self.line];
+        var end = line.end;
+
+        if (end == 0) {
+            while (end < script_context.source.len and script_context.source[end] != '\n') {
+                end += 1;
+            }
+        }
+
         std.debug.print("{s}:{d}:{d}: error: {s}\n{s}\n", .{
             script_context.file_name,
-            self.line.no + 1,
+            line.no + 1,
             self.column,
             message,
-            script_context.source[self.line.start .. self.line.end - 1],
+            script_context.source[line.start .. end - 1],
         });
 
         for (0..self.column - 1) |_| {
@@ -137,7 +146,7 @@ pub const Lines = *std.ArrayList(Line);
 pub const Scanner = struct {
     start: usize,
     current: usize,
-    column: usize,
+    column: u32,
     arena: std.mem.Allocator,
     script_context: *vm.ScriptContext,
 
@@ -157,7 +166,7 @@ pub const Scanner = struct {
         return .{
             .data = self.script_context.source[self.start..self.current],
             .type = token_type,
-            .line = self.currentLine(),
+            .line = self.currentLine().no,
             .column = self.column,
         };
     }
