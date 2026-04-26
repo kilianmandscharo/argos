@@ -1,8 +1,7 @@
 const std = @import("std");
-const ast = @import("ast.zig");
 const scanner = @import("scanner.zig");
 
-pub fn printProgram(program: ast.Program, writer: anytype) !void {
+pub fn printProgram(program: Program, writer: anytype) !void {
     for (program.items) |stmt| {
         try printStatement(stmt, writer, 0);
     }
@@ -12,7 +11,7 @@ fn printIndent(writer: anytype, level: usize) !void {
     for (0..level * 2) |_| try writer.writeByte(' ');
 }
 
-fn printStatement(stmt: ast.Statement, writer: anytype, level: usize) anyerror!void {
+fn printStatement(stmt: Statement, writer: anytype, level: usize) anyerror!void {
     switch (stmt) {
         .VarDeclaration => |s| {
             try printIndent(writer, level);
@@ -24,13 +23,6 @@ fn printStatement(stmt: ast.Statement, writer: anytype, level: usize) anyerror!v
             try printIndent(writer, level + 1);
             try writer.print("expression:\n", .{});
             try printExpression(s.expression.data, writer, level + 2);
-        },
-        .Block => |stmts| {
-            try printIndent(writer, level);
-            try writer.print("Block\n", .{});
-            for (stmts.items) |s| {
-                try printStatement(s, writer, level + 1);
-            }
         },
         .Assignment => |s| {
             try printIndent(writer, level);
@@ -75,9 +67,7 @@ fn printStatement(stmt: ast.Statement, writer: anytype, level: usize) anyerror!v
             }
             try printIndent(writer, level + 1);
             try writer.print("body:\n", .{});
-            for (s.body.items) |item| {
-                try printStatement(item, writer, level + 2);
-            }
+            try printStatement(s.body.*, writer, level + 2);
         },
         .While => |s| {
             try printIndent(writer, level);
@@ -87,9 +77,7 @@ fn printStatement(stmt: ast.Statement, writer: anytype, level: usize) anyerror!v
             try printExpression(s.expression.data, writer, level + 2);
             try printIndent(writer, level + 1);
             try writer.print("body:\n", .{});
-            for (s.body.items) |item| {
-                try printStatement(item, writer, level + 2);
-            }
+            try printStatement(s.body.*, writer, level + 2);
         },
         .Return => |expr| {
             try printIndent(writer, level);
@@ -104,7 +92,7 @@ fn printStatement(stmt: ast.Statement, writer: anytype, level: usize) anyerror!v
     }
 }
 
-fn printExpression(expr: ast.ExpressionData, writer: anytype, level: usize) !void {
+fn printExpression(expr: ExpressionData, writer: anytype, level: usize) !void {
     switch (expr) {
         .Identifier => |name| {
             try printIndent(writer, level);
@@ -187,20 +175,7 @@ fn printExpression(expr: ast.ExpressionData, writer: anytype, level: usize) !voi
             }
             try printIndent(writer, level + 1);
             try writer.print("body:\n", .{});
-            switch (e.body) {
-                .Block => |stmts| {
-                    try printIndent(writer, level + 2);
-                    try writer.print("Block\n", .{});
-                    for (stmts.items) |stmt| {
-                        try printStatement(stmt, writer, level + 3);
-                    }
-                },
-                .Expression => |body_expr| {
-                    try printIndent(writer, level + 2);
-                    try writer.print("Expression\n", .{});
-                    try printExpression(body_expr.data, writer, level + 3);
-                },
-            }
+            try printStatement(e.body.*, writer, level + 2);
         },
         .Call => |e| {
             try printIndent(writer, level);
@@ -309,6 +284,13 @@ fn printExpression(expr: ast.ExpressionData, writer: anytype, level: usize) !voi
                 },
             }
         },
+        .Block => |stmts| {
+            try printIndent(writer, level);
+            try writer.print("Block\n", .{});
+            for (stmts.items) |s| {
+                try printStatement(s, writer, level + 1);
+            }
+        },
     }
 }
 
@@ -316,15 +298,12 @@ pub const Program = std.ArrayList(Statement);
 
 pub const Statement = union(enum) {
     VarDeclaration: VarDeclaration,
-    Block: Block,
     Assignment: Assignment,
     For: For,
     While: While,
     Return: *const Expression,
     Expression: *const Expression,
 };
-
-const Block = std.ArrayList(Statement);
 
 const VarDeclaration = struct {
     name: scanner.Token,
@@ -345,12 +324,12 @@ const For = struct {
     expression: *const Expression,
     capture: scanner.Token,
     index: ?scanner.Token,
-    body: Block,
+    body: *const Statement,
 };
 
 const While = struct {
     expression: *const Expression,
-    body: Block,
+    body: *const Statement,
 };
 
 pub const Expression = struct {
@@ -380,8 +359,11 @@ pub const ExpressionData = union(enum) {
     Table: std.ArrayList(TablePair),
     Index: Index,
     Match: Match,
+    Block: Block,
     Null,
 };
+
+const Block = std.ArrayList(Statement);
 
 const Infix = struct {
     operator: scanner.TokenType,
@@ -396,13 +378,8 @@ const Prefix = struct {
 
 const Function = struct {
     params: std.ArrayList(FunctionParam),
-    body: FunctionBody,
+    body: *const Statement,
     name: ?[]const u8 = null,
-};
-
-const FunctionBody = union(enum) {
-    Block: Block,
-    Expression: *const Expression,
 };
 
 pub const FunctionParam = union(enum) {

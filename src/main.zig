@@ -70,7 +70,9 @@ fn runFile(allocator: std.mem.Allocator, emit_ast: bool) !void {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
 
-        const virtual_machine = try vm.VirtualMachine.init(allocator, arena.allocator());
+        const virtual_machine = try allocator.create(vm.VirtualMachine);
+        defer allocator.destroy(virtual_machine);
+        virtual_machine.* = try vm.VirtualMachine.init(allocator, arena.allocator());
         defer virtual_machine.deinit();
 
         _ = virtual_machine.interpret(file_path, source) catch |err| {

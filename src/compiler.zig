@@ -124,11 +124,12 @@ pub const Compiler = struct {
                 return err;
             };
         }
+        try self.emitOp(.Null);
         return try self.endCompiler();
     }
 
     fn endCompiler(self: *Compiler) !*object.ObjFunction {
-        try self.emitReturn();
+        try self.emitOp(.Return);
         self.vm.current_compiler = self.enclosing;
         const function = self.function;
         if (comptime constants.debug_disassemble) {
@@ -137,11 +138,6 @@ pub const Compiler = struct {
             self.currentChunk().disassemble(name);
         }
         return function.?;
-    }
-
-    fn emitReturn(self: *Compiler) !void {
-        try self.emitOp(.Null);
-        try self.emitOp(.Return);
     }
 
     fn defineVariable(self: *Compiler, global: u16) !void {
@@ -266,17 +262,6 @@ pub const Compiler = struct {
         return null;
     }
 
-    fn blockStatement(self: *Compiler) anyerror!void {
-        self.log("block statement", .{});
-        defer self.log("end block statement", .{});
-
-        while (!self.check(.RBrace) and !self.check(.Eof)) {
-            try self.declaration();
-        }
-        try self.consume(.RBrace, "Expect '}' after block.");
-        try self.consume(.NewLine, "Expect '\n' after block.");
-    }
-
     fn beginScope(self: *Compiler) void {
         self.scope_depth += 1;
     }
@@ -370,13 +355,6 @@ pub const Compiler = struct {
                 try self.compileExpression(val.expression);
                 try self.defineVariable(global);
             },
-            .Block => |val| {
-                self.beginScope();
-                for (val.items) |item| {
-                    try self.compileStatement(item);
-                }
-                try self.endScope();
-            },
             .Assignment => |val| {
                 switch (val.target) {
                     .Identifier => |name| {
@@ -422,9 +400,7 @@ pub const Compiler = struct {
                 const exit_jump = try self.emitJump(.JumpIfGreaterOrEq);
                 const local_count = self.local_count;
 
-                for (val.body.items) |item| {
-                    try self.compileStatement(item);
-                }
+                try self.compileStatement(val.body.*);
 
                 try self.emitOpU8(.GetLocal, increment_var_index);
                 try self.emitConstant(value.wrapInt(1));
@@ -456,9 +432,7 @@ pub const Compiler = struct {
                 const exit_jump = try self.emitJump(.JumpIfFalse);
                 try self.emitOp(.Pop);
 
-                for (val.body.items) |item| {
-                    try self.compileStatement(item);
-                }
+                try self.compileStatement(val.body.*);
 
                 try self.emitLoop(loop_start);
 
@@ -473,6 +447,7 @@ pub const Compiler = struct {
                 try self.emitOp(.Return);
             },
             .Expression => |val| {
+                logDebug("compiling expression statement, suppress_pop = {}", .{self.ctx.suppress_pop});
                 try self.compileExpression(val);
                 if (!self.ctx.suppress_pop) {
                     try self.emitOp(.Pop);
@@ -584,14 +559,9 @@ pub const Compiler = struct {
                     }
                 }
 
-                switch (val.body) {
-                    .Block => |block| {
-                        for (block.items) |stmt| {
-                            try new_compiler.compileStatement(stmt);
-                        }
-                    },
-                    .Expression => unreachable,
-                }
+                new_compiler.ctx.suppress_pop = true;
+                try new_compiler.compileStatement(val.body.*);
+                new_compiler.ctx.suppress_pop = false;
 
                 const function = try new_compiler.endCompiler();
 
@@ -725,6 +695,16 @@ pub const Compiler = struct {
             },
             .Null => {
                 try self.emitOp(.Null);
+            },
+            .Block => |val| {
+                self.beginScope();
+                for (val.items, 0..) |item, i| {
+                    logDebug("i = {d}", .{i});
+                    if (i == val.items.len - 1) self.ctx.suppress_pop = true;
+                    try self.compileStatement(item);
+                    if (i == val.items.len - 1) self.ctx.suppress_pop = false;
+                }
+                try self.endScope();
             },
         }
     }

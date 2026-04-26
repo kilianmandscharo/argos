@@ -77,9 +77,6 @@ pub const Parser = struct {
         if (try self.match(.Return)) {
             return try self.returnStatement();
         }
-        if (try self.match(.LBrace)) {
-            return try self.blockStatement();
-        }
         if (try self.match(.Let)) {
             return try self.varDeclaration();
         }
@@ -95,12 +92,12 @@ pub const Parser = struct {
         try self.consume(.LParen, "expect '(' after 'while'");
         const expression = try self.parseExpression();
         try self.consume(.RParen, "expect ')' after condition");
-        // TODO: allow all statements here
-        try self.consume(.LBrace, "expect '{' after while condition");
-        const body = try self.blockStatement();
+
+        const body_owned = try self.arena.create(ast.Statement);
+        body_owned.* = try self.parseStatement();
 
         return .{
-            .While = .{ .expression = expression, .body = body.Block },
+            .While = .{ .expression = expression, .body = body_owned },
         };
     }
 
@@ -139,16 +136,15 @@ pub const Parser = struct {
         try self.consume(.Pipe, "expect '|' after for loop capture");
         self.ctx.parse_loop_capture = false;
 
-        // TODO: allow all statements here
-        try self.consume(.LBrace, "expect '{' after loop capture");
-        const body = try self.blockStatement();
+        const body_owned = try self.arena.create(ast.Statement);
+        body_owned.* = try self.parseStatement();
 
         return .{
             .For = .{
                 .expression = expression,
                 .capture = capture.token,
                 .index = index,
-                .body = body.Block,
+                .body = body_owned,
             },
         };
     }
@@ -169,23 +165,6 @@ pub const Parser = struct {
             try self.expectLineEnd();
             return .{ .Return = expression };
         }
-    }
-
-    fn blockStatement(self: *Parser) !ast.Statement {
-        if (comptime constants.debug_parser) {
-            self.log("block statement", .{});
-            defer self.log("end block statement", .{});
-        }
-
-        try self.chopNewlines();
-        var statements: std.ArrayList(ast.Statement) = .{};
-        while (!self.check(.RBrace) and !self.check(.Eof)) {
-            try statements.append(self.arena, try self.parseStatement());
-        }
-        try self.consume(.RBrace, "expect '}' after block");
-        try self.expectLineEnd();
-
-        return .{ .Block = statements };
     }
 
     fn varDeclaration(self: *Parser) !ast.Statement {
@@ -492,26 +471,14 @@ fn parseFunction(parser: *Parser) !ast.Expression {
 
     const name = parser.ctx.current_var_name;
 
-    if (try parser.match(.LBrace)) {
-        const body = try parser.blockStatement();
-        return .init(
-            .{
-                .Function = .{
-                    .params = params,
-                    .body = .{ .Block = body.Block },
-                    .name = name,
-                },
-            },
-            token,
-        );
-    }
+    const body_owned = try parser.arena.create(ast.Statement);
+    body_owned.* = try parser.parseStatement();
 
-    const body = try parser.parseExpression();
     return .init(
         .{
             .Function = .{
                 .params = params,
-                .body = .{ .Expression = body },
+                .body = body_owned,
                 .name = name,
             },
         },
@@ -575,6 +542,18 @@ fn parseMatch(self: *Parser) !ast.Expression {
         },
         token,
     );
+}
+
+fn parseBlock(self: *Parser) !ast.Expression {
+    try self.chopNewlines();
+    var statements: std.ArrayList(ast.Statement) = .{};
+    while (!self.check(.RBrace) and !self.check(.Eof)) {
+        try statements.append(self.arena, try self.parseStatement());
+    }
+    try self.consume(.RBrace, "expect '}' after block");
+    try self.expectLineEnd();
+    // TODO: pass token
+    return .init(.{ .Block = statements }, scanner.Token.dummy());
 }
 
 fn parseBinary(parser: *Parser, left: ast.Expression) !ast.Expression {
@@ -681,7 +660,7 @@ fn initRules() [token_count]ParseRule {
             .RParen => .{ .prefix = null, .infix = null, .precedence = null },
             .LBracket => .{ .prefix = null, .infix = parseIndex, .precedence = .Index },
             .RBracket => .{ .prefix = null, .infix = null, .precedence = null },
-            .LBrace => .{ .prefix = null, .infix = null, .precedence = null },
+            .LBrace => .{ .prefix = parseBlock, .infix = null, .precedence = null },
             .RBrace => .{ .prefix = null, .infix = null, .precedence = null },
             .Assign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Comma => .{ .prefix = null, .infix = null, .precedence = null },
