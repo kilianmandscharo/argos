@@ -224,7 +224,7 @@ pub const VirtualMachine = struct {
             const frame = self.frames[@intCast(i)];
             const function = frame.function;
             const instruction = frame.ip - 1;
-            std.debug.print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
+            std.debug.print("[line {d}] in ", .{function.chunk.tokens.items[instruction].line});
             if (function.name) |name| {
                 std.debug.print("{s}()\n", .{name.chars});
             } else {

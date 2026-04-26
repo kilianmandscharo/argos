@@ -128,7 +128,8 @@ pub const Compiler = struct {
     }
 
     fn endCompiler(self: *Compiler) !*object.ObjFunction {
-        try self.emitReturn();
+        try self.emitOp(.Null);
+        try self.emitOp(.Return);
         self.vm.current_compiler = self.enclosing;
         const function = self.function;
         if (comptime constants.debug_disassemble) {
@@ -139,17 +140,12 @@ pub const Compiler = struct {
         return function.?;
     }
 
-    fn emitReturn(self: *Compiler) !void {
-        try self.emitOp(.Null);
-        try self.emitOp(.Return);
-    }
-
-    fn defineVariable(self: *Compiler, global: u16) !void {
+    fn defineVariable(self: *Compiler, global: u16, token: *scanner.Token) !void {
         if (self.scope_depth > 0) {
             self.markInitialized();
             return;
         }
-        try self.emitOpU16(.DefineGlobal, global);
+        try self.emitOpU16(.DefineGlobal, global, token);
     }
 
     fn markInitialized(self: *Compiler) void {
@@ -302,7 +298,7 @@ pub const Compiler = struct {
         while (i > 0) {
             i -= 1;
             const local = &self.locals[i];
-            if (Compiler.identifiersEqual(name.data, local.name)) {
+            if (identifiersEqual(name.data, local.name)) {
                 if (local.depth == null) {
                     return self.errorAt(name, "Can't read local variable in its own initializer.");
                 }
@@ -317,8 +313,8 @@ pub const Compiler = struct {
         return std.mem.eql(u8, a, b);
     }
 
-    fn emitConstant(self: *Compiler, val: value.Value) !void {
-        try self.currentChunk().writeConstant(self.gpa, val, 0);
+    fn emitConstant(self: *Compiler, val: value.Value, token: *scanner.Token) !void {
+        try self.currentChunk().writeConstant(self.gpa, val, token);
     }
 
     fn makeConstant(self: *Compiler, val: value.Value) !u16 {
@@ -329,28 +325,28 @@ pub const Compiler = struct {
         return &self.function.?.chunk;
     }
 
-    fn emitOpU8(self: *Compiler, first: chunk.OpCode, second: u8) !void {
-        try self.emitOp(first);
-        try self.emitByte(second);
+    fn emitOpU8(self: *Compiler, first: chunk.OpCode, second: u8, token: *scanner.Token) !void {
+        try self.emitOp(first, token);
+        try self.emitByte(second, token);
     }
 
-    fn emitOpU16(self: *Compiler, first: chunk.OpCode, second: u16) !void {
-        try self.emitOp(first);
-        try self.emitU16(second);
+    fn emitOpU16(self: *Compiler, first: chunk.OpCode, second: u16, token: *scanner.Token) !void {
+        try self.emitOp(first, token);
+        try self.emitU16(second, token);
     }
 
-    fn emitByte(self: *Compiler, byte: u8) !void {
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Byte = byte }, 0);
+    fn emitByte(self: *Compiler, byte: u8, token: *scanner.Token) !void {
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Byte = byte }, token);
     }
 
-    fn emitU16(self: *Compiler, index: usize) !void {
+    fn emitU16(self: *Compiler, index: usize, token: *scanner.Token) !void {
         const bytes = chunk.indexToU16(index);
-        try self.emitByte(bytes[0]);
-        try self.emitByte(bytes[1]);
+        try self.emitByte(bytes[0], token);
+        try self.emitByte(bytes[1], token);
     }
 
-    fn emitOp(self: *Compiler, op: chunk.OpCode) !void {
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = op }, 0);
+    fn emitOp(self: *Compiler, op: chunk.OpCode, token: *scanner.Token) !void {
+        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = op }, token);
     }
 
     fn emitOpCodes(self: *Compiler, a: chunk.OpCode, b: chunk.OpCode) !void {
@@ -366,9 +362,10 @@ pub const Compiler = struct {
     fn compileStatement(self: *Compiler, stmt: ast.Statement) !void {
         switch (stmt) {
             .VarDeclaration => |val| {
-                const global = try self.getVariable(val.name);
+                var name = val.name;
+                const global = try self.getVariable(name);
                 try self.compileExpression(val.expression);
-                try self.defineVariable(global);
+                try self.defineVariable(global, &name);
             },
             .Block => |val| {
                 self.beginScope();
@@ -382,21 +379,21 @@ pub const Compiler = struct {
                     .Identifier => |name| {
                         try self.compileExpression(val.expression);
                         if (try self.resolveLocal(name)) |local| {
-                            try self.emitOpU8(.SetLocal, local);
+                            try self.emitOpU8(.SetLocal, local, &name);
                         } else if (try self.resolveUpvalue(name)) |upvalue| {
-                            try self.emitOp(.SetUpvalue);
-                            try self.emitByte(upvalue);
+                            try self.emitOp(.SetUpvalue, &name);
+                            try self.emitByte(upvalue, &name);
                         } else {
                             const constant = try self.identifierConstant(name.data);
-                            try self.emitOpU16(.SetGlobal, constant);
+                            try self.emitOpU16(.SetGlobal, constant, &name);
                         }
                     },
                     .Index => |index| {
                         try self.compileExpression(index.left);
                         try self.compileExpression(index.index);
                         try self.compileExpression(val.expression);
-                        try self.emitOp(.IndexSet);
-                        try self.emitOp(.Pop);
+                        try self.emitOp(.IndexSet, &index.left.token);
+                        try self.emitOp(.Pop, &index.left.token);
                     },
                 }
             },
@@ -426,10 +423,10 @@ pub const Compiler = struct {
                     try self.compileStatement(item);
                 }
 
-                try self.emitOpU8(.GetLocal, increment_var_index);
+                try self.emitOpU8(.GetLocal, increment_var_index, &val.capture);
                 try self.emitConstant(value.wrapInt(1));
-                try self.emitOp(.Add);
-                try self.emitOpU8(.SetLocal, increment_var_index);
+                try self.emitOp(.Add, &val.capture);
+                try self.emitOpU8(.SetLocal, increment_var_index, &val.capture);
 
                 var i = self.local_count;
                 while (i > local_count) {
@@ -485,25 +482,25 @@ pub const Compiler = struct {
         switch (expr.data) {
             .Identifier => |name| {
                 if (try self.resolveLocal(expr.token)) |local| {
-                    try self.emitOpU8(.GetLocal, local);
+                    try self.emitOpU8(.GetLocal, local, &expr.token);
                 } else if (try self.resolveUpvalue(expr.token)) |upvalue| {
-                    try self.emitOpU8(.GetUpvalue, upvalue);
+                    try self.emitOpU8(.GetUpvalue, upvalue, &expr.token);
                 } else {
                     const constant = try self.identifierConstant(name);
-                    try self.emitOpU16(.GetGlobal, constant);
+                    try self.emitOpU16(.GetGlobal, constant, &expr.token);
                 }
             },
             .String => |val| {
-                try self.emitConstant(value.wrapObj(try object.copyString(self.vm, val)));
+                try self.emitConstant(value.wrapObj(try object.copyString(self.vm, val)), &expr.token);
             },
             .Integer => |val| {
-                try self.emitConstant(value.wrapInt(val));
+                try self.emitConstant(value.wrapInt(val), &expr.token);
             },
             .Float => |val| {
                 try self.emitConstant(value.wrapFloat(val));
             },
             .Boolean => |val| {
-                if (val) try self.emitOp(.True) else try self.emitOp(.False);
+                if (val) try self.emitOp(.True, &expr.token) else try self.emitOp(.False, &expr.token);
             },
             .Infix => |val| {
                 try self.compileExpression(val.left);

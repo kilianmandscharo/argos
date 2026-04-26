@@ -1,6 +1,7 @@
 const std = @import("std");
 const value = @import("value.zig");
 const logging = @import("logging.zig");
+const scanner = @import("scanner.zig");
 
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
     logging.log(fmt, args, .{
@@ -60,23 +61,23 @@ pub const OpByte = union(enum) {
 pub const Chunk = struct {
     code: std.ArrayList(u8),
     constants: std.ArrayList(value.Value),
-    lines: std.ArrayList(usize),
+    tokens: std.ArrayList(*scanner.Token),
 
     pub fn init() Chunk {
         return Chunk{
             .code = .{},
             .constants = .{},
-            .lines = .{},
+            .tokens = .{},
         };
     }
 
     pub fn deinit(self: *Chunk, gpa: std.mem.Allocator) void {
         self.code.deinit(gpa);
         self.constants.deinit(gpa);
-        self.lines.deinit(gpa);
+        self.tokens.deinit(gpa);
     }
 
-    pub fn write(self: *Chunk, gpa: std.mem.Allocator, op_byte: OpByte, line: usize) !void {
+    pub fn write(self: *Chunk, gpa: std.mem.Allocator, op_byte: OpByte, token: *scanner.Token) !void {
         switch (op_byte) {
             .Byte => |byte| {
                 try self.code.append(gpa, byte);
@@ -85,15 +86,15 @@ pub const Chunk = struct {
                 try self.code.append(gpa, @intFromEnum(op));
             },
         }
-        try self.lines.append(gpa, line);
+        try self.tokens.append(gpa, token);
     }
 
-    pub fn writeConstant(self: *Chunk, gpa: std.mem.Allocator, val: value.Value, line: usize) !void {
+    pub fn writeConstant(self: *Chunk, gpa: std.mem.Allocator, val: value.Value, token: *scanner.Token) !void {
         const constant = try self.addConstant(gpa, val);
         const bytes = indexToU16(constant);
-        try self.write(gpa, OpByte{ .Op = .Constant }, line);
-        try self.write(gpa, OpByte{ .Byte = bytes[0] }, line);
-        try self.write(gpa, OpByte{ .Byte = bytes[1] }, line);
+        try self.write(gpa, OpByte{ .Op = .Constant }, token);
+        try self.write(gpa, OpByte{ .Byte = bytes[0] }, token);
+        try self.write(gpa, OpByte{ .Byte = bytes[1] }, token);
     }
 
     pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, val: value.Value) !u16 {
@@ -111,10 +112,10 @@ pub const Chunk = struct {
 
     pub fn disassembleInstruction(self: *Chunk, offset: usize) usize {
         std.debug.print("{d:0>4} ", .{offset});
-        if (offset > 0 and self.lines.items[offset] == self.lines.items[offset - 1]) {
+        if (offset > 0 and self.tokens.items[offset].line == self.tokens.items[offset - 1].line) {
             std.debug.print("   | ", .{});
         } else {
-            std.debug.print("{d:4} ", .{self.lines.items[offset]});
+            std.debug.print("{d:4} ", .{self.tokens.items[offset].line});
         }
         switch (@as(OpCode, @enumFromInt(self.code.items[offset]))) {
             .Return => return simpleInstruction("OP_RETURN", offset),
