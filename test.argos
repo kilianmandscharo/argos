@@ -1,6 +1,6 @@
-let foo = fn(a, b) {
-    let c = 4
-    a + b + c
+let a = match {
+    true -> 1
+    false -> 2
 }
 
-print(foo(1, 2))
+assert(a == 1)

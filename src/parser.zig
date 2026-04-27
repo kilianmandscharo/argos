@@ -471,14 +471,13 @@ fn parseFunction(parser: *Parser) !ast.Expression {
 
     const name = parser.ctx.current_var_name;
 
-    const body_owned = try parser.arena.create(ast.Statement);
-    body_owned.* = try parser.parseStatement();
+    const body = try parser.parseExpression();
 
     return .init(
         .{
             .Function = .{
                 .params = params,
-                .body = body_owned,
+                .body = body,
                 .name = name,
             },
         },
@@ -504,7 +503,7 @@ fn parseMatch(self: *Parser) !ast.Expression {
     if (!self.check(.LBrace)) {
         const pattern = try self.parseExpression();
         try self.consume(.Arrow, "expect '->' after match pattern");
-        const body = try self.parseStatement();
+        const body = try self.parseExpression();
         return .init(
             .{
                 .Match = .{
@@ -525,10 +524,11 @@ fn parseMatch(self: *Parser) !ast.Expression {
 
     while (!self.check(.Eof) and !self.check(.RBrace)) {
         try self.chopNewlines();
+        if (self.check(.RBrace)) break;
 
         const pattern = try self.parseExpression();
         try self.consume(.Arrow, "expect '->' after match pattern");
-        const body = try self.parseStatement();
+        const body = try self.parseExpression();
 
         try arms.append(self.arena, .{ .pattern = pattern, .body = body });
     }

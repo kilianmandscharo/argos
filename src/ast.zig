@@ -1,6 +1,149 @@
 const std = @import("std");
 const scanner = @import("scanner.zig");
 
+pub const Program = std.ArrayList(Statement);
+
+pub const Statement = union(enum) {
+    VarDeclaration: VarDeclaration,
+    Assignment: Assignment,
+    For: For,
+    While: While,
+    Return: *const Expression,
+    Expression: *const Expression,
+};
+
+const VarDeclaration = struct {
+    name: scanner.Token,
+    expression: *const Expression,
+};
+
+const Assignment = struct {
+    target: AssignTarget,
+    expression: *const Expression,
+};
+
+pub const AssignTarget = union(enum) {
+    Identifier: scanner.Token,
+    Index: Index,
+};
+
+const For = struct {
+    expression: *const Expression,
+    capture: scanner.Token,
+    index: ?scanner.Token,
+    body: *const Statement,
+};
+
+const While = struct {
+    expression: *const Expression,
+    body: *const Statement,
+};
+
+pub const Expression = struct {
+    token: scanner.Token,
+    data: ExpressionData,
+
+    pub fn init(data: ExpressionData, token: scanner.Token) @This() {
+        return .{
+            .data = data,
+            .token = token,
+        };
+    }
+};
+
+pub const ExpressionData = union(enum) {
+    Identifier: []const u8,
+    String: []const u8,
+    Integer: i64,
+    Float: f64,
+    Boolean: bool,
+    Infix: Infix,
+    Prefix: Prefix,
+    Function: Function,
+    Call: Call,
+    Range: Range,
+    List: std.ArrayList(*const Expression),
+    Table: std.ArrayList(TablePair),
+    Index: Index,
+    Match: Match,
+    Block: Block,
+    Null,
+};
+
+const Block = std.ArrayList(Statement);
+
+const Infix = struct {
+    operator: scanner.TokenType,
+    left: *const Expression,
+    right: *const Expression,
+};
+
+const Prefix = struct {
+    operator: scanner.TokenType,
+    expression: *const Expression,
+};
+
+const Function = struct {
+    params: std.ArrayList(FunctionParam),
+    body: *const Expression,
+    name: ?[]const u8 = null,
+};
+
+pub const FunctionParam = union(enum) {
+    Positional: scanner.Token,
+    Default: FunctionParamDefault,
+};
+
+const FunctionParamDefault = struct {
+    name: scanner.Token,
+    value: *const Expression,
+};
+
+const Call = struct {
+    function: *const Expression,
+    args: std.ArrayList(FunctionArg),
+};
+
+pub const FunctionArg = union(enum) {
+    Positional: *const Expression,
+    Named: FunctionArgNamed,
+};
+
+const FunctionArgNamed = struct {
+    name: scanner.Token,
+    value: *const Expression,
+};
+
+const Range = struct {
+    start: *const Expression,
+    end: *const Expression,
+};
+
+pub const TablePair = struct {
+    key: *const Expression,
+    value: *const Expression,
+};
+
+pub const Index = struct {
+    left: *const Expression,
+    index: *const Expression,
+};
+
+const Match = struct {
+    target: ?*const Expression,
+    body: MatchBody,
+};
+
+const MatchBody = union(enum) {
+    Single: MatchArm,
+    Multiple: std.ArrayList(MatchArm),
+};
+
+pub const MatchArm = struct {
+    pattern: *const Expression,
+    body: *const Expression,
+};
+
 pub fn printProgram(program: Program, writer: anytype) !void {
     for (program.items) |stmt| {
         try printStatement(stmt, writer, 0);
@@ -175,7 +318,7 @@ fn printExpression(expr: ExpressionData, writer: anytype, level: usize) !void {
             }
             try printIndent(writer, level + 1);
             try writer.print("body:\n", .{});
-            try printStatement(e.body.*, writer, level + 2);
+            try printExpression(e.body.data, writer, level + 2);
         },
         .Call => |e| {
             try printIndent(writer, level);
@@ -266,7 +409,7 @@ fn printExpression(expr: ExpressionData, writer: anytype, level: usize) !void {
                     try printExpression(arm.pattern.data, writer, level + 4);
                     try printIndent(writer, level + 3);
                     try writer.print("body:\n", .{});
-                    try printStatement(arm.body, writer, level + 4);
+                    try printExpression(arm.body.data, writer, level + 4);
                 },
                 .Multiple => |arms| {
                     try printIndent(writer, level + 2);
@@ -279,7 +422,7 @@ fn printExpression(expr: ExpressionData, writer: anytype, level: usize) !void {
                         try printExpression(arm.pattern.data, writer, level + 5);
                         try printIndent(writer, level + 4);
                         try writer.print("body:\n", .{});
-                        try printStatement(arm.body, writer, level + 5);
+                        try printExpression(arm.body.data, writer, level + 5);
                     }
                 },
             }
@@ -293,146 +436,3 @@ fn printExpression(expr: ExpressionData, writer: anytype, level: usize) !void {
         },
     }
 }
-
-pub const Program = std.ArrayList(Statement);
-
-pub const Statement = union(enum) {
-    VarDeclaration: VarDeclaration,
-    Assignment: Assignment,
-    For: For,
-    While: While,
-    Return: *const Expression,
-    Expression: *const Expression,
-};
-
-const VarDeclaration = struct {
-    name: scanner.Token,
-    expression: *const Expression,
-};
-
-const Assignment = struct {
-    target: AssignTarget,
-    expression: *const Expression,
-};
-
-pub const AssignTarget = union(enum) {
-    Identifier: scanner.Token,
-    Index: Index,
-};
-
-const For = struct {
-    expression: *const Expression,
-    capture: scanner.Token,
-    index: ?scanner.Token,
-    body: *const Statement,
-};
-
-const While = struct {
-    expression: *const Expression,
-    body: *const Statement,
-};
-
-pub const Expression = struct {
-    token: scanner.Token,
-    data: ExpressionData,
-
-    pub fn init(data: ExpressionData, token: scanner.Token) @This() {
-        return .{
-            .data = data,
-            .token = token,
-        };
-    }
-};
-
-pub const ExpressionData = union(enum) {
-    Identifier: []const u8,
-    String: []const u8,
-    Integer: i64,
-    Float: f64,
-    Boolean: bool,
-    Infix: Infix,
-    Prefix: Prefix,
-    Function: Function,
-    Call: Call,
-    Range: Range,
-    List: std.ArrayList(*const Expression),
-    Table: std.ArrayList(TablePair),
-    Index: Index,
-    Match: Match,
-    Block: Block,
-    Null,
-};
-
-const Block = std.ArrayList(Statement);
-
-const Infix = struct {
-    operator: scanner.TokenType,
-    left: *const Expression,
-    right: *const Expression,
-};
-
-const Prefix = struct {
-    operator: scanner.TokenType,
-    expression: *const Expression,
-};
-
-const Function = struct {
-    params: std.ArrayList(FunctionParam),
-    body: *const Statement,
-    name: ?[]const u8 = null,
-};
-
-pub const FunctionParam = union(enum) {
-    Positional: scanner.Token,
-    Default: FunctionParamDefault,
-};
-
-const FunctionParamDefault = struct {
-    name: scanner.Token,
-    value: *const Expression,
-};
-
-const Call = struct {
-    function: *const Expression,
-    args: std.ArrayList(FunctionArg),
-};
-
-pub const FunctionArg = union(enum) {
-    Positional: *const Expression,
-    Named: FunctionArgNamed,
-};
-
-const FunctionArgNamed = struct {
-    name: scanner.Token,
-    value: *const Expression,
-};
-
-const Range = struct {
-    start: *const Expression,
-    end: *const Expression,
-};
-
-pub const TablePair = struct {
-    key: *const Expression,
-    value: *const Expression,
-};
-
-pub const Index = struct {
-    left: *const Expression,
-    index: *const Expression,
-};
-
-const Match = struct {
-    target: ?*const Expression,
-    body: MatchBody,
-};
-
-const MatchBody = union(enum) {
-    Single: MatchArm,
-    Multiple: std.ArrayList(MatchArm),
-};
-
-pub const MatchArm = struct {
-    pattern: *const Expression,
-    body: Statement,
-};

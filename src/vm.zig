@@ -60,9 +60,10 @@ pub const TableGlobals = std.HashMapUnmanaged(*object.ObjString, value.Value, St
 pub const VirtualMachine = struct {
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
-    stack: [constants.stack_max]value.Value,
+    // TODO: why does a larger stack size crash
+    stack: [1000]value.Value,
     stack_top: usize,
-    frames: [constants.stack_max]CallFrame,
+    frames: [constants.frames_max]CallFrame,
     frame_count: usize,
     frame: *CallFrame,
     strings: std.HashMapUnmanaged(*object.ObjString, void, StringContext, 80),
@@ -463,6 +464,10 @@ pub const VirtualMachine = struct {
                 .Pop => {
                     _ = self.pop();
                 },
+                .SwapPop => {
+                    self.swapInPlace(self.peek(0), 1);
+                    _ = self.pop();
+                },
                 .DefineGlobal => {
                     const name_idx = chunk.u16ToIndex(
                         frame.function.chunk.code.items[ip],
@@ -599,6 +604,12 @@ pub const VirtualMachine = struct {
                 .CloseUpvalue => {
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);
                     _ = self.pop();
+                },
+                .SwapCloseUpvalue => {
+                    const val = self.pop();
+                    self.closeUpvalues(&self.stack[self.stack_top - 1]);
+                    _ = self.pop();
+                    self.push(val);
                 },
                 .ListInit => {
                     const val = self.pop();

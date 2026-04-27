@@ -5,33 +5,33 @@ const chunck = @import("chunk.zig");
 
 const DEBUG = true;
 
-test "vm tests" {
-    const TestCase = struct {
-        description: []const u8,
-        source: []const u8,
-    };
+const TestCase = struct {
+    description: []const u8,
+    source: []const u8,
+};
 
-    const run = struct {
-        fn runTest(test_case: TestCase) anyerror!void {
-            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-            defer arena.deinit();
+const run = struct {
+    fn runTest(test_case: TestCase) anyerror!void {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
 
-            var vm = try virtual_machine.VirtualMachine.init(std.testing.allocator, arena.allocator());
-            defer vm.deinit();
+        var vm = try virtual_machine.VirtualMachine.init(std.testing.allocator, arena.allocator());
+        defer vm.deinit();
 
-            const result = try vm.interpret("test", test_case.source);
-            try std.testing.expect(result == .Ok);
+        const result = try vm.interpret("test", test_case.source);
+        try std.testing.expect(result == .Ok);
 
-            if (vm.stack_top != 0) {
-                std.debug.print("Stack not empty at end of program! {d} values remaining\n", .{vm.stack_top});
-                for (0..vm.stack_top) |i| {
-                    std.debug.print("  [{d}] {f}\n", .{ i, vm.stack[i] });
-                }
-                return error.StackNotEmpty;
+        if (vm.stack_top != 0) {
+            std.debug.print("Stack not empty at end of program! {d} values remaining\n", .{vm.stack_top});
+            for (0..vm.stack_top) |i| {
+                std.debug.print("  [{d}] {f}\n", .{ i, vm.stack[i] });
             }
+            return error.StackNotEmpty;
         }
-    }.runTest;
+    }
+}.runTest;
 
+test "vm tests" {
     const test_cases = [_]TestCase{
         .{
             .description = "global variable delcaration",
@@ -190,7 +190,7 @@ test "vm tests" {
             .source =
             \\let a = 5
             \\
-            \\match (a) 5 -> a = 1
+            \\match (a) 5 -> { a = 1 }
             \\
             \\assert(a == 1)
             ,
@@ -200,7 +200,7 @@ test "vm tests" {
             .source =
             \\let a = 5
             \\
-            \\match (a) 4 -> a = 1
+            \\match (a) 4 -> { a = 1 }
             \\
             \\assert(a == 5)
             ,
@@ -336,7 +336,7 @@ test "vm tests" {
             .source =
             \\let a = 5
             \\
-            \\match true -> a = 1
+            \\match true -> { a = 1 }
             \\
             \\assert(a == 1)
             ,
@@ -346,7 +346,7 @@ test "vm tests" {
             .source =
             \\let a = 5
             \\
-            \\match false -> a = 1
+            \\match false -> { a = 1 }
             \\
             \\assert(a == 5)
             ,
@@ -426,6 +426,23 @@ test "vm tests" {
             \\}
             \\
             \\assert(a == 5)
+            ,
+        },
+        .{
+            .description = "match block expression",
+            .source =
+            \\let a = 5
+            \\
+            \\let b = match(a) {
+            \\    5 -> {
+            \\        a = 1
+            \\        10 + 4
+            \\    }
+            \\    _ -> 3 + 3
+            \\}
+            \\
+            \\assert(a == 1)
+            \\assert(b == 14)
             ,
         },
         .{
@@ -527,85 +544,6 @@ test "vm tests" {
             \\}
             \\
             \\assert(a == 3)
-            ,
-        },
-        .{
-            .description = "function calls no return",
-            .source =
-            \\let foo = fn() {
-            \\    print("Hello, World!")
-            \\}
-            \\
-            \\let result = foo()
-            \\
-            \\assert(result == null)
-            ,
-        },
-        .{
-            .description = "function calls with return",
-            .source =
-            \\let foo = fn(a, b) {
-            \\    return a + b
-            \\}
-            \\
-            \\let result = foo(25, 11)
-            \\
-            \\assert(result == 36)
-            ,
-        },
-        .{
-            .description = "nested functions",
-            .source =
-            \\let foo = fn() {
-            \\    let bar = fn(a, b) {
-            \\        return a + b
-            \\    }
-            \\    return bar(2, 7)
-            \\}
-            \\
-            \\let result = foo()
-            \\
-            \\assert(result == 9)
-            ,
-        },
-        .{
-            .description = "closure",
-            .source =
-            \\let foo = fn() {
-            \\    let x = 2
-            \\    let bar = fn(a) {
-            \\        return a + x
-            \\    }
-            \\    return bar
-            \\}
-            \\
-            \\let func = foo()
-            \\let result = func(10)
-            \\
-            \\assert(result == 12)
-            ,
-        },
-        .{
-            .description = "deep closure",
-            .source =
-            \\let foo = fn() {
-            \\    let x = 1
-            \\    let bar = fn() {
-            \\        let y = 2
-            \\        let baz = fn() {
-            \\            let z = 3
-            \\            return x + y + z
-            \\        }
-            \\        return baz
-            \\    }
-            \\    return bar
-            \\}
-            \\
-            \\let bar = foo()
-            \\let baz = bar()
-            \\let result = baz()
-            \\
-            \\assert(result == 6)
             ,
         },
         .{
@@ -746,4 +684,134 @@ test "vm tests" {
     };
 
     try test_utils.runTests(TestCase, "evaluate vm tests", &test_cases, run);
+}
+
+test "function tests" {
+    const test_cases = [_]TestCase{
+        .{
+            .description = "function calls no return",
+            .source =
+            \\let foo = fn() {
+            \\    print("Hello, World!")
+            \\}
+            \\
+            \\let result = foo()
+            \\
+            \\assert(result == null)
+            ,
+        },
+        .{
+            .description = "function calls with return",
+            .source =
+            \\let foo = fn(a, b) {
+            \\    return a + b
+            \\}
+            \\
+            \\let result = foo(25, 11)
+            \\
+            \\assert(result == 36)
+            ,
+        },
+        .{
+            .description = "nested functions",
+            .source =
+            \\let foo = fn() {
+            \\    let bar = fn(a, b) {
+            \\        return a + b
+            \\    }
+            \\    return bar(2, 7)
+            \\}
+            \\
+            \\let result = foo()
+            \\
+            \\assert(result == 9)
+            ,
+        },
+        .{
+            .description = "closure",
+            .source =
+            \\let foo = fn() {
+            \\    let x = 2
+            \\    let bar = fn(a) {
+            \\        return a + x
+            \\    }
+            \\    return bar
+            \\}
+            \\
+            \\let func = foo()
+            \\let result = func(10)
+            \\
+            \\assert(result == 12)
+            ,
+        },
+        .{
+            .description = "deep closure",
+            .source =
+            \\let foo = fn() {
+            \\    let x = 1
+            \\    let bar = fn() {
+            \\        let y = 2
+            \\        let baz = fn() {
+            \\            let z = 3
+            \\            return x + y + z
+            \\        }
+            \\        return baz
+            \\    }
+            \\    return bar
+            \\}
+            \\
+            \\let bar = foo()
+            \\let baz = bar()
+            \\let result = baz()
+            \\
+            \\assert(result == 6)
+            ,
+        },
+        .{
+            .description = "one line expression",
+            .source =
+            \\let foo = fn(a, b) a + b
+            \\
+            \\assert(foo(1, 14) == 15)
+            ,
+        },
+        .{
+            .description = "implicit return",
+            .source =
+            \\let foo = fn(a, b) {
+            \\    a + b
+            \\}
+            \\
+            \\assert(foo(1, 14) == 15)
+            ,
+        },
+        .{
+            .description = "implicit return with clean up",
+            .source =
+            \\let foo = fn(a, b) {
+            \\    let c = 5
+            \\    let d = 6
+            \\    a + b + c + d
+            \\}
+            \\
+            \\assert(foo(1, 14) == 26)
+            ,
+        },
+        .{
+            .description = "match as return",
+            .source =
+            \\let max = fn(a, b) {
+            \\    match {
+            \\        a < b -> b
+            \\        _ -> a
+            \\    }
+            \\}
+            \\
+            \\assert(max(1, 14) == 14)
+            \\assert(max(12, 7) == 12)
+            ,
+        },
+    };
+
+    try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
 }

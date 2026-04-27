@@ -50,7 +50,6 @@ pub const Compiler = struct {
     enclosing: ?*Compiler,
     upvalues: [UINT8_COUNT]Upvalue,
     indent: usize,
-    ctx: struct { suppress_pop: bool },
 
     const Local = struct {
         name: []const u8,
@@ -84,7 +83,6 @@ pub const Compiler = struct {
         self.upvalues = undefined;
         self.indent = indent;
         self.function = null;
-        self.ctx = .{ .suppress_pop = false };
 
         // Set current_compiler BEFORE any allocations that could trigger GC
         vm.current_compiler = self;
@@ -119,7 +117,7 @@ pub const Compiler = struct {
 
     pub fn compile(self: *Compiler, program: ast.Program) !*object.ObjFunction {
         for (program.items) |stmt| {
-            self.compileStatement(stmt) catch |err| {
+            self.compileStatement(stmt, false) catch |err| {
                 self.currentChunk().disassemble("<error>");
                 return err;
             };
@@ -273,9 +271,9 @@ pub const Compiler = struct {
             self.locals[self.local_count - 1].depth.? > self.scope_depth)
         {
             if (self.locals[self.local_count - 1].is_captured) {
-                try self.emitOp(.CloseUpvalue);
+                try self.emitOp(.SwapCloseUpvalue);
             } else {
-                try self.emitOp(.Pop);
+                try self.emitOp(.SwapPop);
             }
             self.local_count -= 1;
         }
@@ -348,7 +346,7 @@ pub const Compiler = struct {
         return error.CompileError;
     }
 
-    fn compileStatement(self: *Compiler, stmt: ast.Statement) !void {
+    fn compileStatement(self: *Compiler, stmt: ast.Statement, suppress_pop: bool) !void {
         switch (stmt) {
             .VarDeclaration => |val| {
                 const global = try self.getVariable(val.name);
@@ -400,7 +398,7 @@ pub const Compiler = struct {
                 const exit_jump = try self.emitJump(.JumpIfGreaterOrEq);
                 const local_count = self.local_count;
 
-                try self.compileStatement(val.body.*);
+                try self.compileStatement(val.body.*, false);
 
                 try self.emitOpU8(.GetLocal, increment_var_index);
                 try self.emitConstant(value.wrapInt(1));
@@ -432,7 +430,7 @@ pub const Compiler = struct {
                 const exit_jump = try self.emitJump(.JumpIfFalse);
                 try self.emitOp(.Pop);
 
-                try self.compileStatement(val.body.*);
+                try self.compileStatement(val.body.*, false);
 
                 try self.emitLoop(loop_start);
 
@@ -447,9 +445,8 @@ pub const Compiler = struct {
                 try self.emitOp(.Return);
             },
             .Expression => |val| {
-                logDebug("compiling expression statement, suppress_pop = {}", .{self.ctx.suppress_pop});
                 try self.compileExpression(val);
-                if (!self.ctx.suppress_pop) {
+                if (!suppress_pop) {
                     try self.emitOp(.Pop);
                 }
             },
@@ -559,9 +556,7 @@ pub const Compiler = struct {
                     }
                 }
 
-                new_compiler.ctx.suppress_pop = true;
-                try new_compiler.compileStatement(val.body.*);
-                new_compiler.ctx.suppress_pop = false;
+                try new_compiler.compileExpression(val.body);
 
                 const function = try new_compiler.endCompiler();
 
@@ -633,7 +628,7 @@ pub const Compiler = struct {
 
                     try self.emitOp(.Pop);
                     if (has_target) try self.emitOp(.Pop);
-                    try self.compileMatchArmBody(val.body.Single.body);
+                    try self.compileExpression(val.body.Single.body);
 
                     const end_jump = try self.emitJump(.Jump);
 
@@ -664,7 +659,7 @@ pub const Compiler = struct {
 
                     try self.emitOp(.Pop);
                     if (has_target) try self.emitOp(.Pop);
-                    try self.compileMatchArmBody(arm.body);
+                    try self.compileExpression(arm.body);
 
                     try end_jumps.append(self.gpa, try self.emitJump(.Jump));
 
@@ -681,7 +676,7 @@ pub const Compiler = struct {
                 }
                 if (else_arm) |arm| {
                     if (has_target) try self.emitOp(.Pop);
-                    try self.compileMatchArmBody(arm.body);
+                    try self.compileExpression(arm.body);
                 } else {
                     if (has_target) try self.emitOp(.Pop);
                     try self.emitOp(.Null);
@@ -699,25 +694,14 @@ pub const Compiler = struct {
             .Block => |val| {
                 self.beginScope();
                 for (val.items, 0..) |item, i| {
-                    logDebug("i = {d}", .{i});
-                    if (i == val.items.len - 1) self.ctx.suppress_pop = true;
-                    try self.compileStatement(item);
-                    if (i == val.items.len - 1) self.ctx.suppress_pop = false;
+                    const is_last = i == val.items.len - 1;
+                    try self.compileStatement(item, is_last);
+                    if (is_last and item != .Expression) {
+                        try self.emitOp(.Null);
+                    }
                 }
                 try self.endScope();
             },
-        }
-    }
-
-    fn compileMatchArmBody(self: *Compiler, body: ast.Statement) !void {
-        self.ctx.suppress_pop = true;
-        defer self.ctx.suppress_pop = false;
-
-        try self.compileStatement(body);
-
-        switch (body) {
-            .Expression => {},
-            else => try self.emitOp(.Null),
         }
     }
 };

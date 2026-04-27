@@ -24,6 +24,7 @@ pub const OpCode = enum(u8) {
     Greater,
     Less,
     Pop,
+    SwapPop,
     DefineGlobal,
     GetGlobal,
     SetGlobal,
@@ -39,6 +40,7 @@ pub const OpCode = enum(u8) {
     GetUpvalue,
     SetUpvalue,
     CloseUpvalue,
+    SwapCloseUpvalue,
     ListInit,
     TableInit,
     IndexGet,
@@ -131,6 +133,7 @@ pub const Chunk = struct {
             .Less => return simpleInstruction("OP_LESS", offset),
             .Equal => return simpleInstruction("OP_EQUAL", offset),
             .Pop => return simpleInstruction("OP_POP", offset),
+            .SwapPop => return simpleInstruction("OP_SWAP_POP", offset),
             .DefineGlobal => return constantInstruction(self, "OP_DEFINE_GLOBAL", offset),
             .Constant => return constantInstruction(self, "OP_CONSTANT", offset),
             .GetGlobal => return constantInstruction(self, "OP_GET_GLOBAL", offset),
@@ -146,6 +149,7 @@ pub const Chunk = struct {
             .GetUpvalue => return byteInstruction(self, "OP_GET_UPVALUE", offset),
             .SetUpvalue => return byteInstruction(self, "OP_SET_UPVALUE", offset),
             .CloseUpvalue => return simpleInstruction("OP_CLOSE_UPVALUE", offset),
+            .SwapCloseUpvalue => return simpleInstruction("OP_SWAP_CLOSE_UPVALUE", offset),
             .Closure => {
                 var curr_offset = offset;
                 const constant = u16ToIndex(
