@@ -38,6 +38,56 @@ test "scanner" {
             try assertTokenEquals(.Int, "1", try s.next());
             try assertTokenEquals(.NewLine, "<newline>", try s.next());
 
+            try assertTokenEquals(.Identifier, "a", try s.next());
+            try assertTokenEquals(.PlusAssign, "+=", try s.next());
+            try assertTokenEquals(.Int, "1", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+
+            try assertTokenEquals(.Identifier, "a", try s.next());
+            try assertTokenEquals(.MinusAssign, "-=", try s.next());
+            try assertTokenEquals(.Int, "1", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+
+            try assertTokenEquals(.Identifier, "a", try s.next());
+            try assertTokenEquals(.AsteriskAssign, "*=", try s.next());
+            try assertTokenEquals(.Int, "1", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+
+            try assertTokenEquals(.Identifier, "a", try s.next());
+            try assertTokenEquals(.SlashAssign, "/=", try s.next());
+            try assertTokenEquals(.Int, "1", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+
+            try assertTokenEquals(.Identifier, "a", try s.next());
+            try assertTokenEquals(.PercentAssign, "%=", try s.next());
+            try assertTokenEquals(.Int, "1", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+
+            try assertTokenEquals(.Identifier, "a", try s.next());
+            try assertTokenEquals(.AmpersandAssign, "&=", try s.next());
+            try assertTokenEquals(.Int, "1", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+
+            try assertTokenEquals(.Identifier, "a", try s.next());
+            try assertTokenEquals(.PipeAssign, "|=", try s.next());
+            try assertTokenEquals(.Int, "1", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+
+            try assertTokenEquals(.Identifier, "a", try s.next());
+            try assertTokenEquals(.CaretAssign, "^=", try s.next());
+            try assertTokenEquals(.Int, "1", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+
+            try assertTokenEquals(.Identifier, "a", try s.next());
+            try assertTokenEquals(.LeftShiftAssign, "<<=", try s.next());
+            try assertTokenEquals(.Int, "1", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+
+            try assertTokenEquals(.Identifier, "a", try s.next());
+            try assertTokenEquals(.RightShiftAssign, ">>=", try s.next());
+            try assertTokenEquals(.Int, "1", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+
             try assertTokenEquals(.Identifier, "b", try s.next());
             try assertTokenEquals(.Assign, "=", try s.next());
             try assertTokenEquals(.LParen, "(", try s.next());
@@ -140,6 +190,16 @@ test "scanner" {
             .description = "tokenize",
             .input =
             \\a = 1
+            \\a += 1
+            \\a -= 1
+            \\a *= 1
+            \\a /= 1
+            \\a %= 1
+            \\a &= 1
+            \\a |= 1
+            \\a ^= 1
+            \\a <<= 1
+            \\a >>= 1
             \\b = (5 + 1) / 3 * 1 - 5
             \\true == true
             \\false != true

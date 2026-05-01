@@ -1,6 +1,18 @@
-let a = match {
-    true -> 1
-    false -> 2
+let fib = fn (n) {
+    let a = 0
+    let b = 1
+
+    for (0..n) |_| {
+        let tmp = a
+        a = b
+        b = b + tmp
+    }
+
+    a
 }
 
-assert(a == 1)
+for (0..1000000) |_| {
+    fib(50)
+}
+
+print("done")

@@ -204,18 +204,50 @@ pub const Parser = struct {
 
     fn expressionStatement(self: *Parser) !ast.Statement {
         const expression = try self.parseExpression();
-        if (try self.match(.Assign)) {
-            const target: ast.AssignTarget = switch (expression.data) {
-                .Identifier => .{ .Identifier = expression.token },
-                .Index => |index| .{ .Index = index },
-                else => return self.errorAtPrevious("Invalid assign target."),
-            };
-            const value = try self.parseExpression();
-            try self.matchLineEnd();
-            return .{ .Assignment = .{ .target = target, .expression = value } };
-        }
+        if (try self.match(.Assign)) return try self.parseAssignment(expression, null);
+        if (try self.match(.PlusAssign)) return try self.parseAssignment(expression, .Plus);
+        if (try self.match(.MinusAssign)) return try self.parseAssignment(expression, .Minus);
+        if (try self.match(.AsteriskAssign)) return try self.parseAssignment(expression, .Asterisk);
+        if (try self.match(.SlashAssign)) return try self.parseAssignment(expression, .Slash);
+        if (try self.match(.PercentAssign)) return try self.parseAssignment(expression, .Percent);
+        if (try self.match(.AmpersandAssign)) return try self.parseAssignment(expression, .Ampersand);
+        if (try self.match(.PipeAssign)) return try self.parseAssignment(expression, .Pipe);
+        if (try self.match(.CaretAssign)) return try self.parseAssignment(expression, .Caret);
+        if (try self.match(.LeftShiftAssign)) return try self.parseAssignment(expression, .LeftShift);
+        if (try self.match(.RightShiftAssign)) return try self.parseAssignment(expression, .RightShift);
         try self.matchLineEnd();
         return .{ .Expression = expression };
+    }
+
+    fn parseAssignment(self: *Parser, expression: *const ast.Expression, op: ?scanner.TokenType) !ast.Statement {
+        const target: ast.AssignTarget = switch (expression.data) {
+            .Identifier => .{ .Identifier = expression.token },
+            .Index => |index| .{ .Index = index },
+            else => return self.errorAtPrevious("Invalid assign target."),
+        };
+
+        var value: *const ast.Expression = undefined;
+
+        if (op) |operator| {
+            const right = try self.parseExpression();
+
+            const owned = try self.arena.create(ast.Expression);
+            owned.data = .{
+                .Infix = .{
+                    .left = expression,
+                    .right = right,
+                    .operator = operator,
+                },
+            };
+            owned.token = expression.token;
+
+            value = owned;
+        } else {
+            value = try self.parseExpression();
+        }
+
+        try self.matchLineEnd();
+        return .{ .Assignment = .{ .target = target, .expression = value } };
     }
 
     fn parseExpression(self: *Parser) !*const ast.Expression {
@@ -679,10 +711,15 @@ fn initRules() [token_count]ParseRule {
             .Eq => .{ .prefix = null, .infix = parseBinary, .precedence = .Equals },
             .NotEq => .{ .prefix = null, .infix = parseBinary, .precedence = .Equals },
             .Plus => .{ .prefix = parseUnary, .infix = parseBinary, .precedence = .Sum },
+            .PlusAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Minus => .{ .prefix = parseUnary, .infix = parseBinary, .precedence = .Sum },
+            .MinusAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Slash => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
+            .SlashAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Asterisk => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
+            .AsteriskAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Percent => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
+            .PercentAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Return => .{ .prefix = null, .infix = null, .precedence = null },
             .For => .{ .prefix = null, .infix = null, .precedence = null },
             .Dot => .{ .prefix = null, .infix = null, .precedence = .Index },
@@ -693,11 +730,16 @@ fn initRules() [token_count]ParseRule {
             .And => .{ .prefix = null, .infix = parseBinary, .precedence = .LogicalAnd },
             .Or => .{ .prefix = null, .infix = parseBinary, .precedence = .LogicalOr },
             .Pipe => .{ .prefix = null, .infix = parseBinary, .precedence = .BitwiseOr },
+            .PipeAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Ampersand => .{ .prefix = null, .infix = parseBinary, .precedence = .BitwiseAnd },
+            .AmpersandAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Caret => .{ .prefix = null, .infix = parseBinary, .precedence = .BitwiseXor },
+            .CaretAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Tilde => .{ .prefix = parseUnary, .infix = null, .precedence = .Prefix },
             .LeftShift => .{ .prefix = null, .infix = parseBinary, .precedence = .Shift },
+            .LeftShiftAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .RightShift => .{ .prefix = null, .infix = parseBinary, .precedence = .Shift },
+            .RightShiftAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Let => .{ .prefix = null, .infix = null, .precedence = null },
             .Match => .{ .prefix = parseMatch, .infix = null, .precedence = null },
             .While => .{ .prefix = null, .infix = null, .precedence = null },

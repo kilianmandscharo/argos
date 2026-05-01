@@ -29,10 +29,15 @@ pub const TokenType = enum {
     Eq,
     NotEq,
     Plus,
+    PlusAssign,
     Minus,
+    MinusAssign,
     Slash,
+    SlashAssign,
     Asterisk,
+    AsteriskAssign,
     Percent,
+    PercentAssign,
 
     Return,
     For,
@@ -47,11 +52,16 @@ pub const TokenType = enum {
     Or,
 
     Pipe,
+    PipeAssign,
     Ampersand,
+    AmpersandAssign,
     Caret,
+    CaretAssign,
     Tilde,
     LeftShift,
+    LeftShiftAssign,
     RightShift,
+    RightShiftAssign,
     Let,
     Match,
     While,
@@ -245,17 +255,26 @@ pub const Scanner = struct {
             ')' => return self.makeToken(.RParen),
             '{' => return self.makeToken(.LBrace),
             '}' => return self.makeToken(.RBrace),
-            ',' => return self.makeToken(.Comma),
-            '+' => return self.makeToken(.Plus),
-            '/' => return self.makeToken(.Slash),
-            '*' => return self.makeToken(.Asterisk),
             '[' => return self.makeToken(.LBracket),
             ']' => return self.makeToken(.RBracket),
-            '&' => return self.makeToken(.Ampersand),
-            '|' => return self.makeToken(.Pipe),
-            '^' => return self.makeToken(.Caret),
+            ',' => return self.makeToken(.Comma),
+            '+' => return if (self.match('=')) self.makeToken(.PlusAssign) else self.makeToken(.Plus),
+            '-' => {
+                if (self.match('>')) return self.makeToken(.Arrow);
+                if (self.match('=')) return self.makeToken(.MinusAssign);
+                return self.makeToken(.Minus);
+            },
+            '*' => return if (self.match('=')) self.makeToken(.AsteriskAssign) else self.makeToken(.Asterisk),
+            '/' => return if (self.match('=')) self.makeToken(.SlashAssign) else self.makeToken(.Slash),
+            '%' => return if (self.match('=')) self.makeToken(.PercentAssign) else self.makeToken(.Percent),
+            '&' => return if (self.match('=')) self.makeToken(.AmpersandAssign) else self.makeToken(.Ampersand),
+            '|' => return if (self.match('=')) self.makeToken(.PipeAssign) else self.makeToken(.Pipe),
+            '^' => return if (self.match('=')) self.makeToken(.CaretAssign) else self.makeToken(.Caret),
+            '<' => return self.scanLess(),
+            '>' => return self.scanGreater(),
+            '!' => return if (self.match('=')) self.makeToken(.NotEq) else self.makeToken(.Bang),
+            '=' => return if (self.match('=')) self.makeToken(.Eq) else self.makeToken(.Assign),
             '~' => return self.makeToken(.Tilde),
-            '%' => return self.makeToken(.Percent),
             '\n' => {
                 const token = self.makeToken(.NewLine);
                 const next_line_no = self.endLine();
@@ -263,11 +282,6 @@ pub const Scanner = struct {
                 self.column = 0;
                 return token;
             },
-            '-' => return if (self.match('>')) self.makeToken(.Arrow) else self.makeToken(.Minus),
-            '!' => return if (self.match('=')) self.makeToken(.NotEq) else self.makeToken(.Bang),
-            '<' => return self.scanLess(),
-            '>' => return self.scanGreater(),
-            '=' => return if (self.match('=')) self.makeToken(.Eq) else self.makeToken(.Assign),
             '.' => return if (self.match('.')) self.makeToken(.DotDot) else self.makeToken(.Dot),
             '0'...'9' => return self.makeNumber(),
             '"' => return self.makeString(),
@@ -282,13 +296,19 @@ pub const Scanner = struct {
 
     fn scanLess(self: *Scanner) !Token {
         if (self.match('=')) return self.makeToken(.LtOrEq);
-        if (self.match('<')) return self.makeToken(.LeftShift);
+        if (self.match('<')) {
+            if (self.match('=')) return self.makeToken(.LeftShiftAssign);
+            return self.makeToken(.LeftShift);
+        }
         return self.makeToken(.Lt);
     }
 
     fn scanGreater(self: *Scanner) !Token {
         if (self.match('=')) return self.makeToken(.GtOrEq);
-        if (self.match('>')) return self.makeToken(.RightShift);
+        if (self.match('>')) {
+            if (self.match('=')) return self.makeToken(.RightShiftAssign);
+            return self.makeToken(.RightShift);
+        }
         return self.makeToken(.Gt);
     }
 

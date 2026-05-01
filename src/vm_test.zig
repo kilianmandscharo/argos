@@ -54,6 +54,86 @@ test "vm tests" {
             ,
         },
         .{
+            .description = "plus assign",
+            .source =
+            \\let a = 6
+            \\a += 12
+            \\assert(a == 18)
+            ,
+        },
+        .{
+            .description = "minus assign",
+            .source =
+            \\let a = 6
+            \\a -= 12
+            \\assert(a == -6)
+            ,
+        },
+        .{
+            .description = "multiply assign",
+            .source =
+            \\let a = 6
+            \\a *= 12
+            \\assert(a == 72)
+            ,
+        },
+        .{
+            .description = "divide assign",
+            .source =
+            \\let a = 6
+            \\a /= 12
+            \\assert(a == 0.5)
+            ,
+        },
+        .{
+            .description = "modulo assign",
+            .source =
+            \\let a = 6
+            \\a %= 4
+            \\assert(a == 2)
+            ,
+        },
+        .{
+            .description = "bitwise and assign",
+            .source =
+            \\let a = 1
+            \\a &= 0
+            \\assert(a == 0)
+            ,
+        },
+        .{
+            .description = "bitwise or assign",
+            .source =
+            \\let a = 1
+            \\a |= 0
+            \\assert(a == 1)
+            ,
+        },
+        .{
+            .description = "bitwise xor assign",
+            .source =
+            \\let a = 1
+            \\a ^= 1
+            \\assert(a == 0)
+            ,
+        },
+        .{
+            .description = "bitwise left shif assign",
+            .source =
+            \\let a = 1
+            \\a <<= 3
+            \\assert(a == 8)
+            ,
+        },
+        .{
+            .description = "bitwise right shif assign",
+            .source =
+            \\let a = 16
+            \\a >>= 2
+            \\assert(a == 4)
+            ,
+        },
+        .{
             .description = "local variable declaration",
             .source =
             \\let a = 6

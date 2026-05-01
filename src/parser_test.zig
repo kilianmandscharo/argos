@@ -239,6 +239,166 @@ test "statements" {
             },
         },
         .{
+            .description = "plus assign",
+            .input =
+            \\foo += 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{ .Identifier = s("foo") },
+                    .expression = &e(.{ .Infix = .{
+                        .left = &e(.{ .Identifier = "foo" }),
+                        .right = &e(.{ .Integer = 5 }),
+                        .operator = .Plus,
+                    } }),
+                },
+            },
+        },
+        .{
+            .description = "minus assign",
+            .input =
+            \\foo -= 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{ .Identifier = s("foo") },
+                    .expression = &e(.{ .Infix = .{
+                        .left = &e(.{ .Identifier = "foo" }),
+                        .right = &e(.{ .Integer = 5 }),
+                        .operator = .Minus,
+                    } }),
+                },
+            },
+        },
+        .{
+            .description = "asterisk assign",
+            .input =
+            \\foo *= 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{ .Identifier = s("foo") },
+                    .expression = &e(.{ .Infix = .{
+                        .left = &e(.{ .Identifier = "foo" }),
+                        .right = &e(.{ .Integer = 5 }),
+                        .operator = .Asterisk,
+                    } }),
+                },
+            },
+        },
+        .{
+            .description = "slash assign",
+            .input =
+            \\foo /= 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{ .Identifier = s("foo") },
+                    .expression = &e(.{ .Infix = .{
+                        .left = &e(.{ .Identifier = "foo" }),
+                        .right = &e(.{ .Integer = 5 }),
+                        .operator = .Slash,
+                    } }),
+                },
+            },
+        },
+        .{
+            .description = "percent assign",
+            .input =
+            \\foo %= 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{ .Identifier = s("foo") },
+                    .expression = &e(.{ .Infix = .{
+                        .left = &e(.{ .Identifier = "foo" }),
+                        .right = &e(.{ .Integer = 5 }),
+                        .operator = .Percent,
+                    } }),
+                },
+            },
+        },
+        .{
+            .description = "ampersand assign",
+            .input =
+            \\foo &= 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{ .Identifier = s("foo") },
+                    .expression = &e(.{ .Infix = .{
+                        .left = &e(.{ .Identifier = "foo" }),
+                        .right = &e(.{ .Integer = 5 }),
+                        .operator = .Ampersand,
+                    } }),
+                },
+            },
+        },
+        .{
+            .description = "pipe assign",
+            .input =
+            \\foo |= 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{ .Identifier = s("foo") },
+                    .expression = &e(.{ .Infix = .{
+                        .left = &e(.{ .Identifier = "foo" }),
+                        .right = &e(.{ .Integer = 5 }),
+                        .operator = .Pipe,
+                    } }),
+                },
+            },
+        },
+        .{
+            .description = "caret assign",
+            .input =
+            \\foo ^= 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{ .Identifier = s("foo") },
+                    .expression = &e(.{ .Infix = .{
+                        .left = &e(.{ .Identifier = "foo" }),
+                        .right = &e(.{ .Integer = 5 }),
+                        .operator = .Caret,
+                    } }),
+                },
+            },
+        },
+        .{
+            .description = "left shift assign",
+            .input =
+            \\foo <<= 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{ .Identifier = s("foo") },
+                    .expression = &e(.{ .Infix = .{
+                        .left = &e(.{ .Identifier = "foo" }),
+                        .right = &e(.{ .Integer = 5 }),
+                        .operator = .LeftShift,
+                    } }),
+                },
+            },
+        },
+        .{
+            .description = "right shift assign",
+            .input =
+            \\foo >>= 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{ .Identifier = s("foo") },
+                    .expression = &e(.{ .Infix = .{
+                        .left = &e(.{ .Identifier = "foo" }),
+                        .right = &e(.{ .Integer = 5 }),
+                        .operator = .RightShift,
+                    } }),
+                },
+            },
+        },
+        .{
             .description = "assignment to index",
             .input =
             \\foo[0] = 5
