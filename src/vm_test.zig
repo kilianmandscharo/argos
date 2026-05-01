@@ -502,51 +502,6 @@ test "vm tests" {
             ,
         },
         .{
-            .description = "while loop",
-            .source =
-            \\let a = 10
-            \\let b = 0
-            \\
-            \\while (a > 0) {
-            \\    a = a - 1
-            \\    b = b + 1
-            \\}
-            \\
-            \\assert(a == 0)
-            \\assert(b == 10)
-            ,
-        },
-        .{
-            .description = "for loop",
-            .source =
-            \\let a = 0
-            \\let b = 0
-            \\
-            \\for (0..3) |i| {
-            \\    a = a + i
-            \\    let c = 1
-            \\    b = b + c
-            \\}
-            \\
-            \\assert(a == 3)
-            \\assert(b == 3)
-            ,
-        },
-        .{
-            .description = "for loop with vars as range",
-            .source =
-            \\let a = 0
-            \\let start = 0
-            \\let end = 3
-            \\
-            \\for (start..end) |i| {
-            \\    a = a + i
-            \\}
-            \\
-            \\assert(a == 3)
-            ,
-        },
-        .{
             .description = "string concatenation",
             .source =
             \\let foo = "foo"
@@ -814,4 +769,78 @@ test "function tests" {
     };
 
     try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
+}
+
+test "loop tests" {
+    const test_cases = [_]TestCase{
+        .{
+            .description = "while loop",
+            .source =
+            \\let a = 10
+            \\let b = 0
+            \\
+            \\while (a > 0) {
+            \\    a = a - 1
+            \\    b = b + 1
+            \\}
+            \\
+            \\assert(a == 0)
+            \\assert(b == 10)
+            ,
+        },
+        .{
+            .description = "while one liner",
+            .source =
+            \\let a = 10
+            \\
+            \\while (a < 20) a = a + 1
+            \\
+            \\assert(a == 20)
+            ,
+        },
+        .{
+            .description = "for loop",
+            .source =
+            \\let a = 0
+            \\let b = 0
+            \\
+            \\for (0..3) |i| {
+            \\    a = a + i
+            \\    let c = 1
+            \\    b = b + c
+            \\}
+            \\
+            \\assert(a == 3)
+            \\assert(b == 3)
+            ,
+        },
+        .{
+            .description = "for loop with vars as range",
+            .source =
+            \\let a = 0
+            \\let start = 0
+            \\let end = 3
+            \\
+            \\for (start..end) |i| {
+            \\    a = a + i
+            \\}
+            \\
+            \\assert(a == 3)
+            ,
+        },
+        .{
+            .description = "for loop one liner",
+            .source =
+            \\let a = 0
+            \\let start = 0
+            \\let end = 3
+            \\
+            \\for (start..end) |i| a = a + 1
+            \\
+            \\assert(a == 3)
+            ,
+        },
+    };
+
+    try test_utils.runTests(TestCase, "evaluate loop tests", &test_cases, run);
 }

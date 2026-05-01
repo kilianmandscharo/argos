@@ -24,12 +24,6 @@ fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void
             try std.testing.expectEqualStrings(stmt.name.data, actual.VarDeclaration.name.data);
             try expectExpression(stmt.expression.*, actual.VarDeclaration.expression.*);
         },
-        .Block => |stmt| {
-            try std.testing.expectEqual(stmt.items.len, actual.Block.items.len);
-            for (0..stmt.items.len) |i| {
-                try expectStatement(stmt.items[i], actual.Block.items[i]);
-            }
-        },
         .Assignment => |stmt| {
             try expectTag(stmt.target, actual.Assignment.target);
             if (stmt.target == .Identifier) {
@@ -48,17 +42,11 @@ fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void
             } else {
                 try std.testing.expect(actual.For.index == null);
             }
-            try std.testing.expectEqual(stmt.body.items.len, actual.For.body.items.len);
-            for (0..stmt.body.items.len) |i| {
-                try expectStatement(stmt.body.items[i], actual.For.body.items[i]);
-            }
+            try expectStatement(stmt.body.*, actual.For.body.*);
         },
         .While => |stmt| {
             try expectExpression(stmt.expression.*, actual.While.expression.*);
-            try std.testing.expectEqual(stmt.body.items.len, actual.While.body.items.len);
-            for (0..stmt.body.items.len) |i| {
-                try expectStatement(stmt.body.items[i], actual.While.body.items[i]);
-            }
+            try expectStatement(stmt.body.*, actual.While.body.*);
         },
         .Return => |stmt| {
             try expectExpression(stmt.*, actual.Return.*);
@@ -114,15 +102,8 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
                     try expectExpression(first.Default.value.*, second.Default.value.*);
                 }
             }
-            try expectTag(expr.body, actual.Function.body);
-            if (expr.body == .Expression) {
-                try expectExpression(expr.body.Expression.*, actual.Function.body.Expression.*);
-            } else {
-                try std.testing.expectEqual(expr.body.Block.items.len, actual.Function.body.Block.items.len);
-                for (0..expr.body.Block.items.len) |i| {
-                    try expectStatement(expr.body.Block.items[i], actual.Function.body.Block.items[i]);
-                }
-            }
+            try expectTag(expr.body.data, actual.Function.body.data);
+            try expectExpression(expr.body.*, actual.Function.body.*);
         },
         .Range => |expr| {
             try expectExpression(expr.start.*, actual.Range.start.*);
@@ -169,15 +150,21 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
             try expectTag(expr.body, actual.Match.body);
             if (expr.body == .Single) {
                 try expectExpression(expr.body.Single.pattern.*, actual.Match.body.Single.pattern.*);
-                try expectStatement(expr.body.Single.body, actual.Match.body.Single.body);
+                try expectExpression(expr.body.Single.body.*, actual.Match.body.Single.body.*);
             } else {
                 try std.testing.expectEqual(expr.body.Multiple.items.len, actual.Match.body.Multiple.items.len);
                 for (0..expr.body.Multiple.items.len) |i| {
                     const first = expr.body.Multiple.items[i];
                     const second = actual.Match.body.Multiple.items[i];
                     try expectExpression(first.pattern.*, second.pattern.*);
-                    try expectStatement(first.body, second.body);
+                    try expectExpression(first.body.*, second.body.*);
                 }
+            }
+        },
+        .Block => |stmt| {
+            try std.testing.expectEqual(stmt.items.len, actual.Block.items.len);
+            for (0..stmt.items.len) |i| {
+                try expectStatement(stmt.items[i], actual.Block.items[i]);
             }
         },
     }
@@ -298,69 +285,6 @@ test "statements" {
             },
         },
         .{
-            .description = "block",
-            .input =
-            \\{
-            \\    let foo = 5
-            \\    foo + 2
-            \\}
-            ,
-            .expected_statement = .{
-                .Block = try test_utils.list(ast.Statement, a, &.{
-                    .{
-                        .VarDeclaration = .{
-                            .name = s("foo"),
-                            .expression = &e(.{ .Integer = 5 }),
-                        },
-                    },
-                    .{
-                        .Expression = &e(.{
-                            .Infix = .{
-                                .left = &e(.{ .Identifier = "foo" }),
-                                .right = &e(.{ .Integer = 2 }),
-                                .operator = .Plus,
-                            },
-                        }),
-                    },
-                }),
-            },
-        },
-        .{
-            .description = "block single line",
-            .input =
-            \\{ 5 + 5 }
-            ,
-            .expected_statement = .{
-                .Block = try test_utils.list(ast.Statement, a, &.{
-                    .{
-                        .Expression = &e(.{
-                            .Infix = .{
-                                .left = &e(.{ .Integer = 5 }),
-                                .right = &e(.{ .Integer = 5 }),
-                                .operator = .Plus,
-                            },
-                        }),
-                    },
-                }),
-            },
-        },
-        .{
-            .description = "block empty",
-            .input =
-            \\{}
-            ,
-            .expected_statement = .{ .Block = .{} },
-        },
-        .{
-            .description = "block empty multiple lines",
-            .input =
-            \\{
-            \\
-            \\}
-            ,
-            .expected_statement = .{ .Block = .{} },
-        },
-        .{
             .description = "while",
             .input =
             \\while(foo < 5) {
@@ -376,20 +300,28 @@ test "statements" {
                             .operator = .Lt,
                         },
                     }),
-                    .body = try test_utils.list(ast.Statement, a, &.{
-                        .{
-                            .Assignment = .{
-                                .target = .{ .Identifier = s("foo") },
-                                .expression = &e(.{
-                                    .Infix = .{
-                                        .left = &e(.{ .Identifier = "foo" }),
-                                        .right = &e(.{ .Integer = 1 }),
-                                        .operator = .Plus,
+                    .body = &.{
+                        .Expression = &e(.{
+                            .Block = try test_utils.list(
+                                ast.Statement,
+                                a,
+                                &.{
+                                    .{
+                                        .Assignment = .{
+                                            .target = .{ .Identifier = s("foo") },
+                                            .expression = &e(.{
+                                                .Infix = .{
+                                                    .left = &e(.{ .Identifier = "foo" }),
+                                                    .right = &e(.{ .Integer = 1 }),
+                                                    .operator = .Plus,
+                                                },
+                                            }),
+                                        },
                                     },
-                                }),
-                            },
-                        },
-                    }),
+                                },
+                            ),
+                        }),
+                    },
                 },
             },
         },
@@ -410,18 +342,26 @@ test "statements" {
                     }),
                     .capture = s("i"),
                     .index = null,
-                    .body = try test_utils.list(ast.Statement, a, &.{
-                        .{
-                            .Expression = &e(.{
-                                .Call = .{
-                                    .function = &e(.{ .Identifier = "print" }),
-                                    .args = try test_utils.list(ast.FunctionArg, a, &.{
-                                        .{ .Positional = &e(.{ .Identifier = "i" }) },
-                                    }),
+                    .body = &.{
+                        .Expression = &e(.{
+                            .Block = try test_utils.list(
+                                ast.Statement,
+                                a,
+                                &.{
+                                    .{
+                                        .Expression = &e(.{
+                                            .Call = .{
+                                                .function = &e(.{ .Identifier = "print" }),
+                                                .args = try test_utils.list(ast.FunctionArg, a, &.{
+                                                    .{ .Positional = &e(.{ .Identifier = "i" }) },
+                                                }),
+                                            },
+                                        }),
+                                    },
                                 },
-                            }),
-                        },
-                    }),
+                            ),
+                        }),
+                    },
                 },
             },
         },
@@ -437,18 +377,28 @@ test "statements" {
                     .expression = &e(.{ .Identifier = "foo" }),
                     .capture = s("item"),
                     .index = s("i"),
-                    .body = try test_utils.list(ast.Statement, a, &.{
-                        .{
-                            .Expression = &e(.{
-                                .Call = .{
-                                    .function = &e(.{ .Identifier = "print" }),
-                                    .args = try test_utils.list(ast.FunctionArg, a, &.{
-                                        .{ .Positional = &e(.{ .Identifier = "i" }) },
-                                    }),
-                                },
-                            }),
-                        },
-                    }),
+                    .body = &.{
+                        .Expression = &e(
+                            .{
+                                .Block = try test_utils.list(
+                                    ast.Statement,
+                                    a,
+                                    &.{
+                                        .{
+                                            .Expression = &e(.{
+                                                .Call = .{
+                                                    .function = &e(.{ .Identifier = "print" }),
+                                                    .args = try test_utils.list(ast.FunctionArg, a, &.{
+                                                        .{ .Positional = &e(.{ .Identifier = "i" }) },
+                                                    }),
+                                                },
+                                            }),
+                                        },
+                                    },
+                                ),
+                            },
+                        ),
+                    },
                 },
             },
         },
@@ -1528,7 +1478,7 @@ test "function literal" {
             \\}
             ,
             .expected_expression = .{
-                .Function = .{ .params = .{}, .body = .{ .Block = .{} } },
+                .Function = .{ .params = .{}, .body = &e(.{ .Block = .{} }) },
             },
         },
         .{
@@ -1544,7 +1494,7 @@ test "function literal" {
                         .{ .Positional = s("a") },
                         .{ .Positional = s("b") },
                     }),
-                    .body = .{
+                    .body = &e(.{
                         .Block = try test_utils.list(ast.Statement, a, &.{
                             .{
                                 .Return = &e(.{
@@ -1556,7 +1506,7 @@ test "function literal" {
                                 }),
                             },
                         }),
-                    },
+                    }),
                 },
             },
         },
@@ -1571,15 +1521,13 @@ test "function literal" {
                         .{ .Positional = s("a") },
                         .{ .Positional = s("b") },
                     }),
-                    .body = .{
-                        .Expression = &e(.{
-                            .Infix = .{
-                                .left = &e(.{ .Identifier = "a" }),
-                                .operator = .Plus,
-                                .right = &e(.{ .Identifier = "b" }),
-                            },
-                        }),
-                    },
+                    .body = &e(.{
+                        .Infix = .{
+                            .left = &e(.{ .Identifier = "a" }),
+                            .operator = .Plus,
+                            .right = &e(.{ .Identifier = "b" }),
+                        },
+                    }),
                 },
             },
         },
@@ -1594,15 +1542,13 @@ test "function literal" {
                         .{ .Default = .{ .name = s("a"), .value = &e(.{ .Integer = 11 }) } },
                         .{ .Default = .{ .name = s("b"), .value = &e(.{ .Integer = 12 }) } },
                     }),
-                    .body = .{
-                        .Expression = &e(.{
-                            .Infix = .{
-                                .left = &e(.{ .Identifier = "a" }),
-                                .operator = .Plus,
-                                .right = &e(.{ .Identifier = "b" }),
-                            },
-                        }),
-                    },
+                    .body = &e(.{
+                        .Infix = .{
+                            .left = &e(.{ .Identifier = "a" }),
+                            .operator = .Plus,
+                            .right = &e(.{ .Identifier = "b" }),
+                        },
+                    }),
                 },
             },
         },
@@ -1649,7 +1595,7 @@ test "match expression" {
         .{
             .description = "single arm",
             .input =
-            \\match(foo) true -> return "bar"
+            \\match(foo) true -> "bar"
             ,
             .expected_expression = .{
                 .Match = .{
@@ -1657,7 +1603,7 @@ test "match expression" {
                     .body = .{
                         .Single = .{
                             .pattern = &e(.{ .Boolean = true }),
-                            .body = .{ .Return = &e(.{ .String = "bar" }) },
+                            .body = &e(.{ .String = "bar" }),
                         },
                     },
                 },
@@ -1666,7 +1612,7 @@ test "match expression" {
         .{
             .description = "single arm no target",
             .input =
-            \\match foo < 10 -> return "bar"
+            \\match foo < 10 -> "bar"
             ,
             .expected_expression = .{
                 .Match = .{
@@ -1680,7 +1626,7 @@ test "match expression" {
                                     .operator = .Lt,
                                 },
                             }),
-                            .body = .{ .Return = &e(.{ .String = "bar" }) },
+                            .body = &e(.{ .String = "bar" }),
                         },
                     },
                 },
@@ -1690,9 +1636,9 @@ test "match expression" {
             .description = "multiple arms",
             .input =
             \\match(foo) {
-            \\     1 ->    return "a"
-            \\     2 ->    return "b"
-            \\     _ ->    return "c"
+            \\     1 -> "a"
+            \\     2 -> "b"
+            \\     _ -> "c"
             \\}
             ,
             .expected_expression = .{
@@ -1702,15 +1648,15 @@ test "match expression" {
                         .Multiple = try test_utils.list(ast.MatchArm, a, &.{
                             .{
                                 .pattern = &e(.{ .Integer = 1 }),
-                                .body = .{ .Return = &e(.{ .String = "a" }) },
+                                .body = &e(.{ .String = "a" }),
                             },
                             .{
                                 .pattern = &e(.{ .Integer = 2 }),
-                                .body = .{ .Return = &e(.{ .String = "b" }) },
+                                .body = &e(.{ .String = "b" }),
                             },
                             .{
                                 .pattern = &e(.{ .Identifier = "_" }),
-                                .body = .{ .Return = &e(.{ .String = "c" }) },
+                                .body = &e(.{ .String = "c" }),
                             },
                         }),
                     },
@@ -1722,6 +1668,85 @@ test "match expression" {
     try test_utils.runTestsWithArena(
         ExpressionTestCase,
         "parse match expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "block expression" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "block",
+            .input =
+            \\{
+            \\    let foo = 5
+            \\    foo + 2
+            \\}
+            ,
+            .expected_expression = .{
+                .Block = try test_utils.list(ast.Statement, a, &.{
+                    .{
+                        .VarDeclaration = .{
+                            .name = s("foo"),
+                            .expression = &e(.{ .Integer = 5 }),
+                        },
+                    },
+                    .{
+                        .Expression = &e(.{
+                            .Infix = .{
+                                .left = &e(.{ .Identifier = "foo" }),
+                                .right = &e(.{ .Integer = 2 }),
+                                .operator = .Plus,
+                            },
+                        }),
+                    },
+                }),
+            },
+        },
+        .{
+            .description = "block single line",
+            .input =
+            \\{ 5 + 5 }
+            ,
+            .expected_expression = .{
+                .Block = try test_utils.list(ast.Statement, a, &.{
+                    .{
+                        .Expression = &e(.{
+                            .Infix = .{
+                                .left = &e(.{ .Integer = 5 }),
+                                .right = &e(.{ .Integer = 5 }),
+                                .operator = .Plus,
+                            },
+                        }),
+                    },
+                }),
+            },
+        },
+        .{
+            .description = "block empty",
+            .input =
+            \\{}
+            ,
+            .expected_expression = .{ .Block = .{} },
+        },
+        .{
+            .description = "block empty multiple lines",
+            .input =
+            \\{
+            \\
+            \\}
+            ,
+            .expected_expression = .{ .Block = .{} },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse block expression",
         &test_cases,
         runExpressionTest,
     );
@@ -1782,7 +1807,7 @@ test "parse program" {
                                 .params = try test_utils.list(ast.FunctionParam, a, &.{
                                     .{ .Positional = s("n") },
                                 }),
-                                .body = .{
+                                .body = &e(.{
                                     .Block = try test_utils.list(ast.Statement, a, &.{
                                         .{
                                             .VarDeclaration = .{
@@ -1806,39 +1831,49 @@ test "parse program" {
                                                 }),
                                                 .capture = s("_"),
                                                 .index = null,
-                                                .body = try test_utils.list(ast.Statement, a, &.{
-                                                    .{
-                                                        .VarDeclaration = .{
-                                                            .name = s("tmp"),
-                                                            .expression = &e(.{ .Identifier = "b" }),
-                                                        },
-                                                    },
-                                                    .{
-                                                        .Assignment = .{
-                                                            .target = .{ .Identifier = s("b") },
-                                                            .expression = &e(.{
-                                                                .Infix = .{
-                                                                    .left = &e(.{ .Identifier = "a" }),
-                                                                    .right = &e(.{ .Identifier = "b" }),
-                                                                    .operator = .Plus,
+                                                .body = &.{
+                                                    .Expression = &e(
+                                                        .{
+                                                            .Block = try test_utils.list(
+                                                                ast.Statement,
+                                                                a,
+                                                                &.{
+                                                                    .{
+                                                                        .VarDeclaration = .{
+                                                                            .name = s("tmp"),
+                                                                            .expression = &e(.{ .Identifier = "b" }),
+                                                                        },
+                                                                    },
+                                                                    .{
+                                                                        .Assignment = .{
+                                                                            .target = .{ .Identifier = s("b") },
+                                                                            .expression = &e(.{
+                                                                                .Infix = .{
+                                                                                    .left = &e(.{ .Identifier = "a" }),
+                                                                                    .right = &e(.{ .Identifier = "b" }),
+                                                                                    .operator = .Plus,
+                                                                                },
+                                                                            }),
+                                                                        },
+                                                                    },
+                                                                    .{
+                                                                        .Assignment = .{
+                                                                            .target = .{ .Identifier = s("a") },
+                                                                            .expression = &e(.{ .Identifier = "tmp" }),
+                                                                        },
+                                                                    },
                                                                 },
-                                                            }),
+                                                            ),
                                                         },
-                                                    },
-                                                    .{
-                                                        .Assignment = .{
-                                                            .target = .{ .Identifier = s("a") },
-                                                            .expression = &e(.{ .Identifier = "tmp" }),
-                                                        },
-                                                    },
-                                                }),
+                                                    ),
+                                                },
                                             },
                                         },
                                         .{
                                             .Return = &e(.{ .Identifier = "a" }),
                                         },
                                     }),
-                                },
+                                }),
                             },
                         }),
                     },
