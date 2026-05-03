@@ -171,7 +171,7 @@ pub const VirtualMachine = struct {
         const ast = try parser.createAst(self.arena, &self.script_context);
 
         var c: compiler.Compiler = undefined;
-        try compiler.Compiler.init(&c, self, self.gpa, .Script, null, 0, null);
+        try compiler.Compiler.init(&c, self, self.gpa, self.arena, .Script, null, 0, null);
         if (comptime constants.debug_trace_execution) {
             logDebug("Pre-compilation finished.", .{});
         }
