@@ -58,6 +58,7 @@ const StringContext = struct {
 pub const TableGlobals = std.HashMapUnmanaged(*object.ObjString, value.Value, StringContext, 80);
 
 pub const VirtualMachine = struct {
+    io: std.Io,
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
     // TODO: why does a larger stack size crash
@@ -76,12 +77,13 @@ pub const VirtualMachine = struct {
     next_gc: usize,
     script_context: ScriptContext,
 
-    pub fn init(gpa: std.mem.Allocator, arena: std.mem.Allocator) !VirtualMachine {
+    pub fn init(io: std.Io, gpa: std.mem.Allocator, arena: std.mem.Allocator) !VirtualMachine {
         if (comptime constants.debug_trace_execution) {
             logDebug("Init vm...", .{});
         }
 
         var vm = VirtualMachine{
+            .io = io,
             .gpa = gpa,
             .arena = arena,
             .stack = undefined,
@@ -89,12 +91,12 @@ pub const VirtualMachine = struct {
             .frames = undefined,
             .frame = undefined,
             .frame_count = 0,
-            .strings = .{},
-            .globals = .{},
+            .strings = .empty,
+            .globals = .empty,
             .objects = null,
             .open_upvalues = null,
             .current_compiler = null,
-            .gray_stack = .{},
+            .gray_stack = .empty,
             .bytes_allocated = 0,
             .next_gc = 1024 * 1024,
             .script_context = undefined,
@@ -165,7 +167,7 @@ pub const VirtualMachine = struct {
         self.script_context = ScriptContext{
             .file_name = file_name,
             .source = source,
-            .lines = .{},
+            .lines = .empty,
         };
 
         const ast = try parser.createAst(self.arena, &self.script_context);

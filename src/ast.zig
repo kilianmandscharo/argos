@@ -144,17 +144,17 @@ pub const MatchArm = struct {
     body: *const Expression,
 };
 
-pub fn printProgram(program: Program, writer: anytype) !void {
+pub fn printProgram(program: Program, writer: *std.Io.Writer) !void {
     for (program.items) |stmt| {
         try printStatement(stmt, writer, 0);
     }
 }
 
-fn printIndent(writer: anytype, level: usize) !void {
+fn printIndent(writer: *std.Io.Writer, level: usize) !void {
     for (0..level * 2) |_| try writer.writeByte(' ');
 }
 
-fn printStatement(stmt: Statement, writer: anytype, level: usize) anyerror!void {
+fn printStatement(stmt: Statement, writer: *std.Io.Writer, level: usize) anyerror!void {
     switch (stmt) {
         .VarDeclaration => |s| {
             try printIndent(writer, level);
@@ -235,7 +235,7 @@ fn printStatement(stmt: Statement, writer: anytype, level: usize) anyerror!void 
     }
 }
 
-fn printExpression(expr: ExpressionData, writer: anytype, level: usize) !void {
+fn printExpression(expr: ExpressionData, writer: *std.Io.Writer, level: usize) !void {
     switch (expr) {
         .Identifier => |name| {
             try printIndent(writer, level);

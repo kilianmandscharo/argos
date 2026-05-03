@@ -56,7 +56,7 @@ pub const Parser = struct {
     }
 
     pub fn parseProgram(self: *Parser) !ast.Program {
-        var statements: std.ArrayList(ast.Statement) = .{};
+        var statements: std.ArrayList(ast.Statement) = .empty;
         while (self.current.type != .Eof) {
             try self.chopNewlines();
             if (self.current.type == .Eof) break;
@@ -289,7 +289,7 @@ pub const Parser = struct {
     }
 
     fn parseCommaSeparated(self: *Parser, T: type, parseFn: *const fn (p: *Parser) anyerror!T, delimiter: scanner.TokenType) !std.ArrayList(T) {
-        var items: std.ArrayList(T) = .{};
+        var items: std.ArrayList(T) = .empty;
         var expectComma = false;
 
         while (!try self.match(delimiter)) {
@@ -552,7 +552,7 @@ fn parseMatch(self: *Parser) !ast.Expression {
     try self.advance();
     try self.consume(.NewLine, "expect new line after '{' in match block");
 
-    var arms: std.ArrayList(ast.MatchArm) = .{};
+    var arms: std.ArrayList(ast.MatchArm) = .empty;
 
     while (!self.check(.Eof) and !self.check(.RBrace)) {
         try self.chopNewlines();
@@ -578,7 +578,7 @@ fn parseMatch(self: *Parser) !ast.Expression {
 
 fn parseBlock(self: *Parser) !ast.Expression {
     try self.chopNewlines();
-    var statements: std.ArrayList(ast.Statement) = .{};
+    var statements: std.ArrayList(ast.Statement) = .empty;
     while (!self.check(.RBrace) and !self.check(.Eof)) {
         try statements.append(self.arena, try self.parseStatement());
     }

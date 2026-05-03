@@ -66,9 +66,9 @@ pub const Chunk = struct {
 
     pub fn init() Chunk {
         return Chunk{
-            .code = .{},
-            .constants = .{},
-            .lines = .{},
+            .code = .empty,
+            .constants = .empty,
+            .lines = .empty,
         };
     }
 

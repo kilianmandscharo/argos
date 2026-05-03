@@ -15,7 +15,7 @@ const run = struct {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
 
-        var vm = try virtual_machine.VirtualMachine.init(std.testing.allocator, arena.allocator());
+        var vm = try virtual_machine.VirtualMachine.init(std.testing.io, std.testing.allocator, arena.allocator());
         defer vm.deinit();
 
         const result = try vm.interpret("test", test_case.source);

@@ -46,13 +46,13 @@ pub fn allocateObject(vm: *virtual_machine.VirtualMachine, T: type) !*T {
 
 pub fn allocateList(vm: *virtual_machine.VirtualMachine) !*Obj {
     const list = try allocateObject(vm, ObjList);
-    list.data = .{};
+    list.data = .empty;
     return &list.obj;
 }
 
 pub fn allocateTable(vm: *virtual_machine.VirtualMachine) !*Obj {
     const table = try allocateObject(vm, ObjTable);
-    table.data = .{};
+    table.data = .empty;
     return &table.obj;
 }
 

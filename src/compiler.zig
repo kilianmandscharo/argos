@@ -77,11 +77,11 @@ pub const Compiler = struct {
         self.gpa = gpa;
         self.arena = arena;
         self.vm = vm;
-        self.locals = .{};
+        self.locals = .empty;
         self.scope_depth = 0;
         self.type = func_type;
         self.enclosing = enclosing;
-        self.upvalues = .{};
+        self.upvalues = .empty;
         self.indent = indent;
         self.function = null;
 
@@ -610,7 +610,7 @@ pub const Compiler = struct {
                     return;
                 }
 
-                var end_jumps: std.ArrayList(usize) = .{};
+                var end_jumps: std.ArrayList(usize) = .empty;
                 errdefer end_jumps.deinit(self.gpa);
 
                 const arms = val.body.Multiple.items;

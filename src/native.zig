@@ -3,10 +3,10 @@ const value = @import("value.zig");
 const virtual_machine = @import("vm.zig");
 
 pub fn clockNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
-    _ = vm;
     _ = arg_count;
     _ = args;
-    const time: f64 = @floatFromInt(std.time.milliTimestamp());
+    const now = std.Io.Timestamp.now(vm.io, .real);
+    const time: f64 = @floatFromInt(std.Io.Timestamp.toMilliseconds(now));
     const ms_per_s: f64 = @floatFromInt(std.time.ms_per_s);
     return value.wrapFloat(@divExact(time, ms_per_s));
 }

@@ -182,7 +182,7 @@ fn runStatementTest(arena: std.mem.Allocator, test_case: StatementTestCase) anye
     ctx.* = .{
         .file_name = "scanner_test",
         .source = test_case.input,
-        .lines = .{},
+        .lines = .empty,
     };
 
     const result = parser.createAst(arena, ctx);
@@ -593,7 +593,7 @@ fn runExpressionTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) an
     ctx.* = .{
         .file_name = "scanner_test",
         .source = test_case.input,
-        .lines = .{},
+        .lines = .empty,
     };
 
     const result = parser.createAst(arena, ctx);
@@ -1139,13 +1139,13 @@ test "range expression" {
                 .Range = .{
                     .start = &e(.{
                         .Call = .{
-                            .args = .{},
+                            .args = .empty,
                             .function = &e(.{ .Identifier = "start" }),
                         },
                     }),
                     .end = &e(.{
                         .Call = .{
-                            .args = .{},
+                            .args = .empty,
                             .function = &e(.{ .Identifier = "end" }),
                         },
                     }),
@@ -1173,7 +1173,7 @@ test "list literal" {
             .input =
             \\List{}
             ,
-            .expected_expression = .{ .List = .{} },
+            .expected_expression = .{ .List = .empty },
         },
         .{
             .description = "empty list with new line",
@@ -1182,7 +1182,7 @@ test "list literal" {
             \\
             \\}
             ,
-            .expected_expression = .{ .List = .{} },
+            .expected_expression = .{ .List = .empty },
         },
         .{
             .description = "list one line",
@@ -1344,7 +1344,7 @@ test "table literal" {
             .input =
             \\Table{}
             ,
-            .expected_expression = .{ .Table = .{} },
+            .expected_expression = .{ .Table = .empty },
         },
         .{
             .description = "empty table with new line",
@@ -1353,7 +1353,7 @@ test "table literal" {
             \\
             \\}
             ,
-            .expected_expression = .{ .Table = .{} },
+            .expected_expression = .{ .Table = .empty },
         },
         .{
             .description = "table one line",
@@ -1524,7 +1524,7 @@ test "function call" {
             .expected_expression = .{
                 .Call = .{
                     .function = &e(.{ .Identifier = "test" }),
-                    .args = .{},
+                    .args = .empty,
                 },
             },
         },
@@ -1638,7 +1638,7 @@ test "function literal" {
             \\}
             ,
             .expected_expression = .{
-                .Function = .{ .params = .{}, .body = &e(.{ .Block = .{} }) },
+                .Function = .{ .params = .empty, .body = &e(.{ .Block = .empty }) },
             },
         },
         .{
@@ -1891,7 +1891,7 @@ test "block expression" {
             .input =
             \\{}
             ,
-            .expected_expression = .{ .Block = .{} },
+            .expected_expression = .{ .Block = .empty },
         },
         .{
             .description = "block empty multiple lines",
@@ -1900,7 +1900,7 @@ test "block expression" {
             \\
             \\}
             ,
-            .expected_expression = .{ .Block = .{} },
+            .expected_expression = .{ .Block = .empty },
         },
     };
 
@@ -1925,7 +1925,7 @@ test "parse program" {
             ctx.* = .{
                 .file_name = "scanner_test",
                 .source = test_case.input,
-                .lines = .{},
+                .lines = .empty,
             };
 
             const program = try parser.createAst(arena, ctx);

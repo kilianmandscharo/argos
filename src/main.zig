@@ -36,76 +36,28 @@ fn repl(allocator: std.mem.Allocator) !void {
     // }
 }
 
-fn runFile(allocator: std.mem.Allocator, emit_ast: bool) !void {
-    const file_path: []const u8 = std.mem.span(std.os.argv[1]);
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const gpa = init.gpa;
+    const arena = init.arena;
 
-    const file = try std.fs.cwd().openFile(file_path, .{});
-    defer file.close();
+    const args = try init.minimal.args.toSlice(arena.allocator());
 
-    const source = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    defer allocator.free(source);
-
-    if (emit_ast) {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-
-        var stdout_buf: [1024]u8 = undefined;
-        var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
-        const stdout = &stdout_writer.interface;
-
-        var script_context = vm.ScriptContext{
-            .file_name = file_path,
-            .source = source,
-            .lines = .{},
-        };
-
-        const program: ast.Program = parser.createAst(arena.allocator(), &script_context) catch |err| {
-            if (constants.stack_trace_on_error) return err;
-            return;
-        };
-        try ast.printProgram(program, stdout);
-
-        try stdout.flush();
-    } else {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-
-        var virtual_machine = try vm.VirtualMachine.init(allocator, arena.allocator());
-        defer virtual_machine.deinit();
-
-        _ = virtual_machine.interpret(file_path, source) catch |err| {
-            if (constants.stack_trace_on_error) {
-                return err;
-            }
-        };
-    }
-}
-
-pub fn main() !void {
-    if (std.os.argv.len < 2) {
+    if (args.len < 2) {
         std.debug.print("Usage: argos [path]\n", .{});
         return error.Exit;
     }
 
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    const file_path: []const u8 = args[1];
 
-    defer {
-        const deinit_status = gpa.deinit();
-        if (deinit_status == .leak) std.testing.expect(false) catch @panic("TEST FAIL");
-    }
+    const file = try std.Io.Dir.cwd().openFile(io, file_path, .{});
+    defer file.close(io);
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+    var file_reader = file.reader(io, &.{});
+    const source = try file_reader.interface.allocRemaining(arena.allocator(), .unlimited);
 
-    const file_path: []const u8 = std.mem.span(std.os.argv[1]);
-
-    const file = try std.fs.cwd().openFile(file_path, .{});
-    defer file.close();
-
-    const source = try file.readToEndAlloc(arena.allocator(), std.math.maxInt(usize));
-
-    if (std.os.argv.len == 2) {
-        var virtual_machine = try vm.VirtualMachine.init(gpa.allocator(), arena.allocator());
+    if (args.len == 2) {
+        var virtual_machine = try vm.VirtualMachine.init(io, gpa, arena.allocator());
         defer virtual_machine.deinit();
 
         _ = virtual_machine.interpret(file_path, source) catch |err| {
@@ -117,26 +69,26 @@ pub fn main() !void {
         return;
     }
 
-    if (std.mem.eql(u8, std.mem.span(std.os.argv[2]), "--ast")) {
-        var stdout_buf: [1024]u8 = undefined;
-        var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
-        const stdout = &stdout_writer.interface;
-
+    if (std.mem.eql(u8, args[2], "--ast")) {
         var script_context = vm.ScriptContext{
             .file_name = file_path,
             .source = source,
-            .lines = .{},
+            .lines = .empty,
         };
 
         const program: ast.Program = parser.createAst(arena.allocator(), &script_context) catch |err| {
             if (constants.stack_trace_on_error) return err;
             return;
         };
-        try ast.printProgram(program, stdout);
-        try stdout.flush();
+
+        var stdout_buffer: [1024]u8 = undefined;
+        var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+        const stdout_writer = &stdout_file_writer.interface;
+        try ast.printProgram(program, stdout_writer);
+        try stdout_writer.flush();
     }
 
-    // if (std.mem.eql(u8, std.mem.span(std.os.argv[2]), "--bytecode")) {
+    // if (std.mem.eql(u8, args[2], "--bytecode")) {
     //     var virtual_machine = try vm.VirtualMachine.init(gpa.allocator(), arena.allocator());
     //     defer virtual_machine.deinit();
     //

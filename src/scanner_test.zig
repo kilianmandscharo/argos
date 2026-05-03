@@ -25,7 +25,7 @@ test "scanner" {
             ctx.* = .{
                 .file_name = "scanner_test",
                 .source = test_case.input,
-                .lines = .{},
+                .lines = .empty,
             };
 
             defer allocator.destroy(ctx);
