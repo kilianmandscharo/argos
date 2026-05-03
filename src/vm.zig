@@ -157,7 +157,7 @@ pub const VirtualMachine = struct {
         self.stack[self.stack_top - 1 - distance] = val;
     }
 
-    pub fn interpret(self: *VirtualMachine, file_name: []const u8, source: []const u8) !InterpretResult {
+    pub fn compile(self: *VirtualMachine, file_name: []const u8, source: []const u8) !*object.ObjFunction {
         if (comptime constants.debug_trace_execution) {
             logDebug("Starting pre-compilation...", .{});
         }
@@ -185,6 +185,11 @@ pub const VirtualMachine = struct {
         if (comptime constants.debug_trace_execution) {
             logDebug("Compilation finished.", .{});
         }
+        return function;
+    }
+
+    pub fn interpret(self: *VirtualMachine, file_name: []const u8, source: []const u8) !InterpretResult {
+        const function = try self.compile(file_name, source);
 
         if (comptime constants.debug_trace_execution) {
             logDebug("Setting up global function...", .{});

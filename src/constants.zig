@@ -10,6 +10,5 @@ pub const debug_log_gc = false;
 pub const gc_heap_grow_factor = 2;
 
 pub const debug_disassemble = false;
-pub const debug_print_steps = false;
 
 pub const stack_trace_on_error = false;

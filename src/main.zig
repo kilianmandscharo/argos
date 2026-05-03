@@ -82,22 +82,66 @@ fn runFile(allocator: std.mem.Allocator, emit_ast: bool) !void {
 }
 
 pub fn main() !void {
+    if (std.os.argv.len < 2) {
+        std.debug.print("Usage: argos [path]\n", .{});
+        return error.Exit;
+    }
+
     var gpa: std.heap.DebugAllocator(.{}) = .init;
-    const allocator = gpa.allocator();
 
     defer {
         const deinit_status = gpa.deinit();
         if (deinit_status == .leak) std.testing.expect(false) catch @panic("TEST FAIL");
     }
 
-    if (std.os.argv.len == 1) {
-        try repl(allocator);
-    } else if (std.os.argv.len == 2) {
-        try runFile(allocator, false);
-    } else if (std.os.argv.len == 3 and std.mem.eql(u8, std.mem.span(std.os.argv[2]), "--ast")) {
-        try runFile(allocator, true);
-    } else {
-        std.debug.print("Usage: argos [path]\n", .{});
-        return error.Exit;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const file_path: []const u8 = std.mem.span(std.os.argv[1]);
+
+    const file = try std.fs.cwd().openFile(file_path, .{});
+    defer file.close();
+
+    const source = try file.readToEndAlloc(arena.allocator(), std.math.maxInt(usize));
+
+    if (std.os.argv.len == 2) {
+        var virtual_machine = try vm.VirtualMachine.init(gpa.allocator(), arena.allocator());
+        defer virtual_machine.deinit();
+
+        _ = virtual_machine.interpret(file_path, source) catch |err| {
+            if (constants.stack_trace_on_error) {
+                return err;
+            }
+        };
+
+        return;
     }
+
+    if (std.mem.eql(u8, std.mem.span(std.os.argv[2]), "--ast")) {
+        var stdout_buf: [1024]u8 = undefined;
+        var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+        const stdout = &stdout_writer.interface;
+
+        var script_context = vm.ScriptContext{
+            .file_name = file_path,
+            .source = source,
+            .lines = .{},
+        };
+
+        const program: ast.Program = parser.createAst(arena.allocator(), &script_context) catch |err| {
+            if (constants.stack_trace_on_error) return err;
+            return;
+        };
+        try ast.printProgram(program, stdout);
+        try stdout.flush();
+    }
+
+    // if (std.mem.eql(u8, std.mem.span(std.os.argv[2]), "--bytecode")) {
+    //     var virtual_machine = try vm.VirtualMachine.init(gpa.allocator(), arena.allocator());
+    //     defer virtual_machine.deinit();
+    //
+    //     const function = try virtual_machine.compile(file_path, source);
+    //
+    //     return;
+    // }
 }

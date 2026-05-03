@@ -1,18 +1,2 @@
-let fib = fn (n) {
-    let a = 0
-    let b = 1
-
-    for (0..n) |_| {
-        let tmp = a
-        a = b
-        b = b + tmp
-    }
-
-    a
-}
-
-for (0..1000000) |_| {
-    fib(50)
-}
-
-print("done")
+let a = 5 + a
+print(a)
