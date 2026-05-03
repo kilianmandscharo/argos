@@ -165,6 +165,8 @@ pub const Compiler = struct {
     }
 
     fn endCompiler(self: *Compiler) !*object.ObjFunction {
+        // TODO: if a function has a return statement there will be 2 return
+        // instructions
         try self.emitOp(.Return);
         self.vm.current_compiler = self.enclosing;
         const function = self.getFunction();

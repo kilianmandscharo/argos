@@ -1,7 +1,6 @@
 # todo
 
 - implement continue and break statements in loops
-- implement "a -= 1" pattern
 - implement ternary
 - implement orelse
 - fix line numbers
@@ -9,4 +8,4 @@
 - list iteration in for
 - appending to a list
 - getting the list length
-- how to do the line handling in compiler and vm
+- how to do the line handling in vm
