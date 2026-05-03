@@ -29,7 +29,7 @@ pub const Resolver = struct {
         is_used: bool,
         is_captured: bool,
         token: scanner.Token,
-        initialized: bool,
+        depth: u16,
     };
 
     const Upvalue = struct {

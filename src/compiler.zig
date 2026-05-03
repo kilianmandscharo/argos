@@ -16,24 +16,6 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
     });
 }
 
-const Precedence = enum(u8) {
-    Lowest = 1,
-    Assign,
-    LogicalOr,
-    LogicalAnd,
-    BitwiseOr,
-    BitwiseXor,
-    BitwiseAnd,
-    Equals,
-    LessGreater,
-    Shift,
-    Sum,
-    Product,
-    Prefix,
-    Call,
-    Index,
-};
-
 pub const Compiler = struct {
     vm: *virtual_machine.VirtualMachine,
     enclosing: ?*Compiler,
@@ -41,16 +23,11 @@ pub const Compiler = struct {
     arena: std.mem.Allocator,
     function: ?*object.ObjFunction,
     type: FunctionType,
-    locals: std.ArrayList(Local),
+    locals: std.ArrayList(VariableInfo),
     upvalues: std.ArrayList(Upvalue),
     scope_depth: u32,
-    indent: usize,
-
-    const Local = struct {
-        name: []const u8,
-        depth: u32,
-        is_captured: bool,
-    };
+    globals: *std.StringHashMapUnmanaged(VariableInfo),
+    expression_types: *std.AutoHashMapUnmanaged(*const ast.Expression, TypeInfo),
 
     const Upvalue = struct {
         index: u8,
@@ -64,42 +41,106 @@ pub const Compiler = struct {
 
     const UINT8_COUNT = std.math.maxInt(u8) + 1;
 
+    const VariableInfo = struct {
+        type_info: TypeInfo,
+        is_const: bool,
+        is_used: bool,
+        is_captured: bool,
+        token: scanner.Token,
+        depth: u32,
+    };
+
+    const TypeInfo = enum {
+        Float,
+        Int,
+        Bool,
+        Null,
+        String,
+        Function,
+        List,
+        Table,
+        Unknown,
+    };
+
     pub fn init(
-        self: *Compiler,
         vm: *virtual_machine.VirtualMachine,
         gpa: std.mem.Allocator,
         arena: std.mem.Allocator,
-        func_type: FunctionType,
-        enclosing: ?*Compiler,
-        indent: usize,
+    ) !*Compiler {
+        const globals = try arena.create(std.StringHashMapUnmanaged(VariableInfo));
+        globals.* = .empty;
+
+        const expression_types = try arena.create(std.AutoHashMapUnmanaged(*const ast.Expression, TypeInfo));
+        expression_types.* = .empty;
+
+        const compiler = try arena.create(Compiler);
+        compiler.* = .{
+            .vm = vm,
+            .enclosing = null,
+            .gpa = gpa,
+            .arena = arena,
+            .function = null,
+            .type = .Script,
+            .locals = .empty,
+            .upvalues = .empty,
+            .scope_depth = 0,
+            .globals = globals,
+            .expression_types = expression_types,
+        };
+
+        vm.current_compiler = compiler;
+
+        compiler.function = try object.allocateFunction(vm);
+
+        try compiler.locals.append(arena, .{
+            .type_info = .Unknown,
+            .is_const = false,
+            .is_used = true,
+            .is_captured = false,
+            .token = scanner.Token.dummy(),
+            .depth = 0,
+        });
+
+        return compiler;
+    }
+
+    pub fn initNewScope(
+        self: *Compiler,
         name: ?[]const u8,
-    ) !void {
-        self.gpa = gpa;
-        self.arena = arena;
-        self.vm = vm;
-        self.locals = .empty;
-        self.scope_depth = 0;
-        self.type = func_type;
-        self.enclosing = enclosing;
-        self.upvalues = .empty;
-        self.indent = indent;
-        self.function = null;
+    ) !*Compiler {
+        const new_compiler = try self.arena.create(Compiler);
+        new_compiler.* = .{
+            .vm = self.vm,
+            .enclosing = self,
+            .gpa = self.gpa,
+            .arena = self.arena,
+            .function = null,
+            .type = .Function,
+            .locals = .empty,
+            .upvalues = .empty,
+            .scope_depth = 0,
+            .globals = self.globals,
+            .expression_types = self.expression_types,
+        };
 
-        // Set current_compiler BEFORE any allocations that could trigger GC
-        vm.current_compiler = self;
-
-        self.function = try object.allocateFunction(vm);
+        new_compiler.vm.current_compiler = new_compiler;
+        new_compiler.function = try object.allocateFunction(new_compiler.vm);
 
         if (name) |func_name| {
-            const obj = try object.copyString(vm, func_name);
-            self.getFunction().name = obj.asString();
+            const obj = try object.copyString(new_compiler.vm, func_name);
+            new_compiler.getFunction().name = obj.asString();
         }
 
-        try self.locals.append(self.arena, .{
-            .depth = 0,
+        try new_compiler.locals.append(new_compiler.arena, .{
+            .type_info = .Unknown,
+            .is_const = false,
+            .is_used = true,
             .is_captured = false,
-            .name = "",
+            .token = scanner.Token.dummy(),
+            .depth = 0,
         });
+
+        return new_compiler;
     }
 
     fn getFunction(self: *Compiler) *object.ObjFunction {
@@ -113,7 +154,9 @@ pub const Compiler = struct {
     pub fn compile(self: *Compiler, program: ast.Program) !*object.ObjFunction {
         for (program.items) |stmt| {
             self.compileStatement(stmt, false) catch |err| {
-                self.currentChunk().disassemble("<error>");
+                if (constants.debug_compiler) {
+                    self.currentChunk().disassemble("<error>");
+                }
                 return err;
             };
         }
@@ -133,12 +176,31 @@ pub const Compiler = struct {
         return function;
     }
 
-    fn declareGlobalVar(self: *Compiler, token: *const scanner.Token) !void {
-        const constant = try self.identifierConstant(token.data);
+    fn declareGlobalVar(self: *Compiler, var_declaration: *const ast.VarDeclaration) !void {
+        if (self.globals.get(var_declaration.name.data)) |_| {
+            return self.errorAt(&var_declaration.name, "already a global variable with this name");
+        }
+
+        const constant = try self.identifierConstant(var_declaration.name.data);
         try self.emitOpU16(.DefineGlobal, constant);
+
+        const type_info = try self.resolveExpression(var_declaration.expression);
+
+        try self.globals.put(
+            self.arena,
+            var_declaration.name.data,
+            .{
+                .type_info = type_info,
+                .is_const = false,
+                .is_used = false,
+                .is_captured = false,
+                .token = var_declaration.name,
+                .depth = 0,
+            },
+        );
     }
 
-    fn declareLocalVar(self: *Compiler, token: *const scanner.Token) !void {
+    fn declareLocalVar(self: *Compiler, name: *const scanner.Token, type_info: TypeInfo) !void {
         var i = self.locals.items.len;
         while (i > 0) {
             i -= 1;
@@ -146,21 +208,24 @@ pub const Compiler = struct {
             if (local.depth < self.scope_depth) {
                 break;
             }
-            if (std.mem.eql(u8, token.data, local.name)) {
-                return self.errorAt(token, "already a variable with this name in this scope");
+            if (std.mem.eql(u8, name.data, local.token.data)) {
+                return self.errorAt(name, "already a variable with this name in this scope");
             }
         }
-        try self.addLocal(token);
+        try self.addLocal(name, type_info);
     }
 
-    fn addLocal(self: *Compiler, name: *const scanner.Token) !void {
+    fn addLocal(self: *Compiler, name: *const scanner.Token, type_info: TypeInfo) !void {
         if (self.locals.items.len == UINT8_COUNT) {
             return self.errorAt(name, "Too many local variables in block.");
         }
         try self.locals.append(self.arena, .{
-            .name = name.data,
-            .depth = self.scope_depth,
+            .type_info = type_info,
+            .is_const = false,
+            .is_used = false,
             .is_captured = false,
+            .token = name.*,
+            .depth = self.scope_depth,
         });
     }
 
@@ -224,7 +289,7 @@ pub const Compiler = struct {
         if (self.enclosing == null) return null;
 
         const enclosing = self.enclosing.?;
-        const local = try enclosing.resolveLocal(name);
+        const local = enclosing.resolveLocal(name);
         if (local) |index| {
             enclosing.locals.items[index].is_captured = true;
             return try self.addUpvalue(name, @intCast(index), true);
@@ -254,12 +319,12 @@ pub const Compiler = struct {
         }
     }
 
-    fn resolveLocal(self: *Compiler, name: *const scanner.Token) !?u8 {
+    fn resolveLocal(self: *Compiler, name: *const scanner.Token) ?u8 {
         var i = self.locals.items.len;
         while (i > 0) {
             i -= 1;
             const local = &self.locals.items[i];
-            if (std.mem.eql(u8, name.data, local.name)) {
+            if (std.mem.eql(u8, name.data, local.token.data)) {
                 return @intCast(i);
             }
         }
@@ -308,30 +373,35 @@ pub const Compiler = struct {
     }
 
     fn errorAt(self: *Compiler, token: *const scanner.Token, message: []const u8) anyerror {
-        token.printError(message, &self.vm.script_context, "Compiler");
+        token.printError(message, &self.vm.script_context, "Compile");
         return error.CompileError;
     }
 
     fn compileStatement(self: *Compiler, stmt: ast.Statement, suppress_pop: bool) !void {
         switch (stmt) {
-            .VarDeclaration => |val| {
+            .VarDeclaration => |*val| {
                 try self.compileExpression(val.expression);
                 if (self.scope_depth == 0) {
-                    try self.declareGlobalVar(&val.name);
+                    try self.declareGlobalVar(val);
                 } else {
-                    try self.declareLocalVar(&val.name);
+                    std.debug.print("resolve {s}\n", .{val.name.data});
+                    const type_info = try self.resolveExpression(val.expression);
+                    try self.declareLocalVar(&val.name, type_info);
                 }
             },
             .Assignment => |val| {
                 switch (val.target) {
                     .Identifier => |name| {
                         try self.compileExpression(val.expression);
-                        if (try self.resolveLocal(&name)) |local| {
+                        if (self.resolveLocal(&name)) |local| {
                             try self.emitOpU8(.SetLocal, local);
                         } else if (try self.resolveUpvalue(&name)) |upvalue| {
                             try self.emitOp(.SetUpvalue);
                             try self.emitByte(upvalue);
                         } else {
+                            if (self.globals.get(name.data) == null) {
+                                return self.errorAt(&name, "undefined variable");
+                            }
                             const constant = try self.identifierConstant(name.data);
                             try self.emitOpU16(.SetGlobal, constant);
                         }
@@ -345,7 +415,7 @@ pub const Compiler = struct {
                     },
                 }
             },
-            .For => |val| {
+            .For => |*val| {
                 self.beginScope();
                 if (val.expression.data != .Range) {
                     unreachable;
@@ -354,12 +424,12 @@ pub const Compiler = struct {
                 try self.compileExpression(val.expression.data.Range.start);
                 try self.compileExpression(val.expression.data.Range.end);
 
-                try self.declareLocalVar(&val.capture);
+                try self.declareLocalVar(&val.capture, .Int);
 
                 const increment_var_index = self.locals.items.len - 1;
 
                 // a dummy local for the right side of the range
-                try self.addLocal(&scanner.Token.dummy());
+                try self.addLocal(&scanner.Token.dummy(), .Int);
 
                 const loop_start = self.currentChunk().code.items.len;
                 const exit_jump = try self.emitJump(.JumpIfGreaterOrEq);
@@ -406,7 +476,7 @@ pub const Compiler = struct {
             },
             .Return => |val| {
                 if (self.type == .Script) {
-                    return self.errorAt(&val.token, "Can't return from top-level code.");
+                    return self.errorAt(&val.token, "can't return from top-level code");
                 }
                 try self.compileExpression(val);
                 try self.emitOp(.Return);
@@ -423,7 +493,7 @@ pub const Compiler = struct {
     fn compileExpression(self: *Compiler, expr: *const ast.Expression) anyerror!void {
         switch (expr.data) {
             .Identifier => |name| {
-                if (try self.resolveLocal(&expr.token)) |local| {
+                if (self.resolveLocal(&expr.token)) |local| {
                     try self.emitOpU8(.GetLocal, local);
                 } else if (try self.resolveUpvalue(&expr.token)) |upvalue| {
                     try self.emitOpU8(.GetUpvalue, upvalue);
@@ -462,7 +532,15 @@ pub const Compiler = struct {
                 } else {
                     try self.compileExpression(val.right);
                     switch (val.operator) {
-                        .Plus => try self.emitOp(.Add),
+                        .Plus => {
+                            const left_type = try self.resolveExpression(val.left);
+                            const right_type = try self.resolveExpression(val.right);
+                            if (left_type == .Int and right_type == .Int) {
+                                try self.emitOp(.AddInt);
+                            } else {
+                                try self.emitOp(.Add);
+                            }
+                        },
                         .Minus => try self.emitOp(.Subtract),
                         .Asterisk => try self.emitOp(.Multiply),
                         .Slash => try self.emitOp(.Divide),
@@ -492,31 +570,18 @@ pub const Compiler = struct {
                 }
             },
             .Function => |val| {
-                self.indent += 1;
-
-                var new_compiler: Compiler = undefined;
-                try new_compiler.init(
-                    self.vm,
-                    self.gpa,
-                    self.arena,
-                    .Function,
-                    self,
-                    self.indent,
-                    val.name,
-                );
-
-                new_compiler.vm.current_compiler = &new_compiler;
+                var new_compiler = try self.initNewScope(val.name);
                 new_compiler.beginScope();
 
-                for (val.params.items) |param| {
-                    switch (param) {
-                        .Positional => |name| {
+                for (val.params.items) |*param| {
+                    switch (param.*) {
+                        .Positional => |*name| {
                             new_compiler.function.?.arity += 1;
                             if (new_compiler.function.?.arity > 255) {
                                 // TODO: pass correct token
                                 return self.errorAt(&scanner.Token.dummy(), "Can't have more than 255 parameters.");
                             }
-                            try new_compiler.declareLocalVar(&name);
+                            try new_compiler.declareLocalVar(name, .Unknown);
                         },
                         .Default => unreachable,
                     }
@@ -537,8 +602,6 @@ pub const Compiler = struct {
                     try self.emitByte(@intFromBool(upvalue.is_local));
                     try self.emitByte(upvalue.index);
                 }
-
-                self.indent -= 1;
             },
             .Call => |val| {
                 const count = val.args.items.len;
@@ -669,5 +732,43 @@ pub const Compiler = struct {
                 try self.endScope();
             },
         }
+    }
+
+    fn resolveExpression(self: *Compiler, expr: *const ast.Expression) !TypeInfo {
+        if (self.expression_types.get(expr)) |t| return t;
+
+        const t: TypeInfo = switch (expr.data) {
+            .Identifier => blk: {
+                if (self.resolveLocal(&expr.token)) |index| {
+                    break :blk self.locals.items[index].type_info;
+                }
+                if (try self.resolveUpvalue(&expr.token)) |index| {
+                    break :blk self.locals.items[self.upvalues.items[index].index].type_info;
+                }
+                if (self.globals.get(expr.token.data)) |var_info| {
+                    break :blk var_info.type_info;
+                }
+                return self.errorAt(&expr.token, "identifier not found");
+            },
+            .String => .String,
+            .Integer => .Int,
+            .Float => .Float,
+            .Boolean => .Bool,
+            .Infix => .Unknown,
+            .Prefix => .Unknown,
+            .Function => .Unknown,
+            .Call => .Unknown,
+            .Range => .Unknown,
+            .List => .List,
+            .Table => .Table,
+            .Index => .Unknown,
+            .Match => .Unknown,
+            .Null => .Null,
+            .Block => .Unknown,
+        };
+
+        try self.expression_types.put(self.arena, expr, t);
+
+        return t;
     }
 };

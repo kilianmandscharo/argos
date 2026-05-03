@@ -74,7 +74,7 @@ pub fn allocateFunction(vm: *virtual_machine.VirtualMachine) !*ObjFunction {
     const function = try allocateObject(vm, ObjFunction);
     function.arity = 0;
     function.name = null;
-    function.chunk = chunk.Chunk.init();
+    function.chunk = .init();
     function.upvalue_count = 0;
     return function;
 }

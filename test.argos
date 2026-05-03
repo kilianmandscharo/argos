@@ -1,2 +1,14 @@
-let a = 5 + a
-print(a)
+let fib = fn(n) {
+    let a = 0
+    let b = 1
+
+    for (0..n) |_| {
+        let tmp = a + b
+        a = b
+        b = tmp
+    }
+
+    a
+}
+
+print(fib(50))

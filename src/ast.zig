@@ -12,7 +12,7 @@ pub const Statement = union(enum) {
     Expression: *const Expression,
 };
 
-const VarDeclaration = struct {
+pub const VarDeclaration = struct {
     name: scanner.Token,
     expression: *const Expression,
 };

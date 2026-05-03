@@ -5,37 +5,6 @@ const constants = @import("constants.zig");
 const parser = @import("parser.zig");
 const ast = @import("ast.zig");
 
-fn repl(allocator: std.mem.Allocator) !void {
-    _ = allocator;
-    // var stdin_buf: [1024]u8 = undefined;
-    // var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
-    // const stdin = &stdin_reader.interface;
-    //
-    // var stdout_buf: [1024]u8 = undefined;
-    // var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
-    // const stdout = &stdout_writer.interface;
-    //
-    // while (true) {
-    //     try stdout.writeAll(">> ");
-    //     try stdout.flush();
-    //
-    //     const source = try stdin.takeDelimiterExclusive('\n');
-    //     stdin.toss(1);
-    //
-    //     var virtual_machine = try vm.VirtualMachine.init(allocator);
-    //     defer virtual_machine.deinit();
-    //
-    //     _ = virtual_machine.interpret("repl", source) catch |err| {
-    //         if (constants.stack_trace_on_error) {
-    //             return err;
-    //         }
-    //     };
-    //
-    //     try stdout.writeAll("\n");
-    //     try stdout.flush();
-    // }
-}
-
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;

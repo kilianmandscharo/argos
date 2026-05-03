@@ -172,21 +172,22 @@ pub const VirtualMachine = struct {
 
         const ast = try parser.createAst(self.arena, &self.script_context);
 
-        var c: compiler.Compiler = undefined;
-        try compiler.Compiler.init(&c, self, self.gpa, self.arena, .Script, null, 0, null);
         if (comptime constants.debug_trace_execution) {
             logDebug("Pre-compilation finished.", .{});
         }
 
-        self.current_compiler = &c;
+        var c = try compiler.Compiler.init(self, self.gpa, self.arena);
 
         if (comptime constants.debug_trace_execution) {
             logDebug("Compiling...", .{});
         }
+
         const function = try c.compile(ast);
+
         if (comptime constants.debug_trace_execution) {
             logDebug("Compilation finished.", .{});
         }
+
         return function;
     }
 
@@ -392,6 +393,11 @@ pub const VirtualMachine = struct {
                         const a = self.peek(0);
                         self.swapInPlace(try self.add(a, b), 0);
                     }
+                },
+                .AddInt => {
+                    const b = self.pop();
+                    const a = self.peek(0);
+                    self.swapInPlace(value.wrapInt(a.Int + b.Int), 0);
                 },
                 .Subtract => {
                     const b = self.pop();

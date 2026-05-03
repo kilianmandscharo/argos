@@ -13,6 +13,7 @@ pub const OpCode = enum(u8) {
     Constant,
     Negate,
     Add,
+    AddInt,
     Subtract,
     Multiply,
     Divide,
@@ -121,6 +122,7 @@ pub const Chunk = struct {
         switch (@as(OpCode, @enumFromInt(self.code.items[offset]))) {
             .Return => return simpleInstruction("OP_RETURN", offset),
             .Add => return simpleInstruction("OP_ADD", offset),
+            .AddInt => return simpleInstruction("OP_ADD_INT", offset),
             .Subtract => return simpleInstruction("OP_SUBTRACT", offset),
             .Multiply => return simpleInstruction("OP_MULTIPLY", offset),
             .Divide => return simpleInstruction("OP_DIVIDE", offset),
