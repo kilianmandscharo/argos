@@ -716,6 +716,16 @@ test "vm tests" {
             \\assert(16 >> 1 >> 1 == 4)
             ,
         },
+        .{
+            .description = "addition after assignment",
+            .source =
+            \\let a = 5
+            \\let b = 5
+            \\a = "foo"
+            \\b = "bar"
+            \\assert(a + b == "foobar")
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate vm tests", &test_cases, run);

@@ -84,10 +84,8 @@ pub const Parser = struct {
     }
 
     fn whileStatement(self: *Parser) !ast.Statement {
-        if (comptime constants.debug_parser) {
-            self.log("while statement", .{});
-            defer self.log("end while statement", .{});
-        }
+        if (comptime constants.debug_parser) self.log("while statement", .{});
+        defer if (comptime constants.debug_parser) self.log("while statement", .{});
 
         try self.consume(.LParen, "expect '(' after 'while'");
         const expression = try self.parseExpression();
@@ -102,10 +100,8 @@ pub const Parser = struct {
     }
 
     fn forStatement(self: *Parser) !ast.Statement {
-        if (comptime constants.debug_parser) {
-            self.log("for statement", .{});
-            defer self.log("end for statement", .{});
-        }
+        if (comptime constants.debug_parser) self.log("for statement", .{});
+        defer if (comptime constants.debug_parser) self.log("for statement", .{});
 
         try self.consume(.LParen, "expect '(' after 'for'");
         const expression = try self.parseExpression();
@@ -150,10 +146,8 @@ pub const Parser = struct {
     }
 
     fn returnStatement(self: *Parser) !ast.Statement {
-        if (comptime constants.debug_parser) {
-            self.log("return statement", .{});
-            defer self.log("end return statement", .{});
-        }
+        if (comptime constants.debug_parser) self.log("return statement", .{});
+        defer if (comptime constants.debug_parser) self.log("return statement", .{});
 
         if (self.isLineEnd()) {
             const expression = try self.arena.create(ast.Expression);
@@ -162,16 +156,13 @@ pub const Parser = struct {
             return .{ .Return = expression };
         } else {
             const expression = try self.parseExpression();
-            try self.expectLineEnd();
             return .{ .Return = expression };
         }
     }
 
     fn varDeclaration(self: *Parser) !ast.Statement {
-        if (comptime constants.debug_parser) {
-            self.log("var declaration", .{});
-            defer self.log("end var declaration", .{});
-        }
+        if (comptime constants.debug_parser) self.log("var declaration", .{});
+        defer if (comptime constants.debug_parser) self.log("end var declaration", .{});
 
         const target = try self.parseExpression();
         if (target.data != .Identifier) {
@@ -191,7 +182,6 @@ pub const Parser = struct {
             };
         }
 
-        try self.expectLineEnd();
         const nullExpression = try self.arena.create(ast.Expression);
         nullExpression.data = .Null;
         return .{
@@ -215,7 +205,6 @@ pub const Parser = struct {
         if (try self.match(.CaretAssign)) return try self.parseAssignment(expression, .Caret);
         if (try self.match(.LeftShiftAssign)) return try self.parseAssignment(expression, .LeftShift);
         if (try self.match(.RightShiftAssign)) return try self.parseAssignment(expression, .RightShift);
-        try self.matchLineEnd();
         return .{ .Expression = expression };
     }
 
@@ -246,7 +235,6 @@ pub const Parser = struct {
             value = try self.parseExpression();
         }
 
-        try self.matchLineEnd();
         return .{ .Assignment = .{ .target = target, .expression = value } };
     }
 
@@ -277,7 +265,11 @@ pub const Parser = struct {
             while (@intFromEnum(precedence) < getRulePrecedenceValue(self, self.current.type)) {
                 try self.advance();
                 if (self.current.type == .Eof) break;
-                if (getRule(self.getPrevious().type).infix) |infixFn| {
+                const t = self.getPrevious().type;
+                if (getRule(t).infix) |infixFn| {
+                    if (comptime constants.debug_parser) {
+                        self.log("infix on {s}", .{@tagName(t)});
+                    }
                     left = try infixFn(self, left);
                 }
             }
@@ -302,6 +294,25 @@ pub const Parser = struct {
 
             try items.append(self.arena, try parseFn(self));
             if (!try self.match(.Comma)) expectComma = true;
+        }
+
+        return items;
+    }
+
+    fn parseNewlineSeparated(self: *Parser, T: type, parseFn: *const fn (p: *Parser) anyerror!T, delimiter: scanner.TokenType) !std.ArrayList(T) {
+        var items: std.ArrayList(T) = .empty;
+        var expectNewline = false;
+
+        while (!try self.match(delimiter)) {
+            try self.chopNewlines();
+
+            if (try self.match(.Eof)) return self.errorAtCurrent("Reached EOF.");
+            if (try self.match(delimiter)) break;
+
+            if (expectNewline) return self.errorAtPrevious("expected newline");
+
+            try items.append(self.arena, try parseFn(self));
+            if (!try self.match(.NewLine)) expectNewline = true;
         }
 
         return items;
@@ -345,14 +356,6 @@ pub const Parser = struct {
         if (self.isLineEnd()) {
             try self.advance();
         }
-    }
-
-    fn expectLineEnd(self: *Parser) !void {
-        if (self.isLineEnd()) {
-            try self.advance();
-            return;
-        }
-        return self.errorAtCurrent("expected line end");
     }
 
     fn errorAtCurrent(self: *Parser, message: []const u8) anyerror {
@@ -566,7 +569,6 @@ fn parseMatch(self: *Parser) !ast.Expression {
     }
 
     try self.consume(.RBrace, "expect '}' at the end of match block");
-    try self.expectLineEnd();
 
     return .init(
         .{
@@ -577,13 +579,16 @@ fn parseMatch(self: *Parser) !ast.Expression {
 }
 
 fn parseBlock(self: *Parser) !ast.Expression {
-    try self.chopNewlines();
-    var statements: std.ArrayList(ast.Statement) = .empty;
-    while (!self.check(.RBrace) and !self.check(.Eof)) {
-        try statements.append(self.arena, try self.parseStatement());
-    }
-    try self.consume(.RBrace, "expect '}' after block");
-    try self.expectLineEnd();
+    const statements = try self.parseNewlineSeparated(
+        ast.Statement,
+        struct {
+            fn parse(p: *Parser) !ast.Statement {
+                return try p.parseStatement();
+            }
+        }.parse,
+        .RBrace,
+    );
+
     // TODO: pass token
     return .init(.{ .Block = statements }, scanner.Token.dummy());
 }
@@ -765,5 +770,5 @@ fn getRulePrecedence(parser: *Parser, token_type: scanner.TokenType) Precedence 
     if (getRule(token_type).precedence) |precedence| {
         return precedence;
     }
-    return Precedence.Lowest;
+    return .Lowest;
 }

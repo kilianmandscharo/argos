@@ -386,7 +386,6 @@ pub const Compiler = struct {
                 if (self.scope_depth == 0) {
                     try self.declareGlobalVar(val);
                 } else {
-                    std.debug.print("resolve {s}\n", .{val.name.data});
                     const type_info = try self.resolveExpression(val.expression);
                     try self.declareLocalVar(&val.name, type_info);
                 }
@@ -394,18 +393,24 @@ pub const Compiler = struct {
             .Assignment => |val| {
                 switch (val.target) {
                     .Identifier => |name| {
+                        const type_info = try self.resolveExpression(val.expression);
                         try self.compileExpression(val.expression);
-                        if (self.resolveLocal(&name)) |local| {
-                            try self.emitOpU8(.SetLocal, local);
-                        } else if (try self.resolveUpvalue(&name)) |upvalue| {
+
+                        if (self.resolveLocal(&name)) |index| {
+                            updateVarInfo(self.getLocal(index), type_info);
+                            try self.emitOpU8(.SetLocal, index);
+                        } else if (try self.resolveUpvalue(&name)) |index| {
+                            updateVarInfo(self.getUpvalue(index), type_info);
                             try self.emitOp(.SetUpvalue);
-                            try self.emitByte(upvalue);
+                            try self.emitByte(index);
                         } else {
-                            if (self.globals.get(name.data) == null) {
+                            if (self.globals.getPtr(name.data)) |var_info| {
+                                updateVarInfo(var_info, type_info);
+                                const constant = try self.identifierConstant(name.data);
+                                try self.emitOpU16(.SetGlobal, constant);
+                            } else {
                                 return self.errorAt(&name, "undefined variable");
                             }
-                            const constant = try self.identifierConstant(name.data);
-                            try self.emitOpU16(.SetGlobal, constant);
                         }
                     },
                     .Index => |index| {
@@ -736,16 +741,29 @@ pub const Compiler = struct {
         }
     }
 
+    fn updateVarInfo(var_info: *VariableInfo, new_type: TypeInfo) void {
+        if (var_info.type_info == new_type) return;
+        var_info.type_info = .Unknown;
+    }
+
+    fn getLocal(self: *Compiler, index: u8) *VariableInfo {
+        return &self.locals.items[index];
+    }
+
+    fn getUpvalue(self: *Compiler, index: u8) *VariableInfo {
+        return &self.locals.items[self.upvalues.items[index].index];
+    }
+
     fn resolveExpression(self: *Compiler, expr: *const ast.Expression) !TypeInfo {
         if (self.expression_types.get(expr)) |t| return t;
 
         const t: TypeInfo = switch (expr.data) {
             .Identifier => blk: {
                 if (self.resolveLocal(&expr.token)) |index| {
-                    break :blk self.locals.items[index].type_info;
+                    break :blk self.getLocal(index).type_info;
                 }
                 if (try self.resolveUpvalue(&expr.token)) |index| {
-                    break :blk self.locals.items[self.upvalues.items[index].index].type_info;
+                    break :blk self.getUpvalue(index).type_info;
                 }
                 if (self.globals.get(expr.token.data)) |var_info| {
                     break :blk var_info.type_info;
