@@ -420,6 +420,7 @@ pub const Compiler = struct {
                         try self.emitOp(.IndexSet);
                         try self.emitOp(.Pop);
                     },
+                    .Field => unreachable,
                 }
             },
             .For => |*val| {
@@ -738,6 +739,9 @@ pub const Compiler = struct {
                 }
                 try self.endScope();
             },
+            .Struct => {},
+            .Field => {},
+            .Instance => {},
         }
     }
 
@@ -785,6 +789,9 @@ pub const Compiler = struct {
             .Match => .Unknown,
             .Null => .Null,
             .Block => .Unknown,
+            .Field => .Unknown,
+            .Struct => .Unknown,
+            .Instance => .Unknown,
         };
 
         try self.expression_types.put(self.arena, expr, t);

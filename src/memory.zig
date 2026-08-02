@@ -105,6 +105,21 @@ fn blackenObj(vm: *virtual_machine.VirtualMachine, obj: *object.Obj) !void {
             const table = obj.asTable();
             try markTable(vm, table.data);
         },
+        .Struct => {
+            const strukt = obj.asStruct();
+            if (strukt.name) |name| {
+                try markObject(vm, &name.obj);
+            }
+            for (strukt.fields.items) |field| {
+                try markObject(vm, &field.name.obj);
+                try markValue(vm, field.value);
+            }
+        },
+        .Instance => {
+            const instance = obj.asInstance();
+            try markObject(vm, &instance.strukt.obj);
+            try markArray(vm, instance.data.items);
+        },
         .String, .NativeFn => {},
     }
 }

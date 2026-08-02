@@ -212,6 +212,7 @@ pub const Parser = struct {
         const target: ast.AssignTarget = switch (expression.data) {
             .Identifier => .{ .Identifier = expression.token },
             .Index => |index| .{ .Index = index },
+            .Field => |field| .{ .Field = field },
             else => return self.errorAtPrevious("Invalid assign target."),
         };
 
@@ -386,6 +387,7 @@ const Precedence = enum(u8) {
     Sum,
     Product,
     Prefix,
+    Instance,
     Call,
     Index,
 };
@@ -469,12 +471,41 @@ fn parseTable(parser: *Parser) !ast.Expression {
                 const key = try p.parseExpression();
                 try p.consume(.Assign, "expect '=' after table key");
                 const value = try p.parseExpression();
-                return ast.TablePair{ .key = key, .value = value };
+                return .{ .key = key, .value = value };
             }
         }.parse,
         .RBrace,
     );
     return .init(.{ .Table = items }, token);
+}
+
+fn parseStruct(parser: *Parser) !ast.Expression {
+    const token = parser.getPrevious();
+
+    try parser.consume(.LBrace, "expect '{' after 'struct'");
+
+    const declarations = try parser.parseNewlineSeparated(
+        ast.VarDeclaration,
+        struct {
+            fn parse(p: *Parser) !ast.VarDeclaration {
+                const statement = try p.parseStatement();
+                if (statement != .VarDeclaration) {
+                    return p.errorAt(p.getPrevious(), "expect var declaration in struct body");
+                }
+                return statement.VarDeclaration;
+            }
+        }.parse,
+        .RBrace,
+    );
+
+    _ = try parser.match(.NewLine);
+
+    return .init(.{
+        .Struct = .{
+            .name = parser.ctx.current_var_name,
+            .fields = declarations,
+        },
+    }, token);
 }
 
 fn parseFunction(parser: *Parser) !ast.Expression {
@@ -622,6 +653,36 @@ fn parseDotDot(parser: *Parser, left: ast.Expression) !ast.Expression {
     );
 }
 
+fn parseInstance(parser: *Parser, left: ast.Expression) !ast.Expression {
+    const fields = try parser.parseCommaSeparated(
+        ast.InstanceField,
+        struct {
+            fn parse(p: *Parser) !ast.InstanceField {
+                const key = try p.parseExpression();
+                if (key.data != .Identifier) {
+                    return p.errorAt(p.getPrevious(), "expect identifier in instance field");
+                }
+                try p.consume(.Assign, "expect '=' after instance key");
+                const value = try p.parseExpression();
+                return .{ .key = key.token, .value = value };
+            }
+        }.parse,
+        .RBrace,
+    );
+
+    _ = try parser.match(.NewLine);
+
+    const left_owned = try parser.arena.create(ast.Expression);
+    left_owned.* = left;
+
+    return .init(.{
+        .Instance = .{
+            .strukt = left_owned,
+            .fields = fields,
+        },
+    }, left.token);
+}
+
 fn parseCall(parser: *Parser, left: ast.Expression) !ast.Expression {
     const args = try parser.parseCommaSeparated(
         ast.FunctionArg,
@@ -676,6 +737,27 @@ fn parseIndex(parser: *Parser, left: ast.Expression) !ast.Expression {
     );
 }
 
+fn parseDot(parser: *Parser, left: ast.Expression) !ast.Expression {
+    const expression = try parser.parsePrecedence(.Index);
+
+    if (expression.data != .Identifier) {
+        return parser.errorAt(expression.token, "expect identifier in field access");
+    }
+
+    const left_owned = try parser.arena.create(ast.Expression);
+    left_owned.* = left;
+
+    return .init(
+        .{
+            .Field = .{
+                .left = left_owned,
+                .field = expression.token,
+            },
+        },
+        left.token,
+    );
+}
+
 const ParseRule = struct {
     prefix: ?*const fn (parser: *Parser) anyerror!ast.Expression,
     infix: ?*const fn (parser: *Parser, left: ast.Expression) anyerror!ast.Expression,
@@ -697,7 +779,7 @@ fn initRules() [token_count]ParseRule {
             .RParen => .{ .prefix = null, .infix = null, .precedence = null },
             .LBracket => .{ .prefix = null, .infix = parseIndex, .precedence = .Index },
             .RBracket => .{ .prefix = null, .infix = null, .precedence = null },
-            .LBrace => .{ .prefix = parseBlock, .infix = null, .precedence = null },
+            .LBrace => .{ .prefix = parseBlock, .infix = parseInstance, .precedence = .Instance },
             .RBrace => .{ .prefix = null, .infix = null, .precedence = null },
             .Assign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Comma => .{ .prefix = null, .infix = null, .precedence = null },
@@ -727,7 +809,7 @@ fn initRules() [token_count]ParseRule {
             .PercentAssign => .{ .prefix = null, .infix = null, .precedence = .Lowest },
             .Return => .{ .prefix = null, .infix = null, .precedence = null },
             .For => .{ .prefix = null, .infix = null, .precedence = null },
-            .Dot => .{ .prefix = null, .infix = null, .precedence = .Index },
+            .Dot => .{ .prefix = null, .infix = parseDot, .precedence = .Index },
             .DotDot => .{ .prefix = null, .infix = parseDotDot, .precedence = .Range },
             .Arrow => .{ .prefix = null, .infix = null, .precedence = null },
             .NewLine => .{ .prefix = null, .infix = null, .precedence = null },
@@ -751,6 +833,7 @@ fn initRules() [token_count]ParseRule {
             .Fn => .{ .prefix = parseFunction, .infix = null, .precedence = null },
             .List => .{ .prefix = parseList, .infix = null, .precedence = null },
             .Table => .{ .prefix = parseTable, .infix = null, .precedence = null },
+            .Struct => .{ .prefix = parseStruct, .infix = null, .precedence = null },
         };
     }
 

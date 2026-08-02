@@ -25,6 +25,7 @@ const Assignment = struct {
 pub const AssignTarget = union(enum) {
     Identifier: scanner.Token,
     Index: Index,
+    Field: Field,
 };
 
 const For = struct {
@@ -67,6 +68,9 @@ pub const ExpressionData = union(enum) {
     Index: Index,
     Match: Match,
     Block: Block,
+    Struct: Struct,
+    Instance: Instance,
+    Field: Field,
     Null,
 };
 
@@ -129,6 +133,11 @@ pub const Index = struct {
     index: *const Expression,
 };
 
+pub const Field = struct {
+    left: *const Expression,
+    field: scanner.Token,
+};
+
 const Match = struct {
     target: ?*const Expression,
     body: MatchBody,
@@ -142,6 +151,21 @@ const MatchBody = union(enum) {
 pub const MatchArm = struct {
     pattern: *const Expression,
     body: *const Expression,
+};
+
+const Struct = struct {
+    name: ?[]const u8 = null,
+    fields: std.ArrayList(VarDeclaration),
+};
+
+const Instance = struct {
+    strukt: *const Expression,
+    fields: std.ArrayList(InstanceField),
+};
+
+pub const InstanceField = struct {
+    key: scanner.Token,
+    value: *const Expression,
 };
 
 pub fn printProgram(program: Program, writer: *std.Io.Writer) !void {
@@ -432,6 +456,48 @@ fn printExpression(expr: ExpressionData, writer: *std.Io.Writer, level: usize) !
             try writer.print("Block\n", .{});
             for (stmts.items) |s| {
                 try printStatement(s, writer, level + 1);
+            }
+        },
+        .Field => |e| {
+            try printIndent(writer, level);
+            try writer.print("Field\n", .{});
+            try printIndent(writer, level + 1);
+            try writer.print("left:\n", .{});
+            try printExpression(e.left.data, writer, level + 2);
+            try printIndent(writer, level + 1);
+            try writer.print("field:\n", .{});
+            try printIndent(writer, level + 2);
+            try writer.print("{s}\n", .{e.field.data});
+        },
+        .Struct => |e| {
+            try printIndent(writer, level);
+            try writer.print("Struct\n", .{});
+            if (e.name) |name| {
+                try printIndent(writer, level + 1);
+                try writer.print("name:\n", .{});
+                try printIndent(writer, level + 2);
+                try writer.print("{s}\n", .{name});
+            }
+            for (e.fields.items) |field| {
+                try printStatement(.{ .VarDeclaration = field }, writer, level + 2);
+            }
+        },
+        .Instance => |e| {
+            try printIndent(writer, level);
+            try writer.print("Instance\n", .{});
+            try printIndent(writer, level + 1);
+            try writer.print("struct:\n", .{});
+            try printExpression(e.strukt.data, writer, level + 2);
+            for (e.fields.items) |field| {
+                try printIndent(writer, level + 1);
+                try writer.print("Field\n", .{});
+                try printIndent(writer, level + 2);
+                try writer.print("key:\n", .{});
+                try printIndent(writer, level + 3);
+                try writer.print("{s}\n", .{field.key.data});
+                try printIndent(writer, level + 2);
+                try writer.print("value:\n", .{});
+                try printExpression(field.value.data, writer, level + 3);
             }
         },
     }

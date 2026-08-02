@@ -111,6 +111,8 @@ pub const ObjType = enum {
     Upvalue,
     List,
     Table,
+    Struct,
+    Instance,
 };
 
 pub const Obj = struct {
@@ -183,7 +185,19 @@ pub const Obj = struct {
                 const table_obj = self.asTable();
                 table_obj.data.deinit(gpa);
                 gpa.destroy(table_obj);
-                vm.bytes_allocated -= @sizeOf(ObjList);
+                vm.bytes_allocated -= @sizeOf(ObjTable);
+            },
+            .Struct => {
+                const struct_obj = self.asStruct();
+                struct_obj.data.deinit(gpa);
+                gpa.destroy(struct_obj);
+                vm.bytes_allocated -= @sizeOf(ObjStruct);
+            },
+            .Instance => {
+                const instance_obj = self.asInstance();
+                instance_obj.data.deinit(gpa);
+                gpa.destroy(instance_obj);
+                vm.bytes_allocated -= @sizeOf(ObjInstance);
             },
         }
     }
@@ -213,6 +227,14 @@ pub const Obj = struct {
     }
 
     pub inline fn asTable(self: *@This()) *ObjTable {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    pub inline fn asStruct(self: *@This()) *ObjStruct {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    pub inline fn asInstance(self: *@This()) *ObjInstance {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 };
@@ -337,5 +359,48 @@ pub const ObjTable = struct {
     ) std.Io.Writer.Error!void {
         _ = self;
         try writer.print("<Table>", .{});
+    }
+};
+
+const Field = struct {
+    name: *const ObjString,
+    value: value.Value,
+};
+
+pub const ObjStruct = struct {
+    pub const KIND = ObjType.Struct;
+
+    obj: Obj = undefined,
+    fields: std.ArrayList(Field),
+    name: ?*ObjString,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        if (self.name) |name| {
+            try writer.print("<Struct {s}>", .{name});
+        } else {
+            try writer.print("<Struct>", .{});
+        }
+    }
+};
+
+pub const ObjInstance = struct {
+    pub const KIND = ObjType.Instance;
+
+    obj: Obj = undefined,
+    def: *ObjStruct,
+    data: std.ArrayList(value.Value),
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        if (self.strukt.name) |name| {
+            try writer.print("<Instance of {name}>", .{name});
+        } else {
+            try writer.print("<Instance>", .{});
+        }
     }
 };

@@ -68,6 +68,7 @@ pub const TokenType = enum {
     Fn,
     List,
     Table,
+    Struct,
 
     pub fn toString(self: @This()) []const u8 {
         return @tagName(self);
@@ -352,6 +353,7 @@ pub const Scanner = struct {
             'r' => return self.checkKeyword(1, "eturn", .Return),
             't' => return self.checkKeyword(1, "rue", .True),
             'T' => return self.checkKeyword(1, "able", .Table),
+            's' => return self.checkKeyword(1, "truct", .Struct),
             'f' => {
                 if (self.current - self.start > 1) {
                     switch (self.script_context.source[self.start + 1]) {

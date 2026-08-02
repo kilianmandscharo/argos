@@ -26,11 +26,18 @@ fn expectStatement(expected: ast.Statement, actual: ast.Statement) anyerror!void
         },
         .Assignment => |stmt| {
             try expectTag(stmt.target, actual.Assignment.target);
-            if (stmt.target == .Identifier) {
-                try std.testing.expectEqualStrings(stmt.target.Identifier.data, actual.Assignment.target.Identifier.data);
-            } else {
-                try expectExpression(stmt.target.Index.left.*, actual.Assignment.target.Index.left.*);
-                try expectExpression(stmt.target.Index.index.*, actual.Assignment.target.Index.index.*);
+            switch (stmt.target) {
+                .Identifier => {
+                    try std.testing.expectEqualStrings(stmt.target.Identifier.data, actual.Assignment.target.Identifier.data);
+                },
+                .Index => {
+                    try expectExpression(stmt.target.Index.left.*, actual.Assignment.target.Index.left.*);
+                    try expectExpression(stmt.target.Index.index.*, actual.Assignment.target.Index.index.*);
+                },
+                .Field => {
+                    try expectExpression(stmt.target.Field.left.*, actual.Assignment.target.Field.left.*);
+                    try std.testing.expectEqualStrings(stmt.target.Field.field.data, actual.Assignment.target.Field.field.data);
+                },
             }
             try expectExpression(stmt.expression.*, actual.Assignment.expression.*);
         },
@@ -141,6 +148,10 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
             try expectExpression(expr.left.*, actual.Index.left.*);
             try expectExpression(expr.index.*, actual.Index.index.*);
         },
+        .Field => |expr| {
+            try expectExpression(expr.left.*, actual.Field.left.*);
+            try std.testing.expectEqualStrings(expr.field.data, actual.Field.field.data);
+        },
         .Match => |expr| {
             if (expr.target) |target| {
                 try expectExpression(target.*, actual.Match.target.?.*);
@@ -165,6 +176,28 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
             try std.testing.expectEqual(stmt.items.len, actual.Block.items.len);
             for (0..stmt.items.len) |i| {
                 try expectStatement(stmt.items[i], actual.Block.items[i]);
+            }
+        },
+        .Struct => |struc| {
+            if (struc.name) |name| {
+                try std.testing.expectEqualStrings(name, actual.Struct.name.?);
+            } else {
+                try std.testing.expect(actual.Struct.name == null);
+            }
+            try std.testing.expectEqual(struc.fields.items.len, actual.Struct.fields.items.len);
+            for (0..struc.fields.items.len) |i| {
+                try expectStatement(
+                    .{ .VarDeclaration = struc.fields.items[i] },
+                    .{ .VarDeclaration = actual.Struct.fields.items[i] },
+                );
+            }
+        },
+        .Instance => |expr| {
+            try expectExpression(expr.strukt.*, actual.Instance.strukt.*);
+            try std.testing.expectEqual(expr.fields.items.len, actual.Instance.fields.items.len);
+            for (expr.fields.items, 0..) |item, i| {
+                try std.testing.expectEqualStrings(item.key.data, actual.Instance.fields.items[i].key.data);
+                try expectExpression(item.value.*, actual.Instance.fields.items[i].value.*);
             }
         },
     }
@@ -223,6 +256,41 @@ test "statements" {
                 .VarDeclaration = .{
                     .name = s("foo"),
                     .expression = &e(.Null),
+                },
+            },
+        },
+        .{
+            .description = "var declaration function",
+            .input =
+            \\let foo = fn() null
+            ,
+            .expected_statement = .{
+                .VarDeclaration = .{
+                    .name = s("foo"),
+                    .expression = &e(.{
+                        .Function = .{
+                            .params = .empty,
+                            .body = &e(.{ .Null = {} }),
+                            .name = "foo",
+                        },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "var declaration struct",
+            .input =
+            \\let foo = struct {}
+            ,
+            .expected_statement = .{
+                .VarDeclaration = .{
+                    .name = s("foo"),
+                    .expression = &e(.{
+                        .Struct = .{
+                            .name = "foo",
+                            .fields = .empty,
+                        },
+                    }),
                 },
             },
         },
@@ -409,6 +477,23 @@ test "statements" {
                         .Index = .{
                             .left = &e(.{ .Identifier = "foo" }),
                             .index = &e(.{ .Integer = 0 }),
+                        },
+                    },
+                    .expression = &e(.{ .Integer = 5 }),
+                },
+            },
+        },
+        .{
+            .description = "assignment to field",
+            .input =
+            \\foo.bar = 5
+            ,
+            .expected_statement = .{
+                .Assignment = .{
+                    .target = .{
+                        .Field = .{
+                            .left = &e(.{ .Identifier = "foo" }),
+                            .field = s("bar"),
                         },
                     },
                     .expression = &e(.{ .Integer = 5 }),
@@ -1746,6 +1831,37 @@ test "index expression" {
     );
 }
 
+test "field expression" {
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "field",
+            .input =
+            \\a.foo
+            ,
+            .expected_expression = .{
+                .Field = .{
+                    .left = &e(.{ .Identifier = "a" }),
+                    .field = s("foo"),
+                },
+            },
+        },
+        .{
+            .description = "invalid field",
+            .input =
+            \\a.5
+            ,
+            .expect_error = true,
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse field expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
 test "match expression" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -1907,6 +2023,226 @@ test "block expression" {
     try test_utils.runTestsWithArena(
         ExpressionTestCase,
         "parse block expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "struct expression" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "empty",
+            .input =
+            \\struct {}
+            ,
+            .expected_expression = .{
+                .Struct = .{
+                    .name = null,
+                    .fields = .empty,
+                },
+            },
+        },
+        .{
+            .description = "empty multi lines",
+            .input =
+            \\struct {
+            \\
+            \\}
+            ,
+            .expected_expression = .{
+                .Struct = .{
+                    .name = null,
+                    .fields = .empty,
+                },
+            },
+        },
+        .{
+            .description = "with fields",
+            .input =
+            \\struct {
+            \\    let a
+            \\    let b
+            \\    let sum = fn (self) self.a + self.b
+            \\}
+            ,
+            .expected_expression = .{
+                .Struct = .{
+                    .name = null,
+                    .fields = try test_utils.list(ast.VarDeclaration, a, &.{
+                        .{
+                            .name = s("a"),
+                            .expression = &e(.{ .Null = {} }),
+                        },
+                        .{
+                            .name = s("b"),
+                            .expression = &e(.{ .Null = {} }),
+                        },
+                        .{
+                            .name = s("sum"),
+                            .expression = &e(.{
+                                .Function = .{
+                                    .name = "sum",
+                                    .params = try test_utils.list(ast.FunctionParam, a, &.{
+                                        .{ .Positional = s("self") },
+                                    }),
+                                    .body = &e(.{ .Infix = .{
+                                        .left = &e(.{ .Field = .{
+                                            .left = &e(.{ .Identifier = "self" }),
+                                            .field = s("a"),
+                                        } }),
+                                        .right = &e(.{ .Field = .{
+                                            .left = &e(.{ .Identifier = "self" }),
+                                            .field = s("b"),
+                                        } }),
+                                        .operator = .Plus,
+                                    } }),
+                                },
+                            }),
+                        },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "with fields single line",
+            .input =
+            \\struct { let a }
+            ,
+            .expected_expression = .{
+                .Struct = .{
+                    .name = null,
+                    .fields = try test_utils.list(ast.VarDeclaration, a, &.{
+                        .{
+                            .name = s("a"),
+                            .expression = &e(.{ .Null = {} }),
+                        },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "with fields invalid",
+            .input =
+            \\struct { let a let b }
+            ,
+            .expect_error = true,
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse struct expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "instance expression" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "empty",
+            .input =
+            \\foo {}
+            ,
+            .expected_expression = .{
+                .Instance = .{
+                    .strukt = &e(.{ .Identifier = "foo" }),
+                    .fields = .empty,
+                },
+            },
+        },
+        .{
+            .description = "with struct literal",
+            .input =
+            \\struct{} {}
+            ,
+            .expected_expression = .{
+                .Instance = .{
+                    .strukt = &e(.{
+                        .Struct = .{
+                            .name = null,
+                            .fields = .empty,
+                        },
+                    }),
+                    .fields = .empty,
+                },
+            },
+        },
+        .{
+            .description = "empty multi lines",
+            .input =
+            \\foo {
+            \\
+            \\}
+            ,
+            .expected_expression = .{
+                .Instance = .{
+                    .strukt = &e(.{ .Identifier = "foo" }),
+                    .fields = .empty,
+                },
+            },
+        },
+        .{
+            .description = "with fields",
+            .input =
+            \\foo {
+            \\    a = 1,
+            \\    b = 2,
+            \\}
+            ,
+            .expected_expression = .{
+                .Instance = .{
+                    .strukt = &e(.{ .Identifier = "foo" }),
+                    .fields = try test_utils.list(ast.InstanceField, a, &.{
+                        .{
+                            .key = s("a"),
+                            .value = &e(.{ .Integer = 1 }),
+                        },
+                        .{
+                            .key = s("b"),
+                            .value = &e(.{ .Integer = 2 }),
+                        },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "with fields single line",
+            .input =
+            \\foo { a = 1 }
+            ,
+            .expected_expression = .{
+                .Instance = .{
+                    .strukt = &e(.{ .Identifier = "foo" }),
+                    .fields = try test_utils.list(ast.InstanceField, a, &.{
+                        .{
+                            .key = s("a"),
+                            .value = &e(.{ .Integer = 1 }),
+                        },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "with fields invalid",
+            .input =
+            \\foo { a = 1 b = 2 }
+            ,
+            .expect_error = true,
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse instance expression",
         &test_cases,
         runExpressionTest,
     );
