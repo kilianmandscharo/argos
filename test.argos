@@ -1,14 +1,14 @@
-let fib = fn(n) {
-    let a = 0
-    let b = 1
+if <expr> then <expr> elif <expr> then <expr> else <expr>
 
-    for (0..n) |_| {
-        let tmp = a + b
-        a = b
-        b = tmp
-    }
+(list <expr>) -> <expr>
 
-    a
-}
+foo = (a, b) -> a + b
 
-print(fib(50))
+foo = (a, b) -> 
+    a + b
+
+foo = (a, b) -> (
+    c = a + b
+    a + b + c
+)
+

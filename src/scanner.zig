@@ -38,11 +38,6 @@ pub const TokenType = enum {
     AsteriskAssign,
     Percent,
     PercentAssign,
-
-    Return,
-    For,
-    Dot,
-    DotDot,
     Arrow,
 
     NewLine,
@@ -52,22 +47,16 @@ pub const TokenType = enum {
     Or,
 
     Pipe,
-    PipeAssign,
     Ampersand,
-    AmpersandAssign,
     Caret,
-    CaretAssign,
     Tilde,
     LeftShift,
-    LeftShiftAssign,
     RightShift,
-    RightShiftAssign,
-    Let,
     Match,
-    While,
-    Fn,
-    List,
-    Table,
+    If,
+    Elif,
+    Else,
+    Then,
 
     pub fn toString(self: @This()) []const u8 {
         return @tagName(self);
@@ -258,18 +247,17 @@ pub const Scanner = struct {
             '[' => return self.makeToken(.LBracket),
             ']' => return self.makeToken(.RBracket),
             ',' => return self.makeToken(.Comma),
-            '+' => return if (self.match('=')) self.makeToken(.PlusAssign) else self.makeToken(.Plus),
+            '+' => return self.makeToken(.Plus),
             '-' => {
                 if (self.match('>')) return self.makeToken(.Arrow);
-                if (self.match('=')) return self.makeToken(.MinusAssign);
                 return self.makeToken(.Minus);
             },
-            '*' => return if (self.match('=')) self.makeToken(.AsteriskAssign) else self.makeToken(.Asterisk),
-            '/' => return if (self.match('=')) self.makeToken(.SlashAssign) else self.makeToken(.Slash),
-            '%' => return if (self.match('=')) self.makeToken(.PercentAssign) else self.makeToken(.Percent),
-            '&' => return if (self.match('=')) self.makeToken(.AmpersandAssign) else self.makeToken(.Ampersand),
-            '|' => return if (self.match('=')) self.makeToken(.PipeAssign) else self.makeToken(.Pipe),
-            '^' => return if (self.match('=')) self.makeToken(.CaretAssign) else self.makeToken(.Caret),
+            '*' => return self.makeToken(.Asterisk),
+            '/' => return self.makeToken(.Slash),
+            '%' => return self.makeToken(.Percent),
+            '&' => return self.makeToken(.Ampersand),
+            '|' => return self.makeToken(.Pipe),
+            '^' => return self.makeToken(.Caret),
             '<' => return self.scanLess(),
             '>' => return self.scanGreater(),
             '!' => return if (self.match('=')) self.makeToken(.NotEq) else self.makeToken(.Bang),
@@ -282,7 +270,6 @@ pub const Scanner = struct {
                 self.column = 0;
                 return token;
             },
-            '.' => return if (self.match('.')) self.makeToken(.DotDot) else self.makeToken(.Dot),
             '0'...'9' => return self.makeNumber(),
             '"' => return self.makeString(),
             else => {
@@ -296,19 +283,13 @@ pub const Scanner = struct {
 
     fn scanLess(self: *Scanner) !Token {
         if (self.match('=')) return self.makeToken(.LtOrEq);
-        if (self.match('<')) {
-            if (self.match('=')) return self.makeToken(.LeftShiftAssign);
-            return self.makeToken(.LeftShift);
-        }
+        if (self.match('<')) return self.makeToken(.LeftShift);
         return self.makeToken(.Lt);
     }
 
     fn scanGreater(self: *Scanner) !Token {
         if (self.match('=')) return self.makeToken(.GtOrEq);
-        if (self.match('>')) {
-            if (self.match('=')) return self.makeToken(.RightShiftAssign);
-            return self.makeToken(.RightShift);
-        }
+        if (self.match('>')) return self.makeToken(.RightShift);
         return self.makeToken(.Gt);
     }
 
@@ -343,21 +324,30 @@ pub const Scanner = struct {
     fn identifierType(self: *Scanner) TokenType {
         switch (self.script_context.source[self.start]) {
             'a' => return self.checkKeyword(1, "nd", .And),
-            'L' => return self.checkKeyword(1, "ist", .List),
-            'l' => return self.checkKeyword(1, "et", .Let),
-            'w' => return self.checkKeyword(1, "hile", .While),
             'm' => return self.checkKeyword(1, "atch", .Match),
             'o' => return self.checkKeyword(1, "r", .Or),
             'n' => return self.checkKeyword(1, "ull", .Null),
-            'r' => return self.checkKeyword(1, "eturn", .Return),
-            't' => return self.checkKeyword(1, "rue", .True),
-            'T' => return self.checkKeyword(1, "able", .Table),
-            'f' => {
+            'f' => return self.checkKeyword(1, "alse", .False),
+            'i' => return self.checkKeyword(1, "f", .If),
+            't' => if (self.current - self.start > 1) {
+                switch (self.script_context.source[self.start + 1]) {
+                    'r' => return self.checkKeyword(2, "ue", .True),
+                    'h' => return self.checkKeyword(2, "en", .Then),
+                    else => return .Identifier,
+                }
+            },
+            'e' => {
                 if (self.current - self.start > 1) {
                     switch (self.script_context.source[self.start + 1]) {
-                        'o' => return self.checkKeyword(2, "r", .For),
-                        'a' => return self.checkKeyword(2, "lse", .False),
-                        'n' => return self.checkKeyword(2, "", .Fn),
+                        'l' => {
+                            if (self.current - self.start > 2) {
+                                switch (self.script_context.source[self.start + 2]) {
+                                    's' => return self.checkKeyword(3, "e", .Else),
+                                    'i' => return self.checkKeyword(3, "f", .Elif),
+                                    else => return .Identifier,
+                                }
+                            }
+                        },
                         else => return .Identifier,
                     }
                 }
