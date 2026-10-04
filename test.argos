@@ -12,3 +12,7 @@ foo = (a, b) -> (
     a + b + c
 )
 
+result = match a with
+    | "foo" -> 1
+    | "bar" -> 2
+    | _ -> 3

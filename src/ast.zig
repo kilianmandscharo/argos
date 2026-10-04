@@ -1,7 +1,7 @@
 const std = @import("std");
 const scanner = @import("scanner.zig");
 
-pub const Program = std.ArrayList(Expression);
+pub const Program = std.ArrayList(*const Expression);
 
 pub const Expression = struct {
     token: scanner.Token,
@@ -26,19 +26,20 @@ pub const Pattern = union(enum) {
 
 pub const ExpressionData = union(enum) {
     Declaration: Declaration,
-    Block: Block,
+    Grouping: Grouping,
     Identifier: []const u8,
     String: []const u8,
     Integer: i64,
     Float: f64,
     Boolean: bool,
-    Infix: Infix,
-    Prefix: Prefix,
+    Unary: Unary,
+    Binary: Binary,
     Function: Function,
     Call: Call,
     List: std.ArrayList(*const Expression),
     Match: Match,
-    Null,
+    If: If,
+    Unit,
 };
 
 pub const Declaration = struct {
@@ -47,15 +48,15 @@ pub const Declaration = struct {
     right: *const Expression,
 };
 
-const Block = std.ArrayList(*const Expression);
+const Grouping = std.ArrayList(*const Expression);
 
-const Infix = struct {
+const Binary = struct {
     operator: scanner.TokenType,
     left: *const Expression,
     right: *const Expression,
 };
 
-const Prefix = struct {
+const Unary = struct {
     operator: scanner.TokenType,
     right: *const Expression,
 };
@@ -78,27 +79,27 @@ const FunctionParamDefault = struct {
 
 const Call = struct {
     function: *const Expression,
-    args: std.ArrayList(FunctionArg),
-};
-
-pub const FunctionArg = union(enum) {
-    Positional: *const Expression,
-    Named: FunctionArgNamed,
-};
-
-const FunctionArgNamed = struct {
-    name: scanner.Token,
-    value: *const Expression,
+    args: std.ArrayList(*const Expression),
 };
 
 const Match = struct {
     target: *const Expression,
-    body: std.ArrayList(MatchArm),
+    arms: std.ArrayList(MatchArm),
 };
 
 pub const MatchArm = struct {
-    pattern: *const Pattern,
+    pattern: *const Expression,
     expression: *const Expression,
+};
+
+pub const If = struct {
+    arms: std.ArrayList(IfArm),
+    alt: ?*const Expression,
+};
+
+pub const IfArm = struct {
+    condition: *const Expression,
+    then: *const Expression,
 };
 
 // pub fn printProgram(program: Program, writer: *std.Io.Writer) !void {

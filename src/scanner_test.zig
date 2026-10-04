@@ -134,7 +134,7 @@ test "scanner" {
 
             try assertTokenEquals(.Match, "match", try s.next());
             try assertTokenEquals(.NewLine, "<newline>", try s.next());
-            try assertTokenEquals(.Null, "null", try s.next());
+            try assertTokenEquals(.With, "with", try s.next());
             try assertTokenEquals(.NewLine, "<newline>", try s.next());
             try assertTokenEquals(.If, "if", try s.next());
             try assertTokenEquals(.NewLine, "<newline>", try s.next());
@@ -171,7 +171,7 @@ test "scanner" {
             \\1 ~ 5
             \\1 % 5
             \\match
-            \\null
+            \\with
             \\if
             \\then
             \\elif

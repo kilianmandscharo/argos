@@ -8,8 +8,6 @@ pub const TokenType = enum {
     RParen,
     LBracket,
     RBracket,
-    LBrace,
-    RBrace,
     Assign,
     Comma,
 
@@ -18,7 +16,6 @@ pub const TokenType = enum {
     Int,
     True,
     False,
-    Null,
     Identifier,
 
     Bang,
@@ -29,19 +26,11 @@ pub const TokenType = enum {
     Eq,
     NotEq,
     Plus,
-    PlusAssign,
     Minus,
-    MinusAssign,
     Slash,
-    SlashAssign,
     Asterisk,
-    AsteriskAssign,
     Percent,
-    PercentAssign,
     Arrow,
-
-    NewLine,
-    Eof,
 
     And,
     Or,
@@ -53,10 +42,14 @@ pub const TokenType = enum {
     LeftShift,
     RightShift,
     Match,
+    With,
     If,
+    Then,
     Elif,
     Else,
-    Then,
+
+    NewLine,
+    Eof,
 
     pub fn toString(self: @This()) []const u8 {
         return @tagName(self);
@@ -242,8 +235,6 @@ pub const Scanner = struct {
         switch (char) {
             '(' => return self.makeToken(.LParen),
             ')' => return self.makeToken(.RParen),
-            '{' => return self.makeToken(.LBrace),
-            '}' => return self.makeToken(.RBrace),
             '[' => return self.makeToken(.LBracket),
             ']' => return self.makeToken(.RBracket),
             ',' => return self.makeToken(.Comma),
@@ -325,8 +316,8 @@ pub const Scanner = struct {
         switch (self.script_context.source[self.start]) {
             'a' => return self.checkKeyword(1, "nd", .And),
             'm' => return self.checkKeyword(1, "atch", .Match),
+            'w' => return self.checkKeyword(1, "ith", .With),
             'o' => return self.checkKeyword(1, "r", .Or),
-            'n' => return self.checkKeyword(1, "ull", .Null),
             'f' => return self.checkKeyword(1, "alse", .False),
             'i' => return self.checkKeyword(1, "f", .If),
             't' => if (self.current - self.start > 1) {
