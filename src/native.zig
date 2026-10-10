@@ -1,8 +1,16 @@
 const std = @import("std");
 const value = @import("value.zig");
+const object = @import("object.zig");
 const virtual_machine = @import("vm.zig");
 
-pub fn clockNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
+pub fn getNative(name: []const u8) ?object.NativeFn {
+    if (std.mem.eql(u8, name, "clock")) return clockNative;
+    if (std.mem.eql(u8, name, "print")) return printNative;
+    if (std.mem.eql(u8, name, "assert")) return assertNative;
+    return null;
+}
+
+fn clockNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
     _ = arg_count;
     _ = args;
     const now = std.Io.Timestamp.now(vm.io, .real);
@@ -11,21 +19,21 @@ pub fn clockNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: 
     return value.wrapFloat(@divExact(time, ms_per_s));
 }
 
-pub fn printNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
+fn printNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
     if (arg_count != 1) {
         return vm.runtimeError("Expected 1 arg, got {d}.", .{arg_count});
     }
     const val = args[0];
     std.debug.print("{f}\n", .{val});
-    return value.valueNull();
+    return value.valueUnit();
 }
 
-pub fn assertNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
+fn assertNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
     if (arg_count != 1) {
         return vm.runtimeError("Expected 1 arg, got {d}.", .{arg_count});
     }
     const val = args[0];
     if (val != .Bool) return vm.runtimeError("Expected Boolean, got {s}", .{val.getType()});
     if (!val.Bool) return vm.runtimeError("Assertion failed", .{});
-    return value.valueNull();
+    return value.valueUnit();
 }

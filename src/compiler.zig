@@ -9,6 +9,7 @@ const memory = @import("memory.zig");
 const constants = @import("constants.zig");
 const parser = @import("parser.zig");
 const ast = @import("ast.zig");
+const native = @import("native.zig");
 
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
     logging.log(fmt, args, .{
@@ -36,16 +37,21 @@ const Function = struct {
     scope_depth: u32,
     function: *object.ObjFunction,
     index: u8,
-    compiler: *const Compiler,
+    compiler: *Compiler,
 
-    pub fn init(vm: *virtual_machine.VirtualMachine, name: ?[]const u8) !@This() {
+    pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, name: ?[]const u8) !@This() {
         const function = try object.allocateFunction(vm);
-        function.name = name;
+        if (name) |func_name| {
+            const obj = try object.copyString(vm, func_name);
+            function.name = obj.asString();
+        }
         return .{
             .locals = .empty,
             .upvalues = .empty,
             .scope_depth = 0,
             .function = function,
+            .index = index,
+            .compiler = compiler,
         };
     }
 
@@ -107,7 +113,7 @@ const Function = struct {
         if (self.upvalues.items.len == UINT8_COUNT) {
             return self.compiler.errorAt(name, "too many closure variables in function");
         }
-        try self.upvalues.append(self.arena, .{
+        try self.upvalues.append(self.compiler.arena, .{
             .is_local = is_local,
             .index = index,
         });
@@ -129,7 +135,7 @@ const Function = struct {
 
     fn getParent(self: Function) ?*Function {
         if (self.index == 0) return null;
-        return self.compiler.functions.items[self.index - 1];
+        return &self.compiler.functions.items[self.index - 1];
     }
 
     fn beginScope(self: *Function) void {
@@ -162,13 +168,13 @@ pub const Compiler = struct {
         gpa: std.mem.Allocator,
         arena: std.mem.Allocator,
     ) !Compiler {
-        const compiler: Compiler = .{
+        var compiler: Compiler = .{
             .vm = vm,
             .gpa = gpa,
             .arena = arena,
             .functions = .empty,
         };
-        try compiler.addFunction(null);
+        _ = try compiler.addFunction(null);
         return compiler;
     }
 
@@ -176,7 +182,8 @@ pub const Compiler = struct {
         self: *Compiler,
         name: ?[]const u8,
     ) !*Function {
-        const function = try Function.init(self.vm, name);
+        const index = self.functions.items.len;
+        var function = try Function.init(self.vm, self, @intCast(index), name);
         try function.locals.append(self.arena, .{
             .is_used = true,
             .is_captured = false,
@@ -184,7 +191,7 @@ pub const Compiler = struct {
             .depth = 0,
         });
         try self.functions.append(self.arena, function);
-        return &function;
+        return &self.functions.items[index];
     }
 
     fn getFunction(self: *Compiler) *Function {
@@ -201,11 +208,9 @@ pub const Compiler = struct {
             };
         }
 
-        // TODO: does that make sense?
-        try self.emitOp(.Unit);
         try self.emitOp(.Return);
 
-        const function = self.functions.pop().?;
+        var function = self.functions.pop().?;
         if (comptime constants.debug_disassemble) {
             const name = function.getName();
             logDebug("Finished compiling {s}", .{name});
@@ -248,7 +253,7 @@ pub const Compiler = struct {
     }
 
     fn currentChunk(self: *Compiler) *chunk.Chunk {
-        return self.getFunction().function.chunk;
+        return &self.getFunction().function.chunk;
     }
 
     fn emitOpU8(self: *Compiler, first: chunk.OpCode, second: u8) !void {
@@ -289,13 +294,17 @@ pub const Compiler = struct {
         switch (expr.data) {
             .Declaration => |declaration| {
                 try self.compileExpression(declaration.right);
-                try self.getFunction().declareLocal(&declaration.left);
+                try self.getFunction().addLocal(&declaration.left);
             },
             .Identifier => {
                 if (self.getFunction().resolveLocal(&expr.token)) |index| {
                     try self.emitOpU8(.GetLocal, index);
                 } else if (try self.getFunction().resolveUpvalue(&expr.token)) |index| {
                     try self.emitOpU8(.GetUpvalue, index);
+                } else if (native.getNative(expr.token.data)) |nativeFn| {
+                    // TODO: allocate once and not for each call
+                    const func_obj = try object.allocateNative(self.vm, nativeFn);
+                    try self.emitConstant(value.wrapObj(func_obj));
                 } else {
                     return self.errorAt(&expr.token, "unknown identifier");
                 }
@@ -342,15 +351,7 @@ pub const Compiler = struct {
                 } else {
                     try self.compileExpression(binary.right);
                     switch (binary.operator) {
-                        .Plus => {
-                            const left_type = try self.resolveExpression(binary.left);
-                            const right_type = try self.resolveExpression(binary.right);
-                            if (left_type == .Int and right_type == .Int) {
-                                try self.emitOp(.AddInt);
-                            } else {
-                                try self.emitOp(.Add);
-                            }
-                        },
+                        .Plus => try self.emitOp(.Add),
                         .Minus => try self.emitOp(.Subtract),
                         .Asterisk => try self.emitOp(.Multiply),
                         .Slash => try self.emitOp(.Divide),
@@ -381,12 +382,13 @@ pub const Compiler = struct {
             },
             .Function => |function| {
                 var new_function = try self.addFunction(function.name);
+                new_function.beginScope();
 
                 for (function.params.items) |*param| {
                     switch (param.*) {
                         .Positional => |*name| {
-                            new_function.function.?.arity += 1;
-                            if (new_function.function.?.arity > 255) {
+                            new_function.function.arity += 1;
+                            if (new_function.function.arity > 255) {
                                 // TODO: pass correct token
                                 return self.errorAt(&scanner.Token.dummy(), "can't have more than 255 parameters");
                             }
@@ -416,6 +418,8 @@ pub const Compiler = struct {
                     try self.emitByte(@intFromBool(upvalue.is_local));
                     try self.emitByte(upvalue.index);
                 }
+
+                try new_function.endScope();
 
                 _ = self.functions.pop();
             },
@@ -450,7 +454,7 @@ pub const Compiler = struct {
                 for (match.arms.items) |arm| {
                     if (arm.pattern.data == .Identifier and std.mem.eql(u8, arm.pattern.data.Identifier, "_")) {
                         try self.emitOp(.Pop);
-                        try self.compileExpression(arm.body);
+                        try self.compileExpression(arm.expression);
                         found_else = true;
                         break;
                     }
@@ -462,7 +466,7 @@ pub const Compiler = struct {
                     try self.emitOp(.Pop);
                     try self.emitOp(.Pop);
 
-                    try self.compileExpression(arm.body);
+                    try self.compileExpression(arm.expression);
 
                     try end_jumps.append(self.gpa, try self.emitJump(.Jump));
 
@@ -501,7 +505,7 @@ pub const Compiler = struct {
                 }
 
                 if (ifExpr.alt) |alt| {
-                    try self.compileExpression(alt.then);
+                    try self.compileExpression(alt);
                 }
 
                 for (end_jumps.items) |jump| {

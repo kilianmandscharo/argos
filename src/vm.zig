@@ -80,7 +80,7 @@ pub const VirtualMachine = struct {
             logDebug("Init vm...", .{});
         }
 
-        var vm = VirtualMachine{
+        const vm = VirtualMachine{
             .io = io,
             .gpa = gpa,
             .arena = arena,
@@ -97,10 +97,6 @@ pub const VirtualMachine = struct {
             .next_gc = 1024 * 1024,
             .script_context = undefined,
         };
-
-        try vm.defineNative("clock", native.clockNative);
-        try vm.defineNative("print", native.printNative);
-        try vm.defineNative("assert", native.assertNative);
 
         if (comptime constants.debug_trace_execution) {
             logDebug("Vm initialized.", .{});
@@ -238,17 +234,6 @@ pub const VirtualMachine = struct {
 
         self.resetStack();
         return error.RuntimeError;
-    }
-
-    // TODO: implement in compilation process
-    fn defineNative(self: *VirtualMachine, name: []const u8, function: object.NativeFn) !void {
-        _ = self;
-        _ = name;
-        _ = function;
-        // self.push(value.wrapObj(try object.copyString(self, name)));
-        // self.push(value.wrapObj(try object.allocateNative(self, function)));
-        // _ = self.pop();
-        // _ = self.pop();
     }
 
     inline fn readU16(self: *VirtualMachine) usize {
@@ -781,7 +766,7 @@ pub const VirtualMachine = struct {
     }
 
     fn isFalsey(val: value.Value) bool {
-        return val == .Null or (val == .Bool and !val.Bool);
+        return val == .Bool and !val.Bool;
     }
 
     fn isEqual(a: value.Value, b: value.Value) !bool {
@@ -798,7 +783,7 @@ pub const VirtualMachine = struct {
             .Int => return a.Int == b.Int,
             .Float => return a.Float == b.Float,
             .Bool => return a.Bool == b.Bool,
-            .Null => return true,
+            .Unit => return true,
             .Obj => |obj| {
                 if (obj.type != b.Obj.type) return false;
                 const a_string = obj.asString();

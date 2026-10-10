@@ -101,10 +101,6 @@ fn blackenObj(vm: *virtual_machine.VirtualMachine, obj: *object.Obj) !void {
             const list = obj.asList();
             try markArray(vm, list.data.items);
         },
-        .Table => {
-            const table = obj.asTable();
-            try markTable(vm, table.data);
-        },
         .String, .NativeFn => {},
     }
 }
@@ -129,8 +125,6 @@ fn markRoots(vm: *virtual_machine.VirtualMachine) !void {
         try markObject(vm, &val.obj);
         upvalue = val.next;
     }
-
-    try markGlobalsTable(vm);
 }
 
 fn markValue(vm: *virtual_machine.VirtualMachine, val: value.Value) !void {
@@ -144,20 +138,4 @@ pub fn markObject(vm: *virtual_machine.VirtualMachine, obj: *object.Obj) !void {
     }
     obj.is_marked = true;
     try vm.gray_stack.append(vm.gpa, obj);
-}
-
-fn markGlobalsTable(vm: *virtual_machine.VirtualMachine) !void {
-    var it = vm.globals.iterator();
-    while (it.next()) |entry| {
-        try markObject(vm, &entry.key_ptr.*.obj);
-        try markValue(vm, entry.value_ptr.*);
-    }
-}
-
-fn markTable(vm: *virtual_machine.VirtualMachine, table: object.TableData) !void {
-    var it = table.iterator();
-    while (it.next()) |entry| {
-        try markObject(vm, &entry.key_ptr.*.obj);
-        try markValue(vm, entry.value_ptr.*);
-    }
 }
