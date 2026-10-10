@@ -16,90 +16,153 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
     });
 }
 
-pub const Compiler = struct {
-    vm: *virtual_machine.VirtualMachine,
-    enclosing: ?*Compiler,
-    gpa: std.mem.Allocator,
-    arena: std.mem.Allocator,
-    function: ?*object.ObjFunction,
-    type: FunctionType,
+const TypeInfo = enum {
+    Float,
+    Int,
+    Bool,
+    Unit,
+    String,
+    Function,
+    List,
+    Unknown,
+};
+
+const VariableInfo = struct {
+    is_used: bool,
+    is_captured: bool,
+    token: scanner.Token,
+    depth: u32,
+};
+
+const Upvalue = struct {
+    index: u8,
+    is_local: bool,
+};
+
+const UINT8_COUNT = std.math.maxInt(u8) + 1;
+
+const Function = struct {
     locals: std.ArrayList(VariableInfo),
     upvalues: std.ArrayList(Upvalue),
     scope_depth: u32,
-    globals: *std.StringHashMapUnmanaged(VariableInfo),
-    expression_types: *std.AutoHashMapUnmanaged(*const ast.Expression, TypeInfo),
+    function: *object.ObjFunction,
+    index: u8,
+    compiler: *const Compiler,
 
-    const Upvalue = struct {
-        index: u8,
-        is_local: bool,
-    };
+    pub fn init(vm: *virtual_machine.VirtualMachine) !@This() {
+        return .{
+            .locals = .empty,
+            .upvalues = .empty,
+            .scope_depth = 0,
+            .function = try object.allocateFunction(vm),
+        };
+    }
 
-    const FunctionType = enum {
-        Function,
-        Script,
-    };
+    fn getLocal(self: *Function, index: u8) *VariableInfo {
+        return &self.locals.items[index];
+    }
 
-    const UINT8_COUNT = std.math.maxInt(u8) + 1;
+    pub fn addLocal(self: *Function, name: *const scanner.Token) !void {
+        var i = self.locals.items.len;
+        while (i > 0) {
+            i -= 1;
+            const local = self.locals.items[i];
+            if (local.depth < self.scope_depth) {
+                break;
+            }
+            if (std.mem.eql(u8, name.data, local.token.data)) {
+                return self.compiler.errorAt(name, "already a variable with this name in this scope");
+            }
+        }
+        if (self.locals.items.len == UINT8_COUNT) {
+            return self.compiler.errorAt(name, "too many local variables in function");
+        }
+        try self.locals.append(self.compiler.arena, .{
+            .is_used = false,
+            .is_captured = false,
+            .token = name.*,
+            .depth = self.scope_depth,
+        });
+    }
 
-    const VariableInfo = struct {
-        type_info: TypeInfo,
-        is_const: bool,
-        is_used: bool,
-        is_captured: bool,
-        token: scanner.Token,
-        depth: u32,
-    };
+    pub fn resolveLocal(self: *Function, name: *const scanner.Token) ?u8 {
+        var i = self.locals.items.len;
+        while (i > 0) {
+            i -= 1;
+            const local = &self.locals.items[i];
+            if (std.mem.eql(u8, name.data, local.token.data)) {
+                return @intCast(i);
+            }
+        }
+        return null;
+    }
 
-    const TypeInfo = enum {
-        Float,
-        Int,
-        Bool,
-        Null,
-        String,
-        Function,
-        List,
-        Table,
-        Unknown,
-    };
+    fn getUpvalue(self: *Function, index: u8) *VariableInfo {
+        return &self.locals.items[self.upvalues.items[index].index];
+    }
+
+    pub fn addUpvalue(self: *Function, name: *const scanner.Token, index: u8, is_local: bool) !u8 {
+        for (self.upvalues.items, 0..) |upvalue, i| {
+            if (upvalue.index == index and upvalue.is_local == is_local) {
+                return @intCast(i);
+            }
+        }
+        if (self.upvalues.items.len == UINT8_COUNT) {
+            return self.compiler.errorAt(name, "too many closure variables in function");
+        }
+        try self.upvalues.append(self.arena, .{
+            .is_local = is_local,
+            .index = index,
+        });
+        return @intCast(self.upvalues.items.len - 1);
+    }
+
+    fn resolveUpvalue(self: *Function, name: *const scanner.Token) !?u8 {
+        if (self.getParent()) |parent| {
+            if (parent.resolveLocal(name)) |index| {
+                parent.getLocal(index).is_captured = true;
+                return try self.addUpvalue(name, index, true);
+            }
+            if (try parent.resolveUpvalue(name)) |index| {
+                return try self.addUpvalue(name, index, false);
+            }
+        }
+        return null;
+    }
+
+    fn getParent(self: Function) ?*Function {
+        if (self.index == 0) return null;
+        return self.compiler.functions.items[self.index - 1];
+    }
+};
+
+pub const Compiler = struct {
+    vm: *virtual_machine.VirtualMachine,
+    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    functions: std.ArrayList(Function),
 
     pub fn init(
         vm: *virtual_machine.VirtualMachine,
         gpa: std.mem.Allocator,
         arena: std.mem.Allocator,
-    ) !*Compiler {
-        const globals = try arena.create(std.StringHashMapUnmanaged(VariableInfo));
-        globals.* = .empty;
-
-        const expression_types = try arena.create(std.AutoHashMapUnmanaged(*const ast.Expression, TypeInfo));
-        expression_types.* = .empty;
-
-        const compiler = try arena.create(Compiler);
-        compiler.* = .{
+    ) !Compiler {
+        const compiler: Compiler = .{
             .vm = vm,
-            .enclosing = null,
             .gpa = gpa,
             .arena = arena,
-            .function = null,
-            .type = .Script,
-            .locals = .empty,
-            .upvalues = .empty,
-            .scope_depth = 0,
-            .globals = globals,
-            .expression_types = expression_types,
+            .functions = .empty,
         };
 
-        vm.current_compiler = compiler;
-
-        compiler.function = try object.allocateFunction(vm);
-
-        try compiler.locals.append(arena, .{
-            .type_info = .Unknown,
-            .is_const = false,
+        const function = try Function.init(vm);
+        try function.locals.append(arena, .{
             .is_used = true,
             .is_captured = false,
             .token = scanner.Token.dummy(),
             .depth = 0,
         });
+
+        try compiler.functions.append(arena, function);
 
         return compiler;
     }
@@ -123,7 +186,6 @@ pub const Compiler = struct {
             .expression_types = self.expression_types,
         };
 
-        new_compiler.vm.current_compiler = new_compiler;
         new_compiler.function = try object.allocateFunction(new_compiler.vm);
 
         if (name) |func_name| {
@@ -143,8 +205,8 @@ pub const Compiler = struct {
         return new_compiler;
     }
 
-    fn getFunction(self: *Compiler) *object.ObjFunction {
-        return self.function.?;
+    fn getFunction(self: *Compiler) *Function {
+        return &self.functions.items[self.functions.items.len - 1];
     }
 
     fn getFunctionName(self: *Compiler) []const u8 {
@@ -168,7 +230,6 @@ pub const Compiler = struct {
         // TODO: if a function has a return statement there will be 2 return
         // instructions
         try self.emitOp(.Return);
-        self.vm.current_compiler = self.enclosing;
         const function = self.getFunction();
         if (comptime constants.debug_disassemble) {
             const name = self.getFunctionName();
@@ -176,59 +237,6 @@ pub const Compiler = struct {
             self.currentChunk().disassemble(name);
         }
         return function;
-    }
-
-    fn declareGlobalVar(self: *Compiler, var_declaration: *const ast.VarDeclaration) !void {
-        if (self.globals.get(var_declaration.name.data)) |_| {
-            return self.errorAt(&var_declaration.name, "already a global variable with this name");
-        }
-
-        const constant = try self.identifierConstant(var_declaration.name.data);
-        try self.emitOpU16(.DefineGlobal, constant);
-
-        const type_info = try self.resolveExpression(var_declaration.expression);
-
-        try self.globals.put(
-            self.arena,
-            var_declaration.name.data,
-            .{
-                .type_info = type_info,
-                .is_const = false,
-                .is_used = false,
-                .is_captured = false,
-                .token = var_declaration.name,
-                .depth = 0,
-            },
-        );
-    }
-
-    fn declareLocalVar(self: *Compiler, name: *const scanner.Token, type_info: TypeInfo) !void {
-        var i = self.locals.items.len;
-        while (i > 0) {
-            i -= 1;
-            const local = self.locals.items[i];
-            if (local.depth < self.scope_depth) {
-                break;
-            }
-            if (std.mem.eql(u8, name.data, local.token.data)) {
-                return self.errorAt(name, "already a variable with this name in this scope");
-            }
-        }
-        try self.addLocal(name, type_info);
-    }
-
-    fn addLocal(self: *Compiler, name: *const scanner.Token, type_info: TypeInfo) !void {
-        if (self.locals.items.len == UINT8_COUNT) {
-            return self.errorAt(name, "Too many local variables in block.");
-        }
-        try self.locals.append(self.arena, .{
-            .type_info = type_info,
-            .is_const = false,
-            .is_used = false,
-            .is_captured = false,
-            .token = name.*,
-            .depth = self.scope_depth,
-        });
     }
 
     fn identifierConstant(self: *Compiler, name: []const u8) !u16 {
@@ -267,42 +275,6 @@ pub const Compiler = struct {
         cur_chunk.code.items[offset + 1] = bytes[1];
     }
 
-    fn addUpvalue(self: *Compiler, name: *const scanner.Token, index: u8, is_local: bool) !u8 {
-        for (self.upvalues.items, 0..) |upvalue, i| {
-            if (upvalue.index == index and upvalue.is_local == is_local) {
-                return @intCast(i);
-            }
-        }
-
-        if (self.upvalues.items.len == UINT8_COUNT) {
-            return self.errorAt(name, "Too many closure variables in function.");
-        }
-
-        try self.upvalues.append(self.arena, .{
-            .is_local = is_local,
-            .index = index,
-        });
-
-        self.getFunction().upvalue_count += 1;
-        return @intCast(self.upvalues.items.len - 1);
-    }
-
-    fn resolveUpvalue(self: *Compiler, name: *const scanner.Token) !?u8 {
-        if (self.enclosing == null) return null;
-
-        const enclosing = self.enclosing.?;
-        const local = enclosing.resolveLocal(name);
-        if (local) |index| {
-            enclosing.locals.items[index].is_captured = true;
-            return try self.addUpvalue(name, @intCast(index), true);
-        }
-
-        const upvalue = try self.enclosing.?.resolveUpvalue(name);
-        if (upvalue) |index| return try self.addUpvalue(name, index, false);
-
-        return null;
-    }
-
     fn beginScope(self: *Compiler) void {
         self.scope_depth += 1;
     }
@@ -321,18 +293,6 @@ pub const Compiler = struct {
         }
     }
 
-    fn resolveLocal(self: *Compiler, name: *const scanner.Token) ?u8 {
-        var i = self.locals.items.len;
-        while (i > 0) {
-            i -= 1;
-            const local = &self.locals.items[i];
-            if (std.mem.eql(u8, name.data, local.token.data)) {
-                return @intCast(i);
-            }
-        }
-        return null;
-    }
-
     fn emitConstant(self: *Compiler, val: value.Value) !void {
         try self.currentChunk().writeConstant(self.gpa, val, 0);
     }
@@ -342,7 +302,7 @@ pub const Compiler = struct {
     }
 
     fn currentChunk(self: *Compiler) *chunk.Chunk {
-        return &self.getFunction().chunk;
+        return self.getFunction().function.chunk;
     }
 
     fn emitOpU8(self: *Compiler, first: chunk.OpCode, second: u8) !void {
@@ -379,134 +339,19 @@ pub const Compiler = struct {
         return error.CompileError;
     }
 
-    fn compileStatement(self: *Compiler, stmt: ast.Statement, suppress_pop: bool) !void {
-        switch (stmt) {
-            .VarDeclaration => |*val| {
-                try self.compileExpression(val.expression);
-                if (self.scope_depth == 0) {
-                    try self.declareGlobalVar(val);
-                } else {
-                    const type_info = try self.resolveExpression(val.expression);
-                    try self.declareLocalVar(&val.name, type_info);
-                }
-            },
-            .Assignment => |val| {
-                switch (val.target) {
-                    .Identifier => |name| {
-                        const type_info = try self.resolveExpression(val.expression);
-                        try self.compileExpression(val.expression);
-
-                        if (self.resolveLocal(&name)) |index| {
-                            updateVarInfo(self.getLocal(index), type_info);
-                            try self.emitOpU8(.SetLocal, index);
-                        } else if (try self.resolveUpvalue(&name)) |index| {
-                            updateVarInfo(self.getUpvalue(index), type_info);
-                            try self.emitOp(.SetUpvalue);
-                            try self.emitByte(index);
-                        } else {
-                            if (self.globals.getPtr(name.data)) |var_info| {
-                                updateVarInfo(var_info, type_info);
-                                const constant = try self.identifierConstant(name.data);
-                                try self.emitOpU16(.SetGlobal, constant);
-                            } else {
-                                return self.errorAt(&name, "undefined variable");
-                            }
-                        }
-                    },
-                    .Index => |index| {
-                        try self.compileExpression(index.left);
-                        try self.compileExpression(index.index);
-                        try self.compileExpression(val.expression);
-                        try self.emitOp(.IndexSet);
-                        try self.emitOp(.Pop);
-                    },
-                }
-            },
-            .For => |*val| {
-                self.beginScope();
-                if (val.expression.data != .Range) {
-                    unreachable;
-                }
-
-                try self.compileExpression(val.expression.data.Range.start);
-                try self.compileExpression(val.expression.data.Range.end);
-
-                try self.declareLocalVar(&val.capture, .Int);
-
-                const increment_var_index = self.locals.items.len - 1;
-
-                // a dummy local for the right side of the range
-                try self.addLocal(&scanner.Token.dummy(), .Int);
-
-                const loop_start = self.currentChunk().code.items.len;
-                const exit_jump = try self.emitJump(.JumpIfGreaterOrEq);
-                const local_count = self.locals.items.len;
-
-                try self.compileStatement(val.body.*, false);
-
-                try self.emitOpU8(.GetLocal, @intCast(increment_var_index));
-                try self.emitConstant(value.wrapInt(1));
-                try self.emitOp(.Add);
-                try self.emitOpU8(.SetLocal, @intCast(increment_var_index));
-
-                var i = self.locals.items.len;
-                while (i > local_count) {
-                    try self.emitOp(.Pop);
-                    i -= 1;
-                }
-
-                try self.emitLoop(loop_start);
-
-                try self.patchJump(exit_jump);
-
-                // we already popped the locals on the last iteration and now
-                // need to reduce the local array accordingly
-                while (self.locals.items.len > local_count) {
-                    _ = self.locals.pop();
-                }
-
-                try self.endScope();
-            },
-            .While => |val| {
-                const loop_start = self.currentChunk().code.items.len;
-                try self.compileExpression(val.expression);
-
-                const exit_jump = try self.emitJump(.JumpIfFalse);
-                try self.emitOp(.Pop);
-
-                try self.compileStatement(val.body.*, false);
-
-                try self.emitLoop(loop_start);
-
-                try self.patchJump(exit_jump);
-                try self.emitOp(.Pop);
-            },
-            .Return => |val| {
-                if (self.type == .Script) {
-                    return self.errorAt(&val.token, "can't return from top-level code");
-                }
-                try self.compileExpression(val);
-                try self.emitOp(.Return);
-            },
-            .Expression => |val| {
-                try self.compileExpression(val);
-                if (!suppress_pop) {
-                    try self.emitOp(.Pop);
-                }
-            },
-        }
-    }
-
     fn compileExpression(self: *Compiler, expr: *const ast.Expression) anyerror!void {
         switch (expr.data) {
-            .Identifier => |name| {
-                if (self.resolveLocal(&expr.token)) |local| {
-                    try self.emitOpU8(.GetLocal, local);
-                } else if (try self.resolveUpvalue(&expr.token)) |upvalue| {
-                    try self.emitOpU8(.GetUpvalue, upvalue);
+            .Declaration => |declaration| {
+                try self.compileExpression(declaration.right);
+                try self.getFunction().declareLocal(&declaration.left);
+            },
+            .Identifier => {
+                if (self.getFunction().resolveLocal(&expr.token)) |index| {
+                    try self.emitOpU8(.GetLocal, index);
+                } else if (try self.getFunction().resolveUpvalue(&expr.token)) |index| {
+                    try self.emitOpU8(.GetUpvalue, index);
                 } else {
-                    const constant = try self.identifierConstant(name);
-                    try self.emitOpU16(.GetGlobal, constant);
+                    return self.errorAt(&expr.token, "unknown identifier");
                 }
             },
             .String => |val| {
@@ -521,7 +366,7 @@ pub const Compiler = struct {
             .Boolean => |val| {
                 if (val) try self.emitOp(.True) else try self.emitOp(.False);
             },
-            .Infix => |val| {
+            .Binary => |val| {
                 try self.compileExpression(val.left);
 
                 if (val.operator == .And) {
@@ -563,11 +408,11 @@ pub const Compiler = struct {
                         .LeftShift => try self.emitOp(.LeftShift),
                         .RightShift => try self.emitOp(.RightShift),
                         .Percent => try self.emitOp(.Mod),
-                        else => unreachable,
+                        else => @panic("unknown operator"),
                     }
                 }
             },
-            .Prefix => |val| {
+            .Unary => |val| {
                 try self.compileExpression(val.expression);
                 switch (val.operator) {
                     .Minus => try self.emitOp(.Negate),
@@ -624,7 +469,6 @@ pub const Compiler = struct {
                 }
                 try self.emitOpU8(.Call, @intCast(count));
             },
-            .Range => unreachable,
             .List => |val| {
                 var index = val.items.len;
                 while (index > 0) {
@@ -633,21 +477,6 @@ pub const Compiler = struct {
                 }
                 try self.emitConstant(value.wrapObj(try object.allocateList(self.vm)));
                 try self.emitOpU16(.ListInit, @intCast(val.items.len));
-            },
-            .Table => |val| {
-                var index = val.items.len;
-                while (index > 0) {
-                    index -= 1;
-                    try self.compileExpression(val.items[index].value);
-                    try self.compileExpression(val.items[index].key);
-                }
-                try self.emitConstant(value.wrapObj(try object.allocateTable(self.vm)));
-                try self.emitOpU16(.TableInit, @intCast(val.items.len));
-            },
-            .Index => |val| {
-                try self.compileExpression(val.left);
-                try self.compileExpression(val.index);
-                try self.emitOp(.IndexGet);
             },
             .Match => |val| {
                 const has_target = val.target != null;
@@ -724,10 +553,10 @@ pub const Compiler = struct {
 
                 end_jumps.deinit(self.gpa);
             },
-            .Null => {
+            .Unit => {
                 try self.emitOp(.Null);
             },
-            .Block => |val| {
+            .Grouping => |val| {
                 self.beginScope();
                 for (val.items, 0..) |item, i| {
                     const is_last = i == val.items.len - 1;
@@ -741,54 +570,46 @@ pub const Compiler = struct {
         }
     }
 
-    fn updateVarInfo(var_info: *VariableInfo, new_type: TypeInfo) void {
-        if (var_info.type_info == new_type) return;
-        var_info.type_info = .Unknown;
-    }
-
-    fn getLocal(self: *Compiler, index: u8) *VariableInfo {
-        return &self.locals.items[index];
-    }
-
-    fn getUpvalue(self: *Compiler, index: u8) *VariableInfo {
-        return &self.locals.items[self.upvalues.items[index].index];
-    }
-
-    fn resolveExpression(self: *Compiler, expr: *const ast.Expression) !TypeInfo {
-        if (self.expression_types.get(expr)) |t| return t;
-
-        const t: TypeInfo = switch (expr.data) {
-            .Identifier => blk: {
-                if (self.resolveLocal(&expr.token)) |index| {
-                    break :blk self.getLocal(index).type_info;
-                }
-                if (try self.resolveUpvalue(&expr.token)) |index| {
-                    break :blk self.getUpvalue(index).type_info;
-                }
-                if (self.globals.get(expr.token.data)) |var_info| {
-                    break :blk var_info.type_info;
-                }
-                return self.errorAt(&expr.token, "identifier not found");
-            },
-            .String => .String,
-            .Integer => .Int,
-            .Float => .Float,
-            .Boolean => .Bool,
-            .Infix => .Unknown,
-            .Prefix => .Unknown,
-            .Function => .Unknown,
-            .Call => .Unknown,
-            .Range => .Unknown,
-            .List => .List,
-            .Table => .Table,
-            .Index => .Unknown,
-            .Match => .Unknown,
-            .Null => .Null,
-            .Block => .Unknown,
-        };
-
-        try self.expression_types.put(self.arena, expr, t);
-
-        return t;
-    }
+    // fn updateVarInfo(var_info: *VariableInfo, new_type: TypeInfo) void {
+    //     if (var_info.type_info == new_type) return;
+    //     var_info.type_info = .Unknown;
+    // }
+    //
+    // fn resolveExpression(self: *Compiler, expr: *const ast.Expression) !TypeInfo {
+    //     if (self.expression_types.get(expr)) |t| return t;
+    //
+    //     const t: TypeInfo = switch (expr.data) {
+    //         .Identifier => blk: {
+    //             if (self.resolveLocal(&expr.token)) |index| {
+    //                 break :blk self.getLocal(index).type_info;
+    //             }
+    //             if (try self.resolveUpvalue(&expr.token)) |index| {
+    //                 break :blk self.getUpvalue(index).type_info;
+    //             }
+    //             if (self.globals.get(expr.token.data)) |var_info| {
+    //                 break :blk var_info.type_info;
+    //             }
+    //             return self.errorAt(&expr.token, "identifier not found");
+    //         },
+    //         .String => .String,
+    //         .Integer => .Int,
+    //         .Float => .Float,
+    //         .Boolean => .Bool,
+    //         .Infix => .Unknown,
+    //         .Prefix => .Unknown,
+    //         .Function => .Unknown,
+    //         .Call => .Unknown,
+    //         .Range => .Unknown,
+    //         .List => .List,
+    //         .Table => .Table,
+    //         .Index => .Unknown,
+    //         .Match => .Unknown,
+    //         .Null => .Null,
+    //         .Block => .Unknown,
+    //     };
+    //
+    //     try self.expression_types.put(self.arena, expr, t);
+    //
+    //     return t;
+    // }
 };

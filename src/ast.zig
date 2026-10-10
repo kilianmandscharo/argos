@@ -105,7 +105,7 @@ pub const IfArm = struct {
 pub fn printProgram(program: Program, writer: *std.Io.Writer) !void {
     try writer.print("(Program\n", .{});
     for (program.items) |expr| {
-        try printExpression(expr, writer, 0);
+        try printExpression(expr, writer, 1);
     }
     try writer.print(")", .{});
 }
@@ -114,51 +114,72 @@ fn printIndent(writer: *std.Io.Writer, level: usize) !void {
     for (0..level * 2) |_| try writer.writeByte(' ');
 }
 
+fn operator(op: scanner.TokenType) []const u8 {
+    return switch (op) {
+        .Bang => "!",
+        .Lt => "<",
+        .LtOrEq => "<=",
+        .Gt => ">",
+        .GtOrEq => ">=",
+        .Eq => "==",
+        .NotEq => "!=",
+        .Plus => "+",
+        .Minus => "-",
+        .Slash => "/",
+        .Asterisk => "*",
+        .Percent => "%",
+        .And => "and",
+        .Or => "or",
+        .Pipe => "|",
+        .Ampersand => "~",
+        .Caret => "^",
+        .Tilde => "~",
+        .LeftShift => "<<",
+        .RightShift => ">>",
+        else => "<unknown operator>",
+    };
+}
+
 fn printExpression(expr: *const Expression, writer: *std.Io.Writer, level: usize) !void {
     switch (expr.data) {
-        // .Identifier => |name| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Identifier({s})\n", .{name});
-        // },
-        // .String => |s| {
-        //     try printIndent(writer, level);
-        //     try writer.print("String({s})\n", .{s});
-        // },
-        // .Integer => |n| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Integer({d})\n", .{n});
-        // },
-        // .Float => |f| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Float({d})\n", .{f});
-        // },
-        // .Boolean => |b| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Boolean({})\n", .{b});
-        // },
-        // .Null => {
-        //     try printIndent(writer, level);
-        //     try writer.print("Null\n", .{});
-        // },
+        .Identifier => |name| {
+            try writer.print("{s}", .{name});
+        },
+        .String => |s| {
+            try writer.print("\"{s}\"", .{s});
+        },
+        .Integer => |n| {
+            try writer.print("{d}", .{n});
+        },
+        .Float => |f| {
+            try writer.print("{d}", .{f});
+        },
+        .Boolean => |b| {
+            try writer.print("{}", .{b});
+        },
+        .Unit => {
+            try writer.print("()", .{});
+        },
         .Binary => |e| {
             try printIndent(writer, level);
             try writer.print("(", .{});
-            try printExpression(e.left, writer, level + 2);
-            try writer.print(" {s} ", .{e.operator.toString()});
-            try printExpression(e.right, writer, level + 2);
+            try printExpression(e.left, writer, 0);
+            try writer.print(" {s} ", .{operator(e.operator)});
+            try printExpression(e.right, writer, 0);
             try writer.print(")", .{});
         },
-        // .Prefix => |e| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Prefix\n", .{});
-        //     try printIndent(writer, level + 1);
-        //     try writer.print("operator:\n", .{});
-        //     try printIndent(writer, level + 2);
-        //     try writer.print("{s}\n", .{e.operator.toString()});
-        //     try printIndent(writer, level + 1);
-        //     try writer.print("expression:\n", .{});
-        //     try printExpression(e.right.data, writer, level + 2);
-        // },
+        .Unary => |e| {
+            try printIndent(writer, level);
+            try writer.print("({s}", .{operator(e.operator)});
+            try printExpression(e.right, writer, level + 1);
+            try writer.print(")", .{});
+        },
+        .Declaration => |e| {
+            try printIndent(writer, level);
+            try writer.print("(declare {s} ", .{e.left.data});
+            try printExpression(e.right, writer, 0);
+            try writer.print(")", .{});
+        },
         // .Function => |e| {
         //     try printIndent(writer, level);
         //     try writer.print("Function\n", .{});
@@ -221,16 +242,6 @@ fn printExpression(expr: *const Expression, writer: *std.Io.Writer, level: usize
         //             },
         //         }
         //     }
-        // },
-        // .Range => |e| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Range\n", .{});
-        //     try printIndent(writer, level + 1);
-        //     try writer.print("start:\n", .{});
-        //     try printExpression(e.start.data, writer, level + 2);
-        //     try printIndent(writer, level + 1);
-        //     try writer.print("end:\n", .{});
-        //     try printExpression(e.end.data, writer, level + 2);
         // },
         // .List => |items| {
         //     try printIndent(writer, level);

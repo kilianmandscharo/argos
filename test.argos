@@ -1,18 +1,3 @@
-if <expr> then <expr> elif <expr> then <expr> else <expr>
-
-(list <expr>) -> <expr>
-
-foo = (a, b) -> a + b
-
-foo = (a, b) -> 
-    a + b
-
-foo = (a, b) -> (
-    c = a + b
-    a + b + c
-)
-
-result = match a with
-    | "foo" -> 1
-    | "bar" -> 2
-    | _ -> 3
+a = 1
+b = 2
+a + b

@@ -131,17 +131,6 @@ fn markRoots(vm: *virtual_machine.VirtualMachine) !void {
     }
 
     try markGlobalsTable(vm);
-    try markCompilerRoots(vm);
-}
-
-fn markCompilerRoots(vm: *virtual_machine.VirtualMachine) !void {
-    var current = vm.current_compiler;
-    while (current) |c| {
-        if (c.function) |f| {
-            try markObject(vm, &f.obj);
-        }
-        current = c.enclosing;
-    }
 }
 
 fn markValue(vm: *virtual_machine.VirtualMachine, val: value.Value) !void {

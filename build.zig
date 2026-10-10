@@ -20,6 +20,8 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the application");
     run_step.dependOn(&run_exe.step);
 
+    run_exe.addPassthruArgs();
+
     const test_step = b.step("test", "Run unit tests");
 
     const test_files = [_][]const u8{
