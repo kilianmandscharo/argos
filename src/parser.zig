@@ -316,7 +316,6 @@ fn parseMatch(parser: *Parser) !ast.Expression {
     while (true) {
         try parser.chopNewlines();
 
-        if (parser.check(.Eof)) return parser.errorAtPrevious("reached eof");
         if (!try parser.match(.Pipe)) break;
 
         const pattern = try parser.parseExpression();
@@ -331,25 +330,30 @@ fn parseMatch(parser: *Parser) !ast.Expression {
 
 fn parseIf(parser: *Parser) !ast.Expression {
     const token = parser.getPrevious();
-    const condition = try parser.parseExpression();
-    try parser.consume(.Then, "expect 'then' after if target expression");
-    const then = try parser.parseExpression();
 
-    var arms: std.ArrayList(ast.IfArm) = .empty;
-    try arms.append(parser.arena, .{ .condition = condition, .then = then });
-    var data: ast.ExpressionData = .{ .If = .{ .arms = arms, .alt = null } };
+    var data: ast.ExpressionData = .{ .If = .{ .arms = .empty, .alt = null } };
 
     while (true) {
         try parser.chopNewlines();
 
+        if (data.If.arms.items.len == 0) {
+            const condition = try parser.parseExpression();
+            try parser.consume(.Then, "expect 'then' after if target expression");
+            try parser.chopNewlines();
+            try data.If.arms.append(parser.arena, .{ .condition = condition, .then = try parser.parseExpression() });
+            continue;
+        }
+
         if (try parser.match(.Elif)) {
-            const con = try parser.parseExpression();
+            const condition = try parser.parseExpression();
             try parser.consume(.Then, "expect 'then' after elif target expression");
-            try arms.append(parser.arena, .{ .condition = con, .then = try parser.parseExpression() });
+            try parser.chopNewlines();
+            try data.If.arms.append(parser.arena, .{ .condition = condition, .then = try parser.parseExpression() });
             continue;
         }
 
         if (try parser.match(.Else)) {
+            try parser.chopNewlines();
             const alt = try parser.parseExpression();
             data.If.alt = alt;
         }

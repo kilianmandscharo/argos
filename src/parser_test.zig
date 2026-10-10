@@ -205,7 +205,7 @@ test "expressions" {
     );
 }
 
-test "prefix expressions" {
+test "unary expressions" {
     const test_cases = [_]ExpressionTestCase{
         .{
             .description = "should parse bang operator with true",
@@ -291,13 +291,13 @@ test "prefix expressions" {
 
     try test_utils.runTestsWithArena(
         ExpressionTestCase,
-        "parse prefix expression",
+        "parse unary expression",
         &test_cases,
         runExpressionTest,
     );
 }
 
-test "infix expression" {
+test "binary expression" {
     const test_cases = [_]ExpressionTestCase{
         .{
             .description = "should parse integer addition",
@@ -629,7 +629,7 @@ test "infix expression" {
 
     try test_utils.runTestsWithArena(
         ExpressionTestCase,
-        "parse infix expression",
+        "parse binary expression",
         &test_cases,
         runExpressionTest,
     );
@@ -1007,171 +1007,227 @@ test "function literal" {
     );
 }
 
-// test "match expression" {
-//     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-//     defer arena.deinit();
-//     const a = arena.allocator();
-//
-//     const test_cases = [_]ExpressionTestCase{
-//         .{
-//             .description = "single arm",
-//             .input =
-//             \\match(foo) true -> "bar"
-//             ,
-//             .expected_expression = .{
-//                 .Match = .{
-//                     .target = &e(.{ .Identifier = "foo" }),
-//                     .body = .{
-//                         .Single = .{
-//                             .pattern = &e(.{ .Boolean = true }),
-//                             .body = &e(.{ .String = "bar" }),
-//                         },
-//                     },
-//                 },
-//             },
-//         },
-//         .{
-//             .description = "single arm no target",
-//             .input =
-//             \\match foo < 10 -> "bar"
-//             ,
-//             .expected_expression = .{
-//                 .Match = .{
-//                     .target = null,
-//                     .body = .{
-//                         .Single = .{
-//                             .pattern = &e(.{
-//                                 .Infix = .{
-//                                     .left = &e(.{ .Identifier = "foo" }),
-//                                     .right = &e(.{ .Integer = 10 }),
-//                                     .operator = .Lt,
-//                                 },
-//                             }),
-//                             .body = &e(.{ .String = "bar" }),
-//                         },
-//                     },
-//                 },
-//             },
-//         },
-//         .{
-//             .description = "multiple arms",
-//             .input =
-//             \\match(foo) {
-//             \\     1 -> "a"
-//             \\     2 -> "b"
-//             \\     _ -> "c"
-//             \\}
-//             ,
-//             .expected_expression = .{
-//                 .Match = .{
-//                     .target = &e(.{ .Identifier = "foo" }),
-//                     .body = .{
-//                         .Multiple = try test_utils.list(ast.MatchArm, a, &.{
-//                             .{
-//                                 .pattern = &e(.{ .Integer = 1 }),
-//                                 .body = &e(.{ .String = "a" }),
-//                             },
-//                             .{
-//                                 .pattern = &e(.{ .Integer = 2 }),
-//                                 .body = &e(.{ .String = "b" }),
-//                             },
-//                             .{
-//                                 .pattern = &e(.{ .Identifier = "_" }),
-//                                 .body = &e(.{ .String = "c" }),
-//                             },
-//                         }),
-//                     },
-//                 },
-//             },
-//         },
-//     };
-//
-//     try test_utils.runTestsWithArena(
-//         ExpressionTestCase,
-//         "parse match expression",
-//         &test_cases,
-//         runExpressionTest,
-//     );
-// }
-//
-// test "block expression" {
-//     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-//     defer arena.deinit();
-//     const a = arena.allocator();
-//
-//     const test_cases = [_]ExpressionTestCase{
-//         .{
-//             .description = "block",
-//             .input =
-//             \\{
-//             \\    let foo = 5
-//             \\    foo + 2
-//             \\}
-//             ,
-//             .expected_expression = .{
-//                 .Block = try test_utils.list(ast.Statement, a, &.{
-//                     .{
-//                         .VarDeclaration = .{
-//                             .name = s("foo"),
-//                             .expression = &e(.{ .Integer = 5 }),
-//                         },
-//                     },
-//                     .{
-//                         .Expression = &e(.{
-//                             .Infix = .{
-//                                 .left = &e(.{ .Identifier = "foo" }),
-//                                 .right = &e(.{ .Integer = 2 }),
-//                                 .operator = .Plus,
-//                             },
-//                         }),
-//                     },
-//                 }),
-//             },
-//         },
-//         .{
-//             .description = "block single line",
-//             .input =
-//             \\{ 5 + 5 }
-//             ,
-//             .expected_expression = .{
-//                 .Block = try test_utils.list(ast.Statement, a, &.{
-//                     .{
-//                         .Expression = &e(.{
-//                             .Infix = .{
-//                                 .left = &e(.{ .Integer = 5 }),
-//                                 .right = &e(.{ .Integer = 5 }),
-//                                 .operator = .Plus,
-//                             },
-//                         }),
-//                     },
-//                 }),
-//             },
-//         },
-//         .{
-//             .description = "block empty",
-//             .input =
-//             \\{}
-//             ,
-//             .expected_expression = .{ .Block = .empty },
-//         },
-//         .{
-//             .description = "block empty multiple lines",
-//             .input =
-//             \\{
-//             \\
-//             \\}
-//             ,
-//             .expected_expression = .{ .Block = .empty },
-//         },
-//     };
-//
-//     try test_utils.runTestsWithArena(
-//         ExpressionTestCase,
-//         "parse block expression",
-//         &test_cases,
-//         runExpressionTest,
-//     );
-// }
+test "match expression" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "one line",
+            .input =
+            \\match foo with | true -> 42
+            ,
+            .expected_expression = .{
+                .Match = .{
+                    .target = &e(.{ .Identifier = "foo" }),
+                    .arms = try test_utils.list(ast.MatchArm, a, &.{
+                        .{
+                            .pattern = &e(.{ .Boolean = true }),
+                            .expression = &e(.{ .Integer = 42 }),
+                        },
+                    }),
+                },
+            },
+        },
+        .{
+            .description = "multiple lines",
+            .input =
+            \\match something with 
+            \\| "foo" -> 42
+            \\| "bar" -> 43
+            \\| "baz" -> 44
+            ,
+            .expected_expression = .{
+                .Match = .{
+                    .target = &e(.{ .Identifier = "something" }),
+                    .arms = try test_utils.list(ast.MatchArm, a, &.{
+                        .{
+                            .pattern = &e(.{ .String = "foo" }),
+                            .expression = &e(.{ .Integer = 42 }),
+                        },
+                        .{
+                            .pattern = &e(.{ .String = "bar" }),
+                            .expression = &e(.{ .Integer = 43 }),
+                        },
+                        .{
+                            .pattern = &e(.{ .String = "baz" }),
+                            .expression = &e(.{ .Integer = 44 }),
+                        },
+                    }),
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse match expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "if expression" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "one line",
+            .input =
+            \\if foo then bar
+            ,
+            .expected_expression = .{
+                .If = .{
+                    .arms = try test_utils.list(ast.IfArm, a, &.{
+                        .{
+                            .condition = &e(.{ .Identifier = "foo" }),
+                            .then = &e(.{ .Identifier = "bar" }),
+                        },
+                    }),
+                    .alt = null,
+                },
+            },
+        },
+        .{
+            .description = "with else",
+            .input =
+            \\if foo then
+            \\    bar
+            \\else
+            \\    baz
+            ,
+            .expected_expression = .{
+                .If = .{
+                    .arms = try test_utils.list(ast.IfArm, a, &.{
+                        .{
+                            .condition = &e(.{ .Identifier = "foo" }),
+                            .then = &e(.{ .Identifier = "bar" }),
+                        },
+                    }),
+                    .alt = &e(.{ .Identifier = "baz" }),
+                },
+            },
+        },
+        .{
+            .description = "with else if",
+            .input =
+            \\if foo then 42
+            \\elif bar then 43
+            \\elif baz then 44
+            \\else 45
+            ,
+            .expected_expression = .{
+                .If = .{
+                    .arms = try test_utils.list(ast.IfArm, a, &.{
+                        .{
+                            .condition = &e(.{ .Identifier = "foo" }),
+                            .then = &e(.{ .Integer = 42 }),
+                        },
+                        .{
+                            .condition = &e(.{ .Identifier = "bar" }),
+                            .then = &e(.{ .Integer = 43 }),
+                        },
+                        .{
+                            .condition = &e(.{ .Identifier = "baz" }),
+                            .then = &e(.{ .Integer = 44 }),
+                        },
+                    }),
+                    .alt = &e(.{ .Integer = 45 }),
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse if expression",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "grouping" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "with encasing new lines",
+            .input =
+            \\(
+            \\    a = 1
+            \\    b = 1
+            \\    a + b
+            \\)
+            ,
+            .expected_expression = .{
+                .Grouping = try test_utils.list(*const ast.Expression, a, &.{
+                    &e(.{
+                        .Declaration = .{
+                            .left = s("a"),
+                            .right = &e(.{ .Integer = 1 }),
+                        },
+                    }),
+                    &e(.{
+                        .Declaration = .{
+                            .left = s("b"),
+                            .right = &e(.{ .Integer = 1 }),
+                        },
+                    }),
+                    &e(.{
+                        .Binary = .{
+                            .left = &e(.{ .Identifier = "a" }),
+                            .right = &e(.{ .Identifier = "b" }),
+                            .operator = .Plus,
+                        },
+                    }),
+                }),
+            },
+        },
+        .{
+            .description = "without encasing new lines",
+            .input =
+            \\(a = 1
+            \\ b = 1
+            \\ a + b)
+            ,
+            .expected_expression = .{
+                .Grouping = try test_utils.list(*const ast.Expression, a, &.{
+                    &e(.{
+                        .Declaration = .{
+                            .left = s("a"),
+                            .right = &e(.{ .Integer = 1 }),
+                        },
+                    }),
+                    &e(.{
+                        .Declaration = .{
+                            .left = s("b"),
+                            .right = &e(.{ .Integer = 1 }),
+                        },
+                    }),
+                    &e(.{
+                        .Binary = .{
+                            .left = &e(.{ .Identifier = "a" }),
+                            .right = &e(.{ .Identifier = "b" }),
+                            .operator = .Plus,
+                        },
+                    }),
+                }),
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse grouping",
+        &test_cases,
+        runExpressionTest,
+    );
+}
 
 // test "parse program" {
 //     const ProgramTestCase = struct {
