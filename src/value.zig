@@ -5,7 +5,7 @@ pub const Value = union(enum) {
     Float: f64,
     Int: i64,
     Bool: bool,
-    Null,
+    Unit,
     Obj: *object.Obj,
 
     pub fn format(
@@ -22,7 +22,7 @@ pub const Value = union(enum) {
             },
             .Int => |val| try writer.print("{d}", .{val}),
             .Bool => |val| try writer.print("{}", .{val}),
-            .Null => try writer.print("null", .{}),
+            .Unit => try writer.print("()", .{}),
             .Obj => |val| try val.format(writer),
         }
     }
@@ -60,6 +60,6 @@ pub inline fn wrapBool(val: bool) Value {
     return Value{ .Bool = val };
 }
 
-pub inline fn valueNull() Value {
-    return .Null;
+pub inline fn valueUnit() Value {
+    return .Unit;
 }

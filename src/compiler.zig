@@ -16,17 +16,6 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
     });
 }
 
-const TypeInfo = enum {
-    Float,
-    Int,
-    Bool,
-    Unit,
-    String,
-    Function,
-    List,
-    Unknown,
-};
-
 const VariableInfo = struct {
     is_used: bool,
     is_captured: bool,
@@ -49,13 +38,21 @@ const Function = struct {
     index: u8,
     compiler: *const Compiler,
 
-    pub fn init(vm: *virtual_machine.VirtualMachine) !@This() {
+    pub fn init(vm: *virtual_machine.VirtualMachine, name: ?[]const u8) !@This() {
+        const function = try object.allocateFunction(vm);
+        function.name = name;
         return .{
             .locals = .empty,
             .upvalues = .empty,
             .scope_depth = 0,
-            .function = try object.allocateFunction(vm),
+            .function = function,
         };
+    }
+
+    fn getName(self: *Function) []const u8 {
+        if (self.index == 0) return "script";
+        if (self.function.name) |name| return name;
+        return "anonymous";
     }
 
     fn getLocal(self: *Function, index: u8) *VariableInfo {
@@ -134,6 +131,24 @@ const Function = struct {
         if (self.index == 0) return null;
         return self.compiler.functions.items[self.index - 1];
     }
+
+    fn beginScope(self: *Function) void {
+        self.scope_depth += 1;
+    }
+
+    fn endScope(self: *Function) !void {
+        self.scope_depth -= 1;
+        var i = self.locals.items.len;
+        while (i > 0 and self.locals.items[i - 1].depth > self.scope_depth) {
+            i -= 1;
+            if (self.locals.items[i].is_captured) {
+                try self.compiler.emitOp(.SwapCloseUpvalue);
+            } else {
+                try self.compiler.emitOp(.SwapPop);
+            }
+            _ = self.locals.pop();
+        }
+    }
 };
 
 pub const Compiler = struct {
@@ -153,107 +168,56 @@ pub const Compiler = struct {
             .arena = arena,
             .functions = .empty,
         };
-
-        const function = try Function.init(vm);
-        try function.locals.append(arena, .{
-            .is_used = true,
-            .is_captured = false,
-            .token = scanner.Token.dummy(),
-            .depth = 0,
-        });
-
-        try compiler.functions.append(arena, function);
-
+        try compiler.addFunction(null);
         return compiler;
     }
 
-    pub fn initNewScope(
+    pub fn addFunction(
         self: *Compiler,
         name: ?[]const u8,
-    ) !*Compiler {
-        const new_compiler = try self.arena.create(Compiler);
-        new_compiler.* = .{
-            .vm = self.vm,
-            .enclosing = self,
-            .gpa = self.gpa,
-            .arena = self.arena,
-            .function = null,
-            .type = .Function,
-            .locals = .empty,
-            .upvalues = .empty,
-            .scope_depth = 0,
-            .globals = self.globals,
-            .expression_types = self.expression_types,
-        };
-
-        new_compiler.function = try object.allocateFunction(new_compiler.vm);
-
-        if (name) |func_name| {
-            const obj = try object.copyString(new_compiler.vm, func_name);
-            new_compiler.getFunction().name = obj.asString();
-        }
-
-        try new_compiler.locals.append(new_compiler.arena, .{
-            .type_info = .Unknown,
-            .is_const = false,
+    ) !*Function {
+        const function = try Function.init(self.vm, name);
+        try function.locals.append(self.arena, .{
             .is_used = true,
             .is_captured = false,
             .token = scanner.Token.dummy(),
             .depth = 0,
         });
-
-        return new_compiler;
+        try self.functions.append(self.arena, function);
+        return &function;
     }
 
     fn getFunction(self: *Compiler) *Function {
         return &self.functions.items[self.functions.items.len - 1];
     }
 
-    fn getFunctionName(self: *Compiler) []const u8 {
-        return if (self.getFunction().name) |name| name.chars else "script";
-    }
-
     pub fn compile(self: *Compiler, program: ast.Program) !*object.ObjFunction {
-        for (program.items) |stmt| {
-            self.compileStatement(stmt, false) catch |err| {
+        for (program.items) |expr| {
+            self.compileExpression(expr) catch |err| {
                 if (constants.debug_compiler) {
                     self.currentChunk().disassemble("<error>");
                 }
                 return err;
             };
         }
-        try self.emitOp(.Null);
-        return try self.endCompiler();
-    }
 
-    fn endCompiler(self: *Compiler) !*object.ObjFunction {
-        // TODO: if a function has a return statement there will be 2 return
-        // instructions
+        // TODO: does that make sense?
+        try self.emitOp(.Unit);
         try self.emitOp(.Return);
-        const function = self.getFunction();
+
+        const function = self.functions.pop().?;
         if (comptime constants.debug_disassemble) {
-            const name = self.getFunctionName();
+            const name = function.getName();
             logDebug("Finished compiling {s}", .{name});
-            self.currentChunk().disassemble(name);
+            function.function.chunk.disassemble(name);
         }
-        return function;
+
+        return function.function;
     }
 
     fn identifierConstant(self: *Compiler, name: []const u8) !u16 {
         const obj = try object.copyString(self.vm, name);
         return try self.makeConstant(value.wrapObj(obj));
-    }
-
-    fn emitLoop(self: *Compiler, loop_start: usize) !void {
-        try self.emitOp(.Loop);
-
-        const offset = self.currentChunk().code.items.len - loop_start + 2;
-        if (offset > std.math.maxInt(u16)) {
-            // TODO: pass correct token
-            return self.errorAt(&scanner.Token.dummy(), "Loop body too large.");
-        }
-
-        try self.emitU16(offset);
     }
 
     fn emitJump(self: *Compiler, instruction: chunk.OpCode) !usize {
@@ -273,24 +237,6 @@ pub const Compiler = struct {
         const bytes = chunk.indexToU16(jump);
         cur_chunk.code.items[offset] = bytes[0];
         cur_chunk.code.items[offset + 1] = bytes[1];
-    }
-
-    fn beginScope(self: *Compiler) void {
-        self.scope_depth += 1;
-    }
-
-    fn endScope(self: *Compiler) !void {
-        self.scope_depth -= 1;
-        while (self.locals.items.len > 0 and
-            self.locals.items[self.locals.items.len - 1].depth > self.scope_depth)
-        {
-            if (self.locals.items[self.locals.items.len - 1].is_captured) {
-                try self.emitOp(.SwapCloseUpvalue);
-            } else {
-                try self.emitOp(.SwapPop);
-            }
-            _ = self.locals.pop();
-        }
     }
 
     fn emitConstant(self: *Compiler, val: value.Value) !void {
@@ -354,39 +300,51 @@ pub const Compiler = struct {
                     return self.errorAt(&expr.token, "unknown identifier");
                 }
             },
-            .String => |val| {
-                try self.emitConstant(value.wrapObj(try object.copyString(self.vm, val)));
+            .String => |string| {
+                try self.emitConstant(value.wrapObj(try object.copyString(self.vm, string)));
             },
-            .Integer => |val| {
-                try self.emitConstant(value.wrapInt(val));
+            .Integer => |integer| {
+                try self.emitConstant(value.wrapInt(integer));
             },
-            .Float => |val| {
-                try self.emitConstant(value.wrapFloat(val));
+            .Float => |float| {
+                try self.emitConstant(value.wrapFloat(float));
             },
-            .Boolean => |val| {
-                if (val) try self.emitOp(.True) else try self.emitOp(.False);
+            .Boolean => |boolean| {
+                if (boolean) try self.emitOp(.True) else try self.emitOp(.False);
             },
-            .Binary => |val| {
-                try self.compileExpression(val.left);
+            .Unit => {
+                try self.emitOp(.Unit);
+            },
+            .Unary => |unary| {
+                try self.compileExpression(unary.right);
+                switch (unary.operator) {
+                    .Minus => try self.emitOp(.Negate),
+                    .Bang => try self.emitOp(.Not),
+                    .Tilde => try self.emitOp(.BitwiseNot),
+                    else => unreachable,
+                }
+            },
+            .Binary => |binary| {
+                try self.compileExpression(binary.left);
 
-                if (val.operator == .And) {
+                if (binary.operator == .And) {
                     const end_jump = try self.emitJump(.JumpIfFalse);
                     try self.emitOp(.Pop);
-                    try self.compileExpression(val.right);
+                    try self.compileExpression(binary.right);
                     try self.patchJump(end_jump);
-                } else if (val.operator == .Or) {
+                } else if (binary.operator == .Or) {
                     const else_jump = try self.emitJump(.JumpIfFalse);
                     const end_jump = try self.emitJump(.Jump);
                     try self.patchJump(else_jump);
                     try self.emitOp(.Pop);
-                    try self.compileExpression(val.right);
+                    try self.compileExpression(binary.right);
                     try self.patchJump(end_jump);
                 } else {
-                    try self.compileExpression(val.right);
-                    switch (val.operator) {
+                    try self.compileExpression(binary.right);
+                    switch (binary.operator) {
                         .Plus => {
-                            const left_type = try self.resolveExpression(val.left);
-                            const right_type = try self.resolveExpression(val.right);
+                            const left_type = try self.resolveExpression(binary.left);
+                            const right_type = try self.resolveExpression(binary.right);
                             if (left_type == .Int and right_type == .Int) {
                                 try self.emitOp(.AddInt);
                             } else {
@@ -412,60 +370,63 @@ pub const Compiler = struct {
                     }
                 }
             },
-            .Unary => |val| {
-                try self.compileExpression(val.expression);
-                switch (val.operator) {
-                    .Minus => try self.emitOp(.Negate),
-                    .Bang => try self.emitOp(.Not),
-                    .Tilde => try self.emitOp(.BitwiseNot),
-                    else => unreachable,
+            .Grouping => |grouping| {
+                const function = self.getFunction();
+                function.beginScope();
+                for (grouping.items) |item| {
+                    try self.compileExpression(item);
+                    // TODO: what to do?
                 }
+                try function.endScope();
             },
-            .Function => |val| {
-                var new_compiler = try self.initNewScope(val.name);
-                new_compiler.beginScope();
+            .Function => |function| {
+                var new_function = try self.addFunction(function.name);
 
-                for (val.params.items) |*param| {
+                for (function.params.items) |*param| {
                     switch (param.*) {
                         .Positional => |*name| {
-                            new_compiler.function.?.arity += 1;
-                            if (new_compiler.function.?.arity > 255) {
+                            new_function.function.?.arity += 1;
+                            if (new_function.function.?.arity > 255) {
                                 // TODO: pass correct token
-                                return self.errorAt(&scanner.Token.dummy(), "Can't have more than 255 parameters.");
+                                return self.errorAt(&scanner.Token.dummy(), "can't have more than 255 parameters");
                             }
-                            try new_compiler.declareLocalVar(name, .Unknown);
+                            try new_function.addLocal(name);
                         },
-                        .Default => unreachable,
+                        .Default => @panic("not implemented"),
                     }
                 }
 
-                try new_compiler.compileExpression(val.body);
+                try self.compileExpression(function.body);
+                try self.emitOp(.Return);
 
-                const function = try new_compiler.endCompiler();
-
-                if (new_compiler.upvalues.items.len > 0) {
-                    const constant = try self.makeConstant(value.wrapObj(&function.obj));
-                    try self.emitOpU16(.Closure, constant);
-                } else {
-                    try self.emitConstant(value.wrapObj(&function.obj));
+                if (comptime constants.debug_disassemble) {
+                    const name = new_function.getName();
+                    logDebug("Finished compiling {s}", .{name});
+                    new_function.function.chunk.disassemble(name);
                 }
 
-                for (new_compiler.upvalues.items) |upvalue| {
+                if (new_function.upvalues.items.len > 0) {
+                    const constant = try self.makeConstant(value.wrapObj(&new_function.function.obj));
+                    try self.emitOpU16(.Closure, constant);
+                } else {
+                    try self.emitConstant(value.wrapObj(&new_function.function.obj));
+                }
+
+                for (new_function.upvalues.items) |upvalue| {
                     try self.emitByte(@intFromBool(upvalue.is_local));
                     try self.emitByte(upvalue.index);
                 }
+
+                _ = self.functions.pop();
             },
-            .Call => |val| {
-                const count = val.args.items.len;
+            .Call => |call| {
+                const count = call.args.items.len;
                 if (count == 255) {
-                    return self.errorAt(&val.function.token, "Can't have more than 255 arguments");
+                    return self.errorAt(&call.function.token, "can't have more than 255 arguments");
                 }
-                try self.compileExpression(val.function);
-                for (val.args.items) |arg| {
-                    switch (arg) {
-                        .Positional => |positional| try self.compileExpression(positional),
-                        .Named => unreachable,
-                    }
+                try self.compileExpression(call.function);
+                for (call.args.items) |arg| {
+                    try self.compileExpression(arg);
                 }
                 try self.emitOpU8(.Call, @intCast(count));
             },
@@ -478,52 +439,29 @@ pub const Compiler = struct {
                 try self.emitConstant(value.wrapObj(try object.allocateList(self.vm)));
                 try self.emitOpU16(.ListInit, @intCast(val.items.len));
             },
-            .Match => |val| {
-                const has_target = val.target != null;
-                const instruction: chunk.OpCode = if (has_target) .JumpIfNotEq else .JumpIfFalse;
-
-                if (val.target) |target| {
-                    try self.compileExpression(target);
-                }
-
-                if (val.body == .Single) {
-                    try self.compileExpression(val.body.Single.pattern);
-
-                    const then_jump = try self.emitJump(instruction);
-
-                    try self.emitOp(.Pop);
-                    if (has_target) try self.emitOp(.Pop);
-                    try self.compileExpression(val.body.Single.body);
-
-                    const end_jump = try self.emitJump(.Jump);
-
-                    try self.patchJump(then_jump);
-
-                    try self.emitOp(.Pop);
-                    if (has_target) try self.emitOp(.Pop);
-
-                    try self.emitOp(.Null);
-
-                    try self.patchJump(end_jump);
-
-                    return;
-                }
+            .Match => |match| {
+                try self.compileExpression(match.target);
 
                 var end_jumps: std.ArrayList(usize) = .empty;
                 errdefer end_jumps.deinit(self.gpa);
 
-                const arms = val.body.Multiple.items;
-                for (arms) |arm| {
+                var found_else = false;
+
+                for (match.arms.items) |arm| {
                     if (arm.pattern.data == .Identifier and std.mem.eql(u8, arm.pattern.data.Identifier, "_")) {
+                        try self.emitOp(.Pop);
+                        try self.compileExpression(arm.body);
+                        found_else = true;
                         break;
                     }
 
                     try self.compileExpression(arm.pattern);
 
-                    const then_jump = try self.emitJump(instruction);
+                    const then_jump = try self.emitJump(.JumpIfNotEq);
 
                     try self.emitOp(.Pop);
-                    if (has_target) try self.emitOp(.Pop);
+                    try self.emitOp(.Pop);
+
                     try self.compileExpression(arm.body);
 
                     try end_jumps.append(self.gpa, try self.emitJump(.Jump));
@@ -532,19 +470,10 @@ pub const Compiler = struct {
                     try self.emitOp(.Pop);
                 }
 
-                const last_arm: ?ast.MatchArm = if (arms.len > 0) arms[arms.len - 1] else null;
-                var else_arm: ?ast.MatchArm = null;
-                if (last_arm) |arm| {
-                    if (arm.pattern.data == .Identifier and std.mem.eql(u8, arm.pattern.data.Identifier, "_")) {
-                        else_arm = arm;
-                    }
-                }
-                if (else_arm) |arm| {
-                    if (has_target) try self.emitOp(.Pop);
-                    try self.compileExpression(arm.body);
-                } else {
-                    if (has_target) try self.emitOp(.Pop);
-                    try self.emitOp(.Null);
+                if (!found_else) {
+                    try self.emitOp(.Pop);
+                    // TODO: does that make sense?
+                    try self.emitOp(.Unit);
                 }
 
                 for (end_jumps.items) |jump| {
@@ -553,63 +482,34 @@ pub const Compiler = struct {
 
                 end_jumps.deinit(self.gpa);
             },
-            .Unit => {
-                try self.emitOp(.Null);
-            },
-            .Grouping => |val| {
-                self.beginScope();
-                for (val.items, 0..) |item, i| {
-                    const is_last = i == val.items.len - 1;
-                    try self.compileStatement(item, is_last);
-                    if (is_last and item != .Expression and item != .Return) {
-                        try self.emitOp(.Null);
-                    }
+            .If => |ifExpr| {
+                var end_jumps: std.ArrayList(usize) = .empty;
+                errdefer end_jumps.deinit(self.gpa);
+
+                for (ifExpr.arms.items) |arm| {
+                    try self.compileExpression(arm.condition);
+
+                    const then_jump = try self.emitJump(.JumpIfFalse);
+
+                    try self.emitOp(.Pop);
+                    try self.compileExpression(arm.then);
+
+                    try end_jumps.append(self.gpa, try self.emitJump(.Jump));
+
+                    try self.patchJump(then_jump);
+                    try self.emitOp(.Pop);
                 }
-                try self.endScope();
+
+                if (ifExpr.alt) |alt| {
+                    try self.compileExpression(alt.then);
+                }
+
+                for (end_jumps.items) |jump| {
+                    try self.patchJump(jump);
+                }
+
+                end_jumps.deinit(self.gpa);
             },
         }
     }
-
-    // fn updateVarInfo(var_info: *VariableInfo, new_type: TypeInfo) void {
-    //     if (var_info.type_info == new_type) return;
-    //     var_info.type_info = .Unknown;
-    // }
-    //
-    // fn resolveExpression(self: *Compiler, expr: *const ast.Expression) !TypeInfo {
-    //     if (self.expression_types.get(expr)) |t| return t;
-    //
-    //     const t: TypeInfo = switch (expr.data) {
-    //         .Identifier => blk: {
-    //             if (self.resolveLocal(&expr.token)) |index| {
-    //                 break :blk self.getLocal(index).type_info;
-    //             }
-    //             if (try self.resolveUpvalue(&expr.token)) |index| {
-    //                 break :blk self.getUpvalue(index).type_info;
-    //             }
-    //             if (self.globals.get(expr.token.data)) |var_info| {
-    //                 break :blk var_info.type_info;
-    //             }
-    //             return self.errorAt(&expr.token, "identifier not found");
-    //         },
-    //         .String => .String,
-    //         .Integer => .Int,
-    //         .Float => .Float,
-    //         .Boolean => .Bool,
-    //         .Infix => .Unknown,
-    //         .Prefix => .Unknown,
-    //         .Function => .Unknown,
-    //         .Call => .Unknown,
-    //         .Range => .Unknown,
-    //         .List => .List,
-    //         .Table => .Table,
-    //         .Index => .Unknown,
-    //         .Match => .Unknown,
-    //         .Null => .Null,
-    //         .Block => .Unknown,
-    //     };
-    //
-    //     try self.expression_types.put(self.arena, expr, t);
-    //
-    //     return t;
-    // }
 };

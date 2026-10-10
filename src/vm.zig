@@ -68,7 +68,6 @@ pub const VirtualMachine = struct {
     frame_count: usize,
     frame: *CallFrame,
     strings: std.HashMapUnmanaged(*object.ObjString, void, StringContext, 80),
-    globals: TableGlobals,
     objects: ?*object.Obj,
     open_upvalues: ?*object.ObjUpvalue,
     gray_stack: std.ArrayList(*object.Obj),
@@ -91,7 +90,6 @@ pub const VirtualMachine = struct {
             .frame = undefined,
             .frame_count = 0,
             .strings = .empty,
-            .globals = .empty,
             .objects = null,
             .open_upvalues = null,
             .gray_stack = .empty,
@@ -119,7 +117,6 @@ pub const VirtualMachine = struct {
             head = next;
         }
         self.strings.deinit(self.gpa);
-        self.globals.deinit(self.gpa);
         self.gray_stack.deinit(self.gpa);
     }
 
@@ -243,12 +240,15 @@ pub const VirtualMachine = struct {
         return error.RuntimeError;
     }
 
+    // TODO: implement in compilation process
     fn defineNative(self: *VirtualMachine, name: []const u8, function: object.NativeFn) !void {
-        self.push(value.wrapObj(try object.copyString(self, name)));
-        self.push(value.wrapObj(try object.allocateNative(self, function)));
-        try self.globals.put(self.gpa, self.stack[0].asObj().asString(), self.stack[1]);
-        _ = self.pop();
-        _ = self.pop();
+        _ = self;
+        _ = name;
+        _ = function;
+        // self.push(value.wrapObj(try object.copyString(self, name)));
+        // self.push(value.wrapObj(try object.allocateNative(self, function)));
+        // _ = self.pop();
+        // _ = self.pop();
     }
 
     inline fn readU16(self: *VirtualMachine) usize {
@@ -371,7 +371,7 @@ pub const VirtualMachine = struct {
             const instruction = frame.function.chunk.code.items[ip];
             ip += 1;
 
-            switch (@as(chunk.OpCode, @enumFromInt(instruction))) {
+            switch (@as(chunk.OpCode, @fromBackingInt(@intCast(instruction)))) {
                 .Constant => {
                     const idx = chunk.u16ToIndex(
                         frame.function.chunk.code.items[ip],
@@ -380,7 +380,7 @@ pub const VirtualMachine = struct {
                     ip += 2;
                     self.push(frame.function.chunk.constants.items[idx]);
                 },
-                .Null => self.push(value.valueNull()),
+                .Unit => self.push(value.valueUnit()),
                 .True => self.push(value.wrapBool(true)),
                 .False => self.push(value.wrapBool(false)),
                 .Add => {
@@ -391,11 +391,6 @@ pub const VirtualMachine = struct {
                         const a = self.peek(0);
                         self.swapInPlace(try self.add(a, b), 0);
                     }
-                },
-                .AddInt => {
-                    const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(value.wrapInt(a.Int + b.Int), 0);
                 },
                 .Subtract => {
                     const b = self.pop();
@@ -479,44 +474,6 @@ pub const VirtualMachine = struct {
                     self.swapInPlace(self.peek(0), 1);
                     _ = self.pop();
                 },
-                .DefineGlobal => {
-                    const name_idx = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
-                    const name = frame.function.chunk.constants.items[name_idx].Obj.asString();
-                    try self.globals.put(self.gpa, name, self.peek(0));
-                    _ = self.pop();
-                },
-                .GetGlobal => {
-                    const name_idx = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
-                    const name = frame.function.chunk.constants.items[name_idx].Obj.asString();
-                    if (self.globals.get(name)) |val| {
-                        self.push(val);
-                    } else {
-                        frame.ip = ip;
-                        return self.runtimeError("Undefined variable '{s}'", .{name.chars});
-                    }
-                },
-                .SetGlobal => {
-                    const name_idx = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
-                    const name = frame.function.chunk.constants.items[name_idx].Obj.asString();
-                    if (self.globals.getPtr(name)) |val_ptr| {
-                        val_ptr.* = self.pop();
-                    } else {
-                        frame.ip = ip;
-                        return self.runtimeError("Undefined variable '{s}'", .{name.chars});
-                    }
-                },
                 .GetLocal => {
                     const slot = frame.function.chunk.code.items[ip];
                     ip += 1;
@@ -545,16 +502,6 @@ pub const VirtualMachine = struct {
                         ip += offset;
                     }
                 },
-                .JumpIfGreaterOrEq => {
-                    const offset = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
-                    if (!try self.less(self.peek(1), self.peek(0))) {
-                        ip += offset;
-                    }
-                },
                 .Jump => {
                     const offset = chunk.u16ToIndex(
                         frame.function.chunk.code.items[ip],
@@ -562,14 +509,6 @@ pub const VirtualMachine = struct {
                     );
                     ip += 2;
                     ip += offset;
-                },
-                .Loop => {
-                    const offset = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
-                    ip -= offset;
                 },
                 .Call => {
                     const arg_count = frame.function.chunk.code.items[ip];
@@ -634,117 +573,6 @@ pub const VirtualMachine = struct {
                         try list.data.append(self.gpa, self.pop());
                     }
                     self.push(val);
-                },
-                .TableInit => {
-                    const val = self.pop();
-                    const table = val.asObj().asTable();
-                    const count = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
-                    for (0..count) |_| {
-                        try table.data.put(
-                            self.gpa,
-                            self.pop().asObj().asString(),
-                            self.pop(),
-                        );
-                    }
-                    self.push(val);
-                },
-                .IndexGet => {
-                    const index = self.pop();
-                    switch (index) {
-                        .Int => |number_index| {
-                            const val = self.pop();
-                            if (!val.isObjType(.List)) {
-                                frame.ip = ip;
-                                return self.runtimeError(
-                                    "Invalid left side in index expression: {s}",
-                                    .{val.getType()},
-                                );
-                            }
-                            const list_obj = val.asObj().asList();
-                            const list_index = try self.resolveListIndex(list_obj.data.items.len, number_index);
-                            self.push(list_obj.data.items[list_index]);
-                        },
-                        .Obj => |key| {
-                            if (key.type != .String) {
-                                frame.ip = ip;
-                                return self.runtimeError(
-                                    "Invalid index type in index expression: {s}",
-                                    .{index.Obj.getType()},
-                                );
-                            }
-                            const val = self.pop();
-                            if (!val.isObjType(.Table)) {
-                                frame.ip = ip;
-                                return self.runtimeError(
-                                    "Invalid left side in index expression: {s}",
-                                    .{val.getType()},
-                                );
-                            }
-                            const table_obj = val.asObj().asTable();
-                            if (table_obj.data.get(key.asString())) |table_val| {
-                                self.push(table_val);
-                            } else {
-                                self.push(value.valueNull());
-                            }
-                        },
-                        else => {
-                            frame.ip = ip;
-                            return self.runtimeError(
-                                "Invalid index type in index expression: {s}",
-                                .{index.getType()},
-                            );
-                        },
-                    }
-                },
-                .IndexSet => {
-                    const val = self.pop();
-                    const index = self.pop();
-
-                    switch (index) {
-                        .Int => |number_index| {
-                            const list = self.peek(0);
-                            if (!list.isObjType(.List)) {
-                                frame.ip = ip;
-                                return self.runtimeError(
-                                    "Invalid left side in index expression: {s}",
-                                    .{list.getType()},
-                                );
-                            }
-                            const list_obj = list.asObj().asList();
-                            const list_index = try self.resolveListIndex(list_obj.data.items.len, number_index);
-                            list_obj.data.items[list_index] = val;
-                        },
-                        .Obj => |key| {
-                            if (key.type != .String) {
-                                frame.ip = ip;
-                                return self.runtimeError(
-                                    "Invalid index type in index expression: {s}",
-                                    .{index.Obj.getType()},
-                                );
-                            }
-                            const table = self.peek(0);
-                            if (!table.isObjType(.Table)) {
-                                frame.ip = ip;
-                                return self.runtimeError(
-                                    "Invalid left side in index expression: {s}",
-                                    .{table.getType()},
-                                );
-                            }
-                            const table_obj = table.asObj().asTable();
-                            try table_obj.data.put(self.gpa, key.asString(), val);
-                        },
-                        else => {
-                            frame.ip = ip;
-                            return self.runtimeError(
-                                "Invalid index type in index expression: {s}",
-                                .{index.getType()},
-                            );
-                        },
-                    }
                 },
                 .Return => {
                     const result = self.pop();
