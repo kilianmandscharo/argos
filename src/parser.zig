@@ -111,7 +111,7 @@ pub const Parser = struct {
                 const t = self.getPrevious().type;
                 if (getRule(t).infix) |infixFn| {
                     if (comptime constants.debug_parser) {
-                        self.log("infix on {s}", .{@tagName(t)});
+                        self.log("binary on {s}", .{@tagName(t)});
                     }
                     left = try infixFn(self, left);
                 }
@@ -280,8 +280,9 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
 
     if (try parser.match(.RParen)) {
         if (try parser.match(.Arrow)) {
+            const name = parser.ctx.current_var_name;
             const body = try parser.parseExpression();
-            return .init(.{ .Function = .{ .params = .empty, .body = body, .name = parser.ctx.current_var_name } }, token);
+            return .init(.{ .Function = .{ .params = .empty, .body = body, .name = name } }, token);
         }
         return .init(.{ .Unit = {} }, token);
     }
@@ -298,14 +299,15 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
     );
 
     if (try parser.match(.Arrow)) {
+        const functionName = parser.ctx.current_var_name;
         const body = try parser.parseExpression();
 
         var params: std.ArrayList(ast.FunctionParam) = .empty;
         for (expressions.items) |expr| {
             if (expr.data == .Declaration) {
-                const name = expr.data.Declaration.left;
+                const paramName = expr.data.Declaration.left;
                 const value = expr.data.Declaration.right;
-                try params.append(parser.arena, .{ .Default = .{ .name = name, .value = value } });
+                try params.append(parser.arena, .{ .Default = .{ .name = paramName, .value = value } });
             } else if (expr.data == .Identifier) {
                 try params.append(parser.arena, .{ .Positional = expr.token });
             } else {
@@ -313,7 +315,7 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
             }
         }
 
-        return .init(.{ .Function = .{ .params = params, .body = body, .name = parser.ctx.current_var_name } }, token);
+        return .init(.{ .Function = .{ .params = params, .body = body, .name = functionName } }, token);
     }
 
     if (expressions.items.len == 1) {

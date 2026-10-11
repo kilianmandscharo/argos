@@ -770,21 +770,18 @@ test "function tests" {
             \\@assert(result == 6)
             ,
         },
-        // .{
-        //     .description = "nested functions",
-        //     .source =
-        //     \\let foo = fn() {
-        //     \\    let bar = fn(a, b) {
-        //     \\        return a + b
-        //     \\    }
-        //     \\    return bar(2, 7)
-        //     \\}
-        //     \\
-        //     \\let result = foo()
-        //     \\
-        //     \\assert(result == 9)
-        //     ,
-        // },
+        .{
+            .description = "closure",
+            .source =
+            \\foo = () -> (
+            \\    x = 2
+            \\    (a) -> a * x
+            \\)
+            \\func = foo()
+            \\result = func(10)
+            \\@assert(result == 20)
+            ,
+        },
         // .{
         //     .description = "closure",
         //     .source =

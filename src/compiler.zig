@@ -11,7 +11,7 @@ const parser = @import("parser.zig");
 const ast = @import("ast.zig");
 const native = @import("native.zig");
 
-const Function = struct {
+pub const Function = struct {
     locals: std.ArrayList(VariableInfo),
     upvalues: std.ArrayList(Upvalue),
     scope_depth: u32,
@@ -33,13 +33,14 @@ const Function = struct {
         depth: u32,
     };
 
-    pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, name: ?[]const u8) !@This() {
+    pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, name: ?[]const u8) !*@This() {
         const function = try object.allocateFunction(vm);
         if (name) |func_name| {
             const obj = try object.copyString(vm, func_name);
             function.name = obj.asString();
         }
-        return .{
+        const owned = try compiler.arena.create(Function);
+        owned.* = .{
             .locals = .empty,
             .upvalues = .empty,
             .scope_depth = 0,
@@ -47,6 +48,7 @@ const Function = struct {
             .index = index,
             .compiler = compiler,
         };
+        return owned;
     }
 
     fn getName(self: *const Function) []const u8 {
@@ -110,6 +112,7 @@ const Function = struct {
             .is_local = is_local,
             .index = index,
         });
+        self.function.upvalue_count += 1;
         return @intCast(self.upvalues.items.len - 1);
     }
 
@@ -128,15 +131,25 @@ const Function = struct {
 
     fn getParent(self: Function) ?*Function {
         if (self.index == 0) return null;
-        return &self.compiler.functions.items[self.index - 1];
+        return self.compiler.functions.items[self.index - 1];
     }
 
     fn beginScope(self: *Function) void {
         self.scope_depth += 1;
+        if (comptime constants.debug_compiler) {
+            const name = self.getName();
+            self.compiler.log("new scope depth for function {s} = {d}", .{ name, self.scope_depth });
+        }
     }
 
     fn endScope(self: *Function) !void {
         self.scope_depth -= 1;
+
+        if (comptime constants.debug_compiler) {
+            const name = self.getName();
+            self.compiler.log("new scope depth for function {s} = {d}", .{ name, self.scope_depth });
+        }
+
         var i = self.locals.items.len;
         while (i > 0 and self.locals.items[i - 1].depth > self.scope_depth) {
             i -= 1;
@@ -154,7 +167,7 @@ pub const Compiler = struct {
     vm: *virtual_machine.VirtualMachine,
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
-    functions: std.ArrayList(Function),
+    functions: std.ArrayList(*Function),
     globals: std.StringHashMapUnmanaged(*object.Obj),
     debug_indent: usize = 0,
 
@@ -202,11 +215,11 @@ pub const Compiler = struct {
             .depth = 0,
         });
         try self.functions.append(self.arena, function);
-        return &self.functions.items[index];
+        return self.functions.items[index];
     }
 
     fn getFunction(self: *Compiler) *Function {
-        return &self.functions.items[self.functions.items.len - 1];
+        return self.functions.items[self.functions.items.len - 1];
     }
 
     pub fn compile(self: *Compiler, program: *const ast.Expression) !*object.ObjFunction {
@@ -371,7 +384,10 @@ pub const Compiler = struct {
                 }
             },
             .Grouping => |grouping| {
-                const function = self.getFunction();
+                var function = self.getFunction();
+                if (comptime constants.debug_compiler) {
+                    self.log("entering grouping in fn {s}", .{function.getName()});
+                }
                 function.beginScope();
                 for (grouping.items, 0..) |item, i| {
                     try self.compileExpression(item);
@@ -379,6 +395,9 @@ pub const Compiler = struct {
                     if (!is_last) {
                         try self.emitOp(.Pop);
                     }
+                }
+                if (comptime constants.debug_compiler) {
+                    self.log("leaving grouping for fn {s}", .{function.getName()});
                 }
                 try function.endScope();
             },
@@ -410,14 +429,13 @@ pub const Compiler = struct {
 
                 try self.compileExpression(function.body);
                 try self.emitOp(.Return);
+                try new_function.endScope();
 
                 if (comptime constants.debug_disassemble) {
                     const name = new_function.getName();
                     self.log("Finished compiling {s}", .{name});
                     new_function.function.chunk.disassemble(name);
                 }
-
-                try new_function.endScope();
 
                 if (new_function.index > 0) {
                     const compiled_function = self.functions.pop().?;

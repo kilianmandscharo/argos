@@ -130,7 +130,11 @@ fn operator(op: scanner.TokenType) []const u8 {
     };
 }
 
-fn printExpression(expr: *const Expression, writer: *std.Io.Writer, level: usize) !void {
+pub fn printExpression(expr: *const Expression, writer: *std.Io.Writer) anyerror!void {
+    return printExpressionInner(expr, writer, 0);
+}
+
+fn printExpressionInner(expr: *const Expression, writer: *std.Io.Writer, level: usize) anyerror!void {
     switch (expr.data) {
         .Identifier => |name| {
             try writer.print("{s}", .{name});
@@ -153,116 +157,65 @@ fn printExpression(expr: *const Expression, writer: *std.Io.Writer, level: usize
         .Binary => |e| {
             try printIndent(writer, level);
             try writer.print("(", .{});
-            try printExpression(e.left, writer, 0);
+            try printExpressionInner(e.left, writer, 0);
             try writer.print(" {s} ", .{operator(e.operator)});
-            try printExpression(e.right, writer, 0);
+            try printExpressionInner(e.right, writer, 0);
             try writer.print(")", .{});
         },
         .Unary => |e| {
             try printIndent(writer, level);
             try writer.print("({s}", .{operator(e.operator)});
-            try printExpression(e.right, writer, level + 1);
+            try printExpressionInner(e.right, writer, level + 1);
             try writer.print(")", .{});
         },
         .Declaration => |e| {
             try printIndent(writer, level);
-            try writer.print("(declare {s} ", .{e.left.data});
-            try printExpression(e.right, writer, 0);
+            try writer.print("(Declare {s}\n", .{e.left.data});
+            try printExpressionInner(e.right, writer, level + 1);
             try writer.print(")", .{});
         },
-        // .Function => |e| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Function\n", .{});
-        //     if (e.name) |name| {
-        //         try printIndent(writer, level + 1);
-        //         try writer.print("name:\n", .{});
-        //         try printIndent(writer, level + 2);
-        //         try writer.print("{s}\n", .{name});
-        //     }
-        //     try printIndent(writer, level + 1);
-        //     try writer.print("params:\n", .{});
-        //     for (e.params.items) |param| {
-        //         switch (param) {
-        //             .Positional => |name| {
-        //                 try printIndent(writer, level + 2);
-        //                 try writer.print("Positional({s})\n", .{name.data});
-        //             },
-        //             .Default => |d| {
-        //                 try printIndent(writer, level + 2);
-        //                 try writer.print("Default\n", .{});
-        //                 try printIndent(writer, level + 3);
-        //                 try writer.print("name:\n", .{});
-        //                 try printIndent(writer, level + 4);
-        //                 try writer.print("{s}\n", .{d.name.data});
-        //                 try printIndent(writer, level + 3);
-        //                 try writer.print("value:\n", .{});
-        //                 try printExpression(d.value.data, writer, level + 4);
-        //             },
-        //         }
-        //     }
-        //     try printIndent(writer, level + 1);
-        //     try writer.print("body:\n", .{});
-        //     try printExpression(e.body.data, writer, level + 2);
-        // },
-        // .Call => |e| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Call\n", .{});
-        //     try printIndent(writer, level + 1);
-        //     try writer.print("function:\n", .{});
-        //     try printExpression(e.function.data, writer, level + 2);
-        //     try printIndent(writer, level + 1);
-        //     try writer.print("args:\n", .{});
-        //     for (e.args.items) |arg| {
-        //         switch (arg) {
-        //             .Positional => |a| {
-        //                 try printIndent(writer, level + 2);
-        //                 try writer.print("Positional\n", .{});
-        //                 try printExpression(a.data, writer, level + 3);
-        //             },
-        //             .Named => |a| {
-        //                 try printIndent(writer, level + 2);
-        //                 try writer.print("Named\n", .{});
-        //                 try printIndent(writer, level + 3);
-        //                 try writer.print("name:\n", .{});
-        //                 try printIndent(writer, level + 4);
-        //                 try writer.print("{s}\n", .{a.name.data});
-        //                 try printIndent(writer, level + 3);
-        //                 try writer.print("value:\n", .{});
-        //                 try printExpression(a.value.data, writer, level + 4);
-        //             },
-        //         }
-        //     }
-        // },
+        .Function => |e| {
+            try printIndent(writer, level);
+            try writer.print("(Function", .{});
+            if (e.name) |name| {
+                try writer.print(" {s}", .{name});
+            } else {
+                try writer.print(" <anonymous>", .{});
+            }
+            for (e.params.items) |param| {
+                switch (param) {
+                    .Positional => |name| {
+                        try writer.print(" {s}", .{name.data});
+                    },
+                    .Default => @panic("not implemented"),
+                }
+            }
+            try writer.print("\n", .{});
+            try printExpressionInner(e.body, writer, level + 1);
+            try writer.print(")", .{});
+        },
+        .Grouping => |e| {
+            try printIndent(writer, level);
+            try writer.print("(", .{});
+            for (e.items) |item| {
+                try printExpressionInner(item, writer, 0);
+            }
+            try writer.print(")", .{});
+        },
+        .Call => |e| {
+            try printIndent(writer, level);
+            try writer.print("(Call ", .{});
+            try printExpressionInner(e.function, writer, 0);
+            for (e.args.items) |arg| {
+                try printExpression(arg, writer);
+            }
+        },
         // .List => |items| {
         //     try printIndent(writer, level);
         //     try writer.print("List\n", .{});
         //     for (items.items) |item| {
         //         try printExpression(item.data, writer, level + 1);
         //     }
-        // },
-        // .Table => |pairs| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Table\n", .{});
-        //     for (pairs.items) |pair| {
-        //         try printIndent(writer, level + 1);
-        //         try writer.print("Pair\n", .{});
-        //         try printIndent(writer, level + 2);
-        //         try writer.print("key:\n", .{});
-        //         try printExpression(pair.key.data, writer, level + 3);
-        //         try printIndent(writer, level + 2);
-        //         try writer.print("value:\n", .{});
-        //         try printExpression(pair.value.data, writer, level + 3);
-        //     }
-        // },
-        // .Index => |e| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Index\n", .{});
-        //     try printIndent(writer, level + 1);
-        //     try writer.print("left:\n", .{});
-        //     try printExpression(e.left.data, writer, level + 2);
-        //     try printIndent(writer, level + 1);
-        //     try writer.print("index:\n", .{});
-        //     try printExpression(e.index.data, writer, level + 2);
         // },
         // .Match => |e| {
         //     try printIndent(writer, level);
@@ -301,13 +254,6 @@ fn printExpression(expr: *const Expression, writer: *std.Io.Writer, level: usize
         //         },
         //     }
         // },
-        // .Block => |stmts| {
-        //     try printIndent(writer, level);
-        //     try writer.print("Block\n", .{});
-        //     for (stmts.items) |s| {
-        //         try printStatement(s, writer, level + 1);
-        //     }
-        // },
-        else => {},
+        else => @panic("not implemented"),
     }
 }

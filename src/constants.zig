@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const debug_parser = false;
+pub const debug_parser = true;
 pub const debug_compiler = true;
 pub const debug_disassemble = true;
 

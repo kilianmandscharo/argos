@@ -45,7 +45,7 @@ pub fn main(init: std.process.Init) !void {
             .lines = .empty,
         };
 
-        const program: ast.Program = parser.createAst(arena.allocator(), &script_context) catch |err| {
+        const program = parser.createAst(arena.allocator(), &script_context) catch |err| {
             if (constants.stack_trace_on_error) return err;
             return;
         };
@@ -53,7 +53,7 @@ pub fn main(init: std.process.Init) !void {
         var stdout_buffer: [1024]u8 = undefined;
         var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
         const stdout_writer = &stdout_file_writer.interface;
-        try ast.printProgram(program, stdout_writer);
+        try ast.printExpression(program, stdout_writer);
         try stdout_writer.flush();
     }
 
