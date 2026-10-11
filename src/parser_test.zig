@@ -38,7 +38,6 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
                 try expectExpression(expr.items[i].*, actual.Grouping.items[i].*);
             }
         },
-
         .Identifier => |ident| try std.testing.expectEqualStrings(ident, actual.Identifier),
         .String => |string| try std.testing.expectEqualStrings(string, actual.String),
         .Integer => |n| try std.testing.expectEqual(n, actual.Integer),
@@ -139,8 +138,9 @@ fn runExpressionTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) an
         try std.testing.expectError(error.ParserError, result);
     } else {
         const program = try result;
-        try std.testing.expectEqual(program.items.len, 1);
-        try expectExpressionData(test_case.expected_expression.?, program.items[0].data);
+        const expressions = program.data.Function.body.data.Grouping.items;
+        try std.testing.expectEqual(expressions.len, 1);
+        try expectExpressionData(test_case.expected_expression.?, expressions[0].data);
     }
 }
 
@@ -915,6 +915,7 @@ test "function literal" {
                 .Function = .{ .params = .empty, .body = &e(.{ .Unit = {} }) },
             },
         },
+
         .{
             .description = "with expression",
             .input =
@@ -994,6 +995,26 @@ test "function literal" {
                             .right = &e(.{ .Identifier = "b" }),
                         },
                     }),
+                },
+            },
+        },
+        .{
+            .description = "declare function",
+            .input =
+            \\foo = () -> ()
+            ,
+            .expected_expression = .{
+                .Declaration = .{
+                    .left = s("foo"),
+                    .right = &e(
+                        .{
+                            .Function = .{
+                                .params = .empty,
+                                .body = &e(.{ .Unit = {} }),
+                                .name = "foo",
+                            },
+                        },
+                    ),
                 },
             },
         },

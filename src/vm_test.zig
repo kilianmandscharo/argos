@@ -34,217 +34,60 @@ const run = struct {
 test "vm tests" {
     const test_cases = [_]TestCase{
         .{
-            .description = "global variable declaration",
+            .description = "variable declaration",
             .source =
             \\a = 6
             \\b = 7
             \\c = a + b
-            \\assert(c == 13)
+            \\@assert(c == 13)
             ,
         },
-        // .{
-        //     .description = "global variable assignment",
-        //     .source =
-        //     \\let a = 6
-        //     \\let b = 7
-        //     \\a = 2
-        //     \\b = 4
-        //     \\let c = a + b
-        //     \\assert(c == 6)
-        //     ,
-        // },
-        // .{
-        //     .description = "plus assign",
-        //     .source =
-        //     \\let a = 6
-        //     \\a += 12
-        //     \\assert(a == 18)
-        //     ,
-        // },
-        // .{
-        //     .description = "minus assign",
-        //     .source =
-        //     \\let a = 6
-        //     \\a -= 12
-        //     \\assert(a == -6)
-        //     ,
-        // },
-        // .{
-        //     .description = "multiply assign",
-        //     .source =
-        //     \\let a = 6
-        //     \\a *= 12
-        //     \\assert(a == 72)
-        //     ,
-        // },
-        // .{
-        //     .description = "divide assign",
-        //     .source =
-        //     \\let a = 6
-        //     \\a /= 12
-        //     \\assert(a == 0.5)
-        //     ,
-        // },
-        // .{
-        //     .description = "modulo assign",
-        //     .source =
-        //     \\let a = 6
-        //     \\a %= 4
-        //     \\assert(a == 2)
-        //     ,
-        // },
-        // .{
-        //     .description = "bitwise and assign",
-        //     .source =
-        //     \\let a = 1
-        //     \\a &= 0
-        //     \\assert(a == 0)
-        //     ,
-        // },
-        // .{
-        //     .description = "bitwise or assign",
-        //     .source =
-        //     \\let a = 1
-        //     \\a |= 0
-        //     \\assert(a == 1)
-        //     ,
-        // },
-        // .{
-        //     .description = "bitwise xor assign",
-        //     .source =
-        //     \\let a = 1
-        //     \\a ^= 1
-        //     \\assert(a == 0)
-        //     ,
-        // },
-        // .{
-        //     .description = "bitwise left shif assign",
-        //     .source =
-        //     \\let a = 1
-        //     \\a <<= 3
-        //     \\assert(a == 8)
-        //     ,
-        // },
-        // .{
-        //     .description = "bitwise right shif assign",
-        //     .source =
-        //     \\let a = 16
-        //     \\a >>= 2
-        //     \\assert(a == 4)
-        //     ,
-        // },
-        // .{
-        //     .description = "local variable declaration",
-        //     .source =
-        //     \\let a = 6
-        //     \\
-        //     \\{
-        //     \\    let b = 7
-        //     \\    a = a + b
-        //     \\}
-        //     \\
-        //     \\assert(a == 13)
-        //     ,
-        // },
-        // .{
-        //     .description = "local variable assignment",
-        //     .source =
-        //     \\let a = 6
-        //     \\
-        //     \\{
-        //     \\    let b = 7
-        //     \\    b = 5
-        //     \\    a = a + b
-        //     \\}
-        //     \\
-        //     \\assert(a == 11)
-        //     ,
-        // },
-        // .{
-        //     .description = "local variable declaration nested",
-        //     .source =
-        //     \\let a = 6
-        //     \\
-        //     \\{
-        //     \\    let b = 7
-        //     \\    a = a + b
-        //     \\
-        //     \\    {
-        //     \\        let c = 7
-        //     \\        a = a + c
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(a == 20)
-        //     ,
-        // },
-        // .{
-        //     .description = "local variable assignment nested",
-        //     .source =
-        //     \\let a = 6
-        //     \\
-        //     \\{
-        //     \\    let b = 7
-        //     \\    a = a + b
-        //     \\
-        //     \\    {
-        //     \\        let c = 7
-        //     \\        c = 2
-        //     \\        b = 2
-        //     \\        a = a + b + c
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(a == 17)
-        //     ,
-        // },
-        // .{
-        //     .description = "shadowing",
-        //     .source =
-        //     \\let a = 6
-        //     \\
-        //     \\{
-        //     \\    let a = 10
-        //     \\    let b = 10
-        //     \\    a = a + b
-        //     \\}
-        //     \\
-        //     \\assert(a == 6)
-        //     ,
-        // },
-        // .{
-        //     .description = "shadowing nested",
-        //     .source =
-        //     \\let a = 6
-        //     \\let d = 6
-        //     \\let e = 6
-        //     \\
-        //     \\{
-        //     \\    let a = 10
-        //     \\    let b = 10
-        //     \\    a = 9
-        //     \\    b = 9
-        //     \\
-        //     \\    {
-        //     \\        let a = 3
-        //     \\        let b = 3
-        //     \\        let c = 3
-        //     \\        a = 2
-        //     \\        b = 2
-        //     \\        c = 2
-        //     \\        a = a + b + c
-        //     \\        e = e + a
-        //     \\    }
-        //     \\
-        //     \\    a = a + b
-        //     \\    d = a + b
-        //     \\}
-        //     \\
-        //     \\assert(a == 6)
-        //     \\assert(d == 27)
-        //     \\assert(e == 12)
-        //     ,
-        // },
+        .{
+            .description = "nested variable declaration",
+            .source =
+            \\a = 6
+            \\b = 7
+            \\c = a + b
+            \\(
+            \\    d = c + 1
+            \\    @assert(d == 14)
+            \\)
+            \\@assert(c == 13)
+            ,
+        },
+        .{
+            .description = "using grouping in declaration",
+            .source =
+            \\a = (
+            \\    b = 1
+            \\    b + 1
+            \\)
+            \\@assert(a == 2)
+            ,
+        },
+        .{
+            .description = "using grouping in binary expression and declaration",
+            .source =
+            \\a = (
+            \\    b = 1
+            \\    b + 1
+            \\) + 2
+            \\@assert(a == 4)
+            ,
+        },
+        .{
+            .description = "nested grouping",
+            .source =
+            \\a = (
+            \\    b = 1
+            \\    (
+            \\        c = 2
+            \\        c + b
+            \\    )
+            \\) + 2
+            \\@assert(a == 5)
+            ,
+        },
         // .{
         //     .description = "match as expression",
         //     .source =
@@ -665,272 +508,368 @@ test "vm tests" {
         //     \\assert(result == 21)
         //     ,
         // },
-        // .{
-        //     .description = "infix and prefix",
-        //     .source =
-        //     \\assert((5 + 5) == 10)
-        //     \\assert((10 - 20) == -10)
-        //     \\assert((10 * 54) == 540)
-        //     \\assert((2.5 * 10) == 25)
-        //     \\assert((20 * 4.5) == 90)
-        //     \\assert((10 / 5) == 2)
-        //     \\assert((10 / 2.5) == 4)
-        //     \\assert((20.5 / 2) == 10.25)
-        //     \\assert((100 % 30) == 10)
-        //     \\assert((30 % 100) == 30)
-        //     \\assert((1 & 1) == 1)
-        //     \\assert((1 & 0) == 0)
-        //     \\assert((1 | 1) == 1)
-        //     \\assert((1 | 0) == 1)
-        //     \\assert((1 ^ 1) == 0)
-        //     \\assert((0 ^ 1) == 1)
-        //     \\assert((2 << 2) == 8)
-        //     \\assert((16 >> 2) == 4)
-        //     \\assert((~10) == -11)
-        //     \\assert((5.5 % 3.1) == 2.4)
-        //     \\assert((5 > 3) == true)
-        //     \\assert((4 < 10) == true)
-        //     \\assert((3 <= 3) == true)
-        //     \\assert((2 <= 3) == true)
-        //     \\assert((2 >= 2) == true)
-        //     \\assert((2 >= 1) == true)
-        //     ,
-        // },
-        // .{
-        //     .description = "precedence",
-        //     .source =
-        //     \\assert(2 + 3 * 4 == 14)
-        //     \\assert(2 * 3 + 4 == 10)
-        //     \\assert(2 * (3 + 4) == 14)
-        //     \\assert(10 - 3 - 2 == 5)
-        //     \\assert(2 + 3 * 4 - 1 == 13)
-        //     \\assert(10 / 2 + 3 == 8)
-        //     \\assert(10 / (2 + 3) == 2.0)
-        //     \\assert(2 * 3 * 4 == 24)
-        //     \\assert(true and false or true == true)
-        //     \\assert(true or false and false == true)
-        //     \\assert(!false and true == true)
-        //     \\assert(1 | 2 | 4 == 7)
-        //     \\assert(7 & 6 & 4 == 4)
-        //     \\assert(1 << 1 << 1 == 4)
-        //     \\assert(16 >> 1 >> 1 == 4)
-        //     ,
-        // },
-        // .{
-        //     .description = "addition after assignment",
-        //     .source =
-        //     \\let a = 5
-        //     \\let b = 5
-        //     \\a = "foo"
-        //     \\b = "bar"
-        //     \\assert(a + b == "foobar")
-        //     ,
-        // },
+        .{
+            .description = "binary and unary",
+            .source =
+            \\@assert((5 + 5) == 10)
+            \\@assert((10 - 20) == -10)
+            \\@assert((10 * 54) == 540)
+            \\@assert((2.5 * 10) == 25)
+            \\@assert((20 * 4.5) == 90)
+            \\@assert((10 / 5) == 2)
+            \\@assert((10 / 2.5) == 4)
+            \\@assert((20.5 / 2) == 10.25)
+            \\@assert((100 % 30) == 10)
+            \\@assert((30 % 100) == 30)
+            \\@assert((1 & 1) == 1)
+            \\@assert((1 & 0) == 0)
+            \\@assert((1 | 1) == 1)
+            \\@assert((1 | 0) == 1)
+            \\@assert((1 ^ 1) == 0)
+            \\@assert((0 ^ 1) == 1)
+            \\@assert((2 << 2) == 8)
+            \\@assert((16 >> 2) == 4)
+            \\@assert((~10) == -11)
+            \\@assert((5.5 % 3.1) == 2.4)
+            \\@assert((5 > 3) == true)
+            \\@assert((4 < 10) == true)
+            \\@assert((3 <= 3) == true)
+            \\@assert((2 <= 3) == true)
+            \\@assert((2 >= 2) == true)
+            \\@assert((2 >= 1) == true)
+            ,
+        },
+        .{
+            .description = "precedence",
+            .source =
+            \\@assert(2 + 3 * 4 == 14)
+            \\@assert(2 * 3 + 4 == 10)
+            \\@assert(2 * (3 + 4) == 14)
+            \\@assert(10 - 3 - 2 == 5)
+            \\@assert(2 + 3 * 4 - 1 == 13)
+            \\@assert(10 / 2 + 3 == 8)
+            \\@assert(10 / (2 + 3) == 2.0)
+            \\@assert(2 * 3 * 4 == 24)
+            \\@assert(true and false or true == true)
+            \\@assert(true or false and false == true)
+            \\@assert(!false and true == true)
+            \\@assert(1 | 2 | 4 == 7)
+            \\@assert(7 & 6 & 4 == 4)
+            \\@assert(1 << 1 << 1 == 4)
+            \\@assert(16 >> 1 >> 1 == 4)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate vm tests", &test_cases, run);
 }
 
-// test "function tests" {
-//     const test_cases = [_]TestCase{
-//         .{
-//             .description = "function calls no return",
-//             .source =
-//             \\let foo = fn() {
-//             \\    print("Hello, World!")
-//             \\}
-//             \\
-//             \\let result = foo()
-//             \\
-//             \\assert(result == null)
-//             ,
-//         },
-//         .{
-//             .description = "function calls with return",
-//             .source =
-//             \\let foo = fn(a, b) {
-//             \\    return a + b
-//             \\}
-//             \\
-//             \\let result = foo(25, 11)
-//             \\
-//             \\assert(result == 36)
-//             ,
-//         },
-//         .{
-//             .description = "nested functions",
-//             .source =
-//             \\let foo = fn() {
-//             \\    let bar = fn(a, b) {
-//             \\        return a + b
-//             \\    }
-//             \\    return bar(2, 7)
-//             \\}
-//             \\
-//             \\let result = foo()
-//             \\
-//             \\assert(result == 9)
-//             ,
-//         },
-//         .{
-//             .description = "closure",
-//             .source =
-//             \\let foo = fn() {
-//             \\    let x = 2
-//             \\    let bar = fn(a) {
-//             \\        return a + x
-//             \\    }
-//             \\    return bar
-//             \\}
-//             \\
-//             \\let func = foo()
-//             \\let result = func(10)
-//             \\
-//             \\assert(result == 12)
-//             ,
-//         },
-//         .{
-//             .description = "deep closure",
-//             .source =
-//             \\let foo = fn() {
-//             \\    let x = 1
-//             \\    let bar = fn() {
-//             \\        let y = 2
-//             \\        let baz = fn() {
-//             \\            let z = 3
-//             \\            return x + y + z
-//             \\        }
-//             \\        return baz
-//             \\    }
-//             \\    return bar
-//             \\}
-//             \\
-//             \\let bar = foo()
-//             \\let baz = bar()
-//             \\let result = baz()
-//             \\
-//             \\assert(result == 6)
-//             ,
-//         },
-//         .{
-//             .description = "one line expression",
-//             .source =
-//             \\let foo = fn(a, b) a + b
-//             \\
-//             \\assert(foo(1, 14) == 15)
-//             ,
-//         },
-//         .{
-//             .description = "implicit return",
-//             .source =
-//             \\let foo = fn(a, b) {
-//             \\    a + b
-//             \\}
-//             \\
-//             \\assert(foo(1, 14) == 15)
-//             ,
-//         },
-//         .{
-//             .description = "implicit return with clean up",
-//             .source =
-//             \\let foo = fn(a, b) {
-//             \\    let c = 5
-//             \\    let d = 6
-//             \\    a + b + c + d
-//             \\}
-//             \\
-//             \\assert(foo(1, 14) == 26)
-//             ,
-//         },
-//         .{
-//             .description = "match as return",
-//             .source =
-//             \\let max = fn(a, b) {
-//             \\    match {
-//             \\        a < b -> b
-//             \\        _ -> a
-//             \\    }
-//             \\}
-//             \\
-//             \\assert(max(1, 14) == 14)
-//             \\assert(max(12, 7) == 12)
-//             ,
-//         },
-//     };
-//
-//     try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
-// }
-//
-// test "loop tests" {
-//     const test_cases = [_]TestCase{
-//         .{
-//             .description = "while loop",
-//             .source =
-//             \\let a = 10
-//             \\let b = 0
-//             \\
-//             \\while (a > 0) {
-//             \\    a = a - 1
-//             \\    b = b + 1
-//             \\}
-//             \\
-//             \\assert(a == 0)
-//             \\assert(b == 10)
-//             ,
-//         },
-//         .{
-//             .description = "while one liner",
-//             .source =
-//             \\let a = 10
-//             \\
-//             \\while (a < 20) a = a + 1
-//             \\
-//             \\assert(a == 20)
-//             ,
-//         },
-//         .{
-//             .description = "for loop",
-//             .source =
-//             \\let a = 0
-//             \\let b = 0
-//             \\
-//             \\for (0..3) |i| {
-//             \\    a = a + i
-//             \\    let c = 1
-//             \\    b = b + c
-//             \\}
-//             \\
-//             \\assert(a == 3)
-//             \\assert(b == 3)
-//             ,
-//         },
-//         .{
-//             .description = "for loop with vars as range",
-//             .source =
-//             \\let a = 0
-//             \\let start = 0
-//             \\let end = 3
-//             \\
-//             \\for (start..end) |i| {
-//             \\    a = a + i
-//             \\}
-//             \\
-//             \\assert(a == 3)
-//             ,
-//         },
-//         .{
-//             .description = "for loop one liner",
-//             .source =
-//             \\let a = 0
-//             \\let start = 0
-//             \\let end = 3
-//             \\
-//             \\for (start..end) |i| a = a + 1
-//             \\
-//             \\assert(a == 3)
-//             ,
-//         },
-//     };
-//
-//     try test_utils.runTests(TestCase, "evaluate loop tests", &test_cases, run);
-// }
+test "if tests" {
+    const test_cases = [_]TestCase{
+        .{
+            .description = "evaluate to if",
+            .source =
+            \\foo = true
+            \\bar = if foo then 42 else 43
+            \\@assert(bar == 42)
+            ,
+        },
+        .{
+            .description = "evaluate to else",
+            .source =
+            \\foo = false
+            \\bar = if foo then 42 else 43
+            \\@assert(bar == 43)
+            ,
+        },
+        .{
+            .description = "evaluate to elif",
+            .source =
+            \\foo = 43
+            \\bar = if foo == 42 then 1
+            \\      elif foo == 43 then 2
+            \\      else 3
+            \\@assert(bar == 2)
+            ,
+        },
+        .{
+            .description = "evaluate to if with many branches",
+            .source =
+            \\foo = 42
+            \\bar = if foo == 42 then 1
+            \\      elif foo == 43 then 2
+            \\      elif foo == 44 then 3
+            \\      elif foo == 45 then 4
+            \\      else 5
+            \\@assert(bar == 1)
+            ,
+        },
+        .{
+            .description = "evaluate to else with many branches",
+            .source =
+            \\foo = 41
+            \\bar = if foo == 42 then 1
+            \\      elif foo == 43 then 2
+            \\      elif foo == 44 then 3
+            \\      elif foo == 45 then 4
+            \\      else 5
+            \\@assert(bar == 5)
+            ,
+        },
+        .{
+            .description = "implicit else",
+            .source =
+            \\foo = 41
+            \\bar = if foo == 42 then @assert(true)
+            \\@assert(bar == ())
+            ,
+        },
+    };
+
+    try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
+}
+
+test "match tests" {
+    const test_cases = [_]TestCase{
+        .{
+            .description = "one line",
+            .source =
+            \\foo = match 42 with | 42 -> true
+            \\@assert(foo == true)
+            ,
+        },
+        .{
+            .description = "second branch",
+            .source =
+            \\foo = match 42 with 
+            \\| 41 -> 1
+            \\| 42 -> 2
+            \\@assert(foo == 2)
+            ,
+        },
+        .{
+            .description = "wildcard at end",
+            .source =
+            \\foo = match 43 with 
+            \\| 41 -> 1
+            \\| 42 -> 2
+            \\| _ -> 3
+            \\@assert(foo == 3)
+            ,
+        },
+        .{
+            .description = "wildcard at start",
+            .source =
+            \\foo = match 42 with 
+            \\| _ -> 3
+            \\| 42 -> 1
+            \\| 43 -> 2
+            \\@assert(foo == 3)
+            ,
+        },
+        .{
+            .description = "wildcard in middle",
+            .source =
+            \\foo = match 42 with 
+            \\| 43 -> 1
+            \\| _ -> 3
+            \\| 42 -> 2
+            \\@assert(foo == 3)
+            ,
+        },
+        .{
+            .description = "fallthrough",
+            .source =
+            \\foo = match 41 with 
+            \\| 42 -> @print("foo")
+            \\| 43 -> @print("bar")
+            \\@assert(foo == ())
+            ,
+        },
+        .{
+            .description = "nested",
+            .source =
+            \\foo = 96
+            \\bar = match 43 with 
+            \\| 42 -> 1
+            \\| 43 -> (match foo with
+            \\    | 95 -> 2
+            \\    | 96 -> 3
+            \\    | 97 -> 4)
+            \\| 44 -> 5
+            \\@assert(bar == 3)
+            ,
+        },
+        .{
+            .description = "jump over nested",
+            .source =
+            \\foo = 96
+            \\bar = match 44 with 
+            \\| 42 -> 1
+            \\| 43 -> (match foo with
+            \\    | 95 -> 2
+            \\    | 96 -> 3
+            \\    | 97 -> 4)
+            \\| 44 -> 5
+            \\@assert(bar == 5)
+            ,
+        },
+        .{
+            .description = "grouping in arm",
+            .source =
+            \\foo = match 43 with 
+            \\| 42 -> 1
+            \\| 43 -> (bar = 2
+            \\     bar + 1)
+            \\| 44 -> 5
+            \\@assert(foo == 3)
+            ,
+        },
+    };
+
+    try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
+}
+
+test "function tests" {
+    const test_cases = [_]TestCase{
+        .{
+            .description = "unit return",
+            .source =
+            \\foo = () -> @print("foo")
+            \\result = foo()
+            \\@assert(result == ())
+            ,
+        },
+        .{
+            .description = "number return",
+            .source =
+            \\foo = (a, b) -> a + b
+            \\result = foo(33, 32)
+            \\@assert(result == 65)
+            ,
+        },
+        .{
+            .description = "grouping return",
+            .source =
+            \\foo = (a, b) -> (
+            \\    c = a + b
+            \\    c * c
+            \\)
+            \\result = foo(3, 4)
+            \\@assert(result == 49)
+            ,
+        },
+        .{
+            .description = "nested function",
+            .source =
+            \\foo = () -> (
+            \\    bar = (a, b) -> a * b
+            \\    bar(1, 2) * 3
+            \\)
+            \\result = foo()
+            \\@assert(result == 6)
+            ,
+        },
+        // .{
+        //     .description = "nested functions",
+        //     .source =
+        //     \\let foo = fn() {
+        //     \\    let bar = fn(a, b) {
+        //     \\        return a + b
+        //     \\    }
+        //     \\    return bar(2, 7)
+        //     \\}
+        //     \\
+        //     \\let result = foo()
+        //     \\
+        //     \\assert(result == 9)
+        //     ,
+        // },
+        // .{
+        //     .description = "closure",
+        //     .source =
+        //     \\let foo = fn() {
+        //     \\    let x = 2
+        //     \\    let bar = fn(a) {
+        //     \\        return a + x
+        //     \\    }
+        //     \\    return bar
+        //     \\}
+        //     \\
+        //     \\let func = foo()
+        //     \\let result = func(10)
+        //     \\
+        //     \\assert(result == 12)
+        //     ,
+        // },
+        // .{
+        //     .description = "deep closure",
+        //     .source =
+        //     \\let foo = fn() {
+        //     \\    let x = 1
+        //     \\    let bar = fn() {
+        //     \\        let y = 2
+        //     \\        let baz = fn() {
+        //     \\            let z = 3
+        //     \\            return x + y + z
+        //     \\        }
+        //     \\        return baz
+        //     \\    }
+        //     \\    return bar
+        //     \\}
+        //     \\
+        //     \\let bar = foo()
+        //     \\let baz = bar()
+        //     \\let result = baz()
+        //     \\
+        //     \\assert(result == 6)
+        //     ,
+        // },
+        // .{
+        //     .description = "one line expression",
+        //     .source =
+        //     \\let foo = fn(a, b) a + b
+        //     \\
+        //     \\assert(foo(1, 14) == 15)
+        //     ,
+        // },
+        // .{
+        //     .description = "implicit return",
+        //     .source =
+        //     \\let foo = fn(a, b) {
+        //     \\    a + b
+        //     \\}
+        //     \\
+        //     \\assert(foo(1, 14) == 15)
+        //     ,
+        // },
+        // .{
+        //     .description = "implicit return with clean up",
+        //     .source =
+        //     \\let foo = fn(a, b) {
+        //     \\    let c = 5
+        //     \\    let d = 6
+        //     \\    a + b + c + d
+        //     \\}
+        //     \\
+        //     \\assert(foo(1, 14) == 26)
+        //     ,
+        // },
+        // .{
+        //     .description = "match as return",
+        //     .source =
+        //     \\let max = fn(a, b) {
+        //     \\    match {
+        //     \\        a < b -> b
+        //     \\        _ -> a
+        //     \\    }
+        //     \\}
+        //     \\
+        //     \\assert(max(1, 14) == 14)
+        //     \\assert(max(12, 7) == 12)
+        //     ,
+        // },
+    };
+
+    try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
+}

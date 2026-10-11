@@ -1,8 +1,6 @@
 const std = @import("std");
 const scanner = @import("scanner.zig");
 
-pub const Program = std.ArrayList(*const Expression);
-
 pub const Expression = struct {
     token: scanner.Token,
     data: ExpressionData,
@@ -101,14 +99,6 @@ pub const IfArm = struct {
     condition: *const Expression,
     then: *const Expression,
 };
-
-pub fn printProgram(program: Program, writer: *std.Io.Writer) !void {
-    try writer.print("(Program\n", .{});
-    for (program.items) |expr| {
-        try printExpression(expr, writer, 1);
-    }
-    try writer.print(")", .{});
-}
 
 fn printIndent(writer: *std.Io.Writer, level: usize) !void {
     for (0..level * 2) |_| try writer.writeByte(' ');

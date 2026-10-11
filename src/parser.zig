@@ -6,7 +6,7 @@ const ast = @import("ast.zig");
 const constants = @import("constants.zig");
 const vm = @import("vm.zig");
 
-pub fn createAst(arena: std.mem.Allocator, script_context: *vm.ScriptContext) !ast.Program {
+pub fn createAst(arena: std.mem.Allocator, script_context: *vm.ScriptContext) !*const ast.Expression {
     var s = try scanner.Scanner.init(arena, script_context);
     var p = try Parser.init(arena, &s, script_context);
     return try p.parseProgram();
@@ -53,13 +53,31 @@ pub const Parser = struct {
         });
     }
 
-    pub fn parseProgram(self: *Parser) !ast.Program {
-        var program: std.ArrayList(*const ast.Expression) = .empty;
+    pub fn parseProgram(self: *Parser) !*const ast.Expression {
+        const grouping = try self.arena.create(ast.Expression);
+        grouping.* = .{
+            .data = .{ .Grouping = .empty },
+            .token = scanner.Token.dummy(),
+        };
+
+        const program = try self.arena.create(ast.Expression);
+        program.* = .{
+            .data = .{
+                .Function = .{
+                    .name = "Program",
+                    .params = .empty,
+                    .body = grouping,
+                },
+            },
+            .token = scanner.Token.dummy(),
+        };
+
         while (self.current.type != .Eof) {
             try self.chopNewlines();
             if (self.current.type == .Eof) break;
-            try program.append(self.arena, try self.parseExpression());
+            try grouping.data.Grouping.append(self.arena, try self.parseExpression());
         }
+
         return program;
     }
 
@@ -87,7 +105,7 @@ pub const Parser = struct {
                 }
             }
 
-            while (@intFromEnum(precedence) < getRulePrecedenceValue(self.current.type)) {
+            while (@backingInt(precedence) < getRulePrecedenceValue(self.current.type)) {
                 try self.advance();
                 if (self.current.type == .Eof) break;
                 const t = self.getPrevious().type;
@@ -458,7 +476,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
 }
 
 fn getRulePrecedenceValue(token_type: scanner.TokenType) usize {
-    return @intFromEnum(getRulePrecedence(token_type));
+    return @backingInt(getRulePrecedence(token_type));
 }
 
 fn getRulePrecedence(token_type: scanner.TokenType) Precedence {

@@ -191,7 +191,7 @@ pub const Scanner = struct {
     }
 
     fn isAlpha(char: u8) bool {
-        return std.ascii.isAlphabetic(char) or char == '_';
+        return std.ascii.isAlphabetic(char) or char == '_' or char == '@';
     }
 
     fn peek(self: *Scanner) u8 {

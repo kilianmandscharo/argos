@@ -11,26 +11,6 @@ const parser = @import("parser.zig");
 const ast = @import("ast.zig");
 const native = @import("native.zig");
 
-fn logDebug(comptime fmt: []const u8, args: anytype) void {
-    logging.log(fmt, args, .{
-        .module = "Compiler",
-    });
-}
-
-const VariableInfo = struct {
-    is_used: bool,
-    is_captured: bool,
-    token: scanner.Token,
-    depth: u32,
-};
-
-const Upvalue = struct {
-    index: u8,
-    is_local: bool,
-};
-
-const UINT8_COUNT = std.math.maxInt(u8) + 1;
-
 const Function = struct {
     locals: std.ArrayList(VariableInfo),
     upvalues: std.ArrayList(Upvalue),
@@ -38,6 +18,20 @@ const Function = struct {
     function: *object.ObjFunction,
     index: u8,
     compiler: *Compiler,
+
+    const UINT8_COUNT = std.math.maxInt(u8) + 1;
+
+    const Upvalue = struct {
+        index: u8,
+        is_local: bool,
+    };
+
+    const VariableInfo = struct {
+        is_used: bool,
+        is_captured: bool,
+        token: scanner.Token,
+        depth: u32,
+    };
 
     pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, name: ?[]const u8) !@This() {
         const function = try object.allocateFunction(vm);
@@ -55,9 +49,8 @@ const Function = struct {
         };
     }
 
-    fn getName(self: *Function) []const u8 {
-        if (self.index == 0) return "script";
-        if (self.function.name) |name| return name;
+    fn getName(self: *const Function) []const u8 {
+        if (self.function.name) |name| return name.chars;
         return "anonymous";
     }
 
@@ -162,6 +155,8 @@ pub const Compiler = struct {
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
     functions: std.ArrayList(Function),
+    globals: std.StringHashMapUnmanaged(*object.Obj),
+    debug_indent: usize = 0,
 
     pub fn init(
         vm: *virtual_machine.VirtualMachine,
@@ -173,9 +168,25 @@ pub const Compiler = struct {
             .gpa = gpa,
             .arena = arena,
             .functions = .empty,
+            .globals = .empty,
         };
-        _ = try compiler.addFunction(null);
+        try compiler.initNativeFunctions();
         return compiler;
+    }
+
+    fn log(self: *const Compiler, comptime fmt: []const u8, args: anytype) void {
+        logging.log(fmt, args, .{
+            .messageLevel = .Debug,
+            .currentLevel = .Debug,
+            .indent = self.debug_indent,
+            .module = "Compiler",
+        });
+    }
+
+    pub fn initNativeFunctions(self: *Compiler) !void {
+        for (native.natives) |item| {
+            try self.globals.put(self.arena, item.name, try object.allocateNative(self.vm, item.function));
+        }
     }
 
     pub fn addFunction(
@@ -198,25 +209,9 @@ pub const Compiler = struct {
         return &self.functions.items[self.functions.items.len - 1];
     }
 
-    pub fn compile(self: *Compiler, program: ast.Program) !*object.ObjFunction {
-        for (program.items) |expr| {
-            self.compileExpression(expr) catch |err| {
-                if (constants.debug_compiler) {
-                    self.currentChunk().disassemble("<error>");
-                }
-                return err;
-            };
-        }
-
-        try self.emitOp(.Return);
-
-        var function = self.functions.pop().?;
-        if (comptime constants.debug_disassemble) {
-            const name = function.getName();
-            logDebug("Finished compiling {s}", .{name});
-            function.function.chunk.disassemble(name);
-        }
-
+    pub fn compile(self: *Compiler, program: *const ast.Expression) !*object.ObjFunction {
+        try self.compileExpression(program);
+        const function = self.functions.pop().?;
         return function.function;
     }
 
@@ -291,19 +286,23 @@ pub const Compiler = struct {
     }
 
     fn compileExpression(self: *Compiler, expr: *const ast.Expression) anyerror!void {
+        if (comptime constants.debug_compiler) {
+            self.log("compiling {s}", .{@tagName(expr.data)});
+            self.debug_indent += 1;
+        }
+
         switch (expr.data) {
             .Declaration => |declaration| {
                 try self.compileExpression(declaration.right);
                 try self.getFunction().addLocal(&declaration.left);
+                try self.emitOp(.Unit);
             },
             .Identifier => {
                 if (self.getFunction().resolveLocal(&expr.token)) |index| {
                     try self.emitOpU8(.GetLocal, index);
                 } else if (try self.getFunction().resolveUpvalue(&expr.token)) |index| {
                     try self.emitOpU8(.GetUpvalue, index);
-                } else if (native.getNative(expr.token.data)) |nativeFn| {
-                    // TODO: allocate once and not for each call
-                    const func_obj = try object.allocateNative(self.vm, nativeFn);
+                } else if (self.globals.get(expr.token.data)) |func_obj| {
                     try self.emitConstant(value.wrapObj(func_obj));
                 } else {
                     return self.errorAt(&expr.token, "unknown identifier");
@@ -374,14 +373,25 @@ pub const Compiler = struct {
             .Grouping => |grouping| {
                 const function = self.getFunction();
                 function.beginScope();
-                for (grouping.items) |item| {
+                for (grouping.items, 0..) |item, i| {
                     try self.compileExpression(item);
-                    // TODO: what to do?
+                    const is_last = i == grouping.items.len - 1;
+                    if (!is_last) {
+                        try self.emitOp(.Pop);
+                    }
                 }
                 try function.endScope();
             },
             .Function => |function| {
                 var new_function = try self.addFunction(function.name);
+
+                if (comptime constants.debug_compiler) {
+                    self.log("added new function, current function stack:", .{});
+                    for (self.functions.items) |func| {
+                        self.log("{s}", .{func.getName()});
+                    }
+                }
+
                 new_function.beginScope();
 
                 for (function.params.items) |*param| {
@@ -403,25 +413,29 @@ pub const Compiler = struct {
 
                 if (comptime constants.debug_disassemble) {
                     const name = new_function.getName();
-                    logDebug("Finished compiling {s}", .{name});
+                    self.log("Finished compiling {s}", .{name});
                     new_function.function.chunk.disassemble(name);
-                }
-
-                if (new_function.upvalues.items.len > 0) {
-                    const constant = try self.makeConstant(value.wrapObj(&new_function.function.obj));
-                    try self.emitOpU16(.Closure, constant);
-                } else {
-                    try self.emitConstant(value.wrapObj(&new_function.function.obj));
-                }
-
-                for (new_function.upvalues.items) |upvalue| {
-                    try self.emitByte(@intFromBool(upvalue.is_local));
-                    try self.emitByte(upvalue.index);
                 }
 
                 try new_function.endScope();
 
-                _ = self.functions.pop();
+                if (new_function.index > 0) {
+                    const compiled_function = self.functions.pop().?;
+
+                    if (compiled_function.upvalues.items.len > 0) {
+                        const constant = try self.makeConstant(value.wrapObj(&compiled_function.function.obj));
+                        try self.emitOpU16(.Closure, constant);
+                    } else {
+                        try self.emitConstant(value.wrapObj(&compiled_function.function.obj));
+                    }
+
+                    for (compiled_function.upvalues.items) |upvalue| {
+                        try self.emitByte(@intFromBool(upvalue.is_local));
+                        try self.emitByte(upvalue.index);
+                    }
+                } else {
+                    try self.emitConstant(value.wrapObj(&new_function.function.obj));
+                }
             },
             .Call => |call| {
                 const count = call.args.items.len;
@@ -476,7 +490,6 @@ pub const Compiler = struct {
 
                 if (!found_else) {
                     try self.emitOp(.Pop);
-                    // TODO: does that make sense?
                     try self.emitOp(.Unit);
                 }
 
@@ -506,6 +519,8 @@ pub const Compiler = struct {
 
                 if (ifExpr.alt) |alt| {
                     try self.compileExpression(alt);
+                } else {
+                    try self.emitOp(.Unit);
                 }
 
                 for (end_jumps.items) |jump| {
@@ -514,6 +529,10 @@ pub const Compiler = struct {
 
                 end_jumps.deinit(self.gpa);
             },
+        }
+
+        if (comptime constants.debug_compiler) {
+            self.debug_indent -= 1;
         }
     }
 };

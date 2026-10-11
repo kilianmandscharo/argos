@@ -1,7 +1,8 @@
 const std = @import("std");
 
 pub const debug_parser = false;
-pub const debug_compiler = false;
+pub const debug_compiler = true;
+pub const debug_disassemble = true;
 
 pub const debug_trace_execution = true;
 pub const frames_max = 64;
@@ -10,7 +11,5 @@ pub const stack_max = std.math.maxInt(u8) * frames_max;
 pub const debug_stress_gc = false;
 pub const debug_log_gc = false;
 pub const gc_heap_grow_factor = 2;
-
-pub const debug_disassemble = false;
 
 pub const stack_trace_on_error = false;

@@ -3,12 +3,25 @@ const value = @import("value.zig");
 const object = @import("object.zig");
 const virtual_machine = @import("vm.zig");
 
-pub fn getNative(name: []const u8) ?object.NativeFn {
-    if (std.mem.eql(u8, name, "clock")) return clockNative;
-    if (std.mem.eql(u8, name, "print")) return printNative;
-    if (std.mem.eql(u8, name, "assert")) return assertNative;
-    return null;
-}
+const Native = struct {
+    name: []const u8,
+    function: object.NativeFn,
+};
+
+pub const natives: []const Native = &.{
+    .{
+        .name = "@clock",
+        .function = clockNative,
+    },
+    .{
+        .name = "@print",
+        .function = printNative,
+    },
+    .{
+        .name = "@assert",
+        .function = assertNative,
+    },
+};
 
 fn clockNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
     _ = arg_count;
