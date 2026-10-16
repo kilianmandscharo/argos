@@ -1,6 +1,5 @@
-foo = () -> (
-    bar = (a, b) -> a * b
-    bar(1, 2) * 3
-)
-result = foo()
-@assert(result == 6)
+a = 1 + 2
+b = a != 4
+c = !b
+foo = (a, b) -> a * b
+foo(1, 2)
