@@ -782,90 +782,55 @@ test "function tests" {
             \\@assert(result == 20)
             ,
         },
-        // .{
-        //     .description = "closure",
-        //     .source =
-        //     \\let foo = fn() {
-        //     \\    let x = 2
-        //     \\    let bar = fn(a) {
-        //     \\        return a + x
-        //     \\    }
-        //     \\    return bar
-        //     \\}
-        //     \\
-        //     \\let func = foo()
-        //     \\let result = func(10)
-        //     \\
-        //     \\assert(result == 12)
-        //     ,
-        // },
-        // .{
-        //     .description = "deep closure",
-        //     .source =
-        //     \\let foo = fn() {
-        //     \\    let x = 1
-        //     \\    let bar = fn() {
-        //     \\        let y = 2
-        //     \\        let baz = fn() {
-        //     \\            let z = 3
-        //     \\            return x + y + z
-        //     \\        }
-        //     \\        return baz
-        //     \\    }
-        //     \\    return bar
-        //     \\}
-        //     \\
-        //     \\let bar = foo()
-        //     \\let baz = bar()
-        //     \\let result = baz()
-        //     \\
-        //     \\assert(result == 6)
-        //     ,
-        // },
-        // .{
-        //     .description = "one line expression",
-        //     .source =
-        //     \\let foo = fn(a, b) a + b
-        //     \\
-        //     \\assert(foo(1, 14) == 15)
-        //     ,
-        // },
-        // .{
-        //     .description = "implicit return",
-        //     .source =
-        //     \\let foo = fn(a, b) {
-        //     \\    a + b
-        //     \\}
-        //     \\
-        //     \\assert(foo(1, 14) == 15)
-        //     ,
-        // },
-        // .{
-        //     .description = "implicit return with clean up",
-        //     .source =
-        //     \\let foo = fn(a, b) {
-        //     \\    let c = 5
-        //     \\    let d = 6
-        //     \\    a + b + c + d
-        //     \\}
-        //     \\
-        //     \\assert(foo(1, 14) == 26)
-        //     ,
-        // },
-        // .{
-        //     .description = "match as return",
-        //     .source =
-        //     \\let max = fn(a, b) {
-        //     \\    match {
-        //     \\        a < b -> b
-        //     \\        _ -> a
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(max(1, 14) == 14)
-        //     \\assert(max(12, 7) == 12)
-        //     ,
-        // },
+        .{
+            .description = "deep closure",
+            .source =
+            \\foo = () -> (
+            \\    x = 1
+            \\    bar = () -> (
+            \\        y = 2
+            \\        baz = () -> (
+            \\            z = 3
+            \\            x + y + z
+            \\        )
+            \\        baz
+            \\    )
+            \\    bar
+            \\)
+            \\
+            \\bar = foo()
+            \\baz = bar()
+            \\result = baz()
+            \\
+            \\@assert(result == 6)
+            ,
+        },
+        .{
+            .description = "iife",
+            .source =
+            \\foo = ((a, b) -> a + b)(1, 2)
+            \\@assert(foo == 3)
+            ,
+        },
+        .{
+            .description = "recursion",
+            .source =
+            \\fac = (n) -> if n <= 1 then 1 else n * fac(n-1)
+            \\result = fac(5)
+            \\@assert(result == 120)
+            ,
+        },
+        .{
+            .description = "fib",
+            .source =
+            \\fib = (index) -> (
+            \\    inner = (a, b, n) -> if n <= 0 then a else inner(b, a+b, n-1)
+            \\    inner(0, 1, index)
+            \\)
+            \\result = fib(5)
+            \\@assert(result == 5)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);

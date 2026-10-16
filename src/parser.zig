@@ -20,7 +20,7 @@ pub const Parser = struct {
     debug_indent: usize = 0,
     script_context: *vm.ScriptContext,
     ctx: struct {
-        current_var_name: ?[]const u8,
+        current_var_token: ?scanner.Token,
     },
 
     pub fn init(arena: std.mem.Allocator, s: *scanner.Scanner, script_context: *vm.ScriptContext) !Parser {
@@ -35,7 +35,7 @@ pub const Parser = struct {
             .previous = null,
             .arena = arena,
             .ctx = .{
-                .current_var_name = null,
+                .current_var_token = null,
             },
         };
     }
@@ -64,7 +64,7 @@ pub const Parser = struct {
         program.* = .{
             .data = .{
                 .Function = .{
-                    .name = "Program",
+                    .name = scanner.Token.dummyWithName("Program"),
                     .params = .empty,
                     .body = grouping,
                 },
@@ -280,7 +280,7 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
 
     if (try parser.match(.RParen)) {
         if (try parser.match(.Arrow)) {
-            const name = parser.ctx.current_var_name;
+            const name = parser.ctx.current_var_token;
             const body = try parser.parseExpression();
             return .init(.{ .Function = .{ .params = .empty, .body = body, .name = name } }, token);
         }
@@ -299,7 +299,7 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
     );
 
     if (try parser.match(.Arrow)) {
-        const functionName = parser.ctx.current_var_name;
+        const functionName = parser.ctx.current_var_token;
         const body = try parser.parseExpression();
 
         var params: std.ArrayList(ast.FunctionParam) = .empty;
@@ -417,8 +417,8 @@ fn parseDeclaration(parser: *Parser, left: ast.Expression) !ast.Expression {
         return parser.errorAtPrevious("expect identifier on left side of declaration");
     }
 
-    parser.ctx.current_var_name = left.data.Identifier;
-    defer parser.ctx.current_var_name = null;
+    parser.ctx.current_var_token = left.token;
+    defer parser.ctx.current_var_token = null;
 
     const right = try parser.parseExpression();
 

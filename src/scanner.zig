@@ -71,6 +71,12 @@ pub const Token = struct {
         };
     }
 
+    pub fn dummyWithName(name: []const u8) @This() {
+        var token = dummy();
+        token.data = name;
+        return token;
+    }
+
     pub fn toString(self: Token) []const u8 {
         if (self.type == .NewLine) return "<newline>";
         if (self.type == .Eof) return "EOF";

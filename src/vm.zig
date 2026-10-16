@@ -464,11 +464,6 @@ pub const VirtualMachine = struct {
                     ip += 1;
                     self.push(self.stack[frame.slot + slot]);
                 },
-                .SetLocal => {
-                    const slot = frame.function.chunk.code.items[ip];
-                    ip += 1;
-                    self.stack[frame.slot + slot] = self.pop();
-                },
                 .JumpIfFalse => {
                     const offset = chunk.u16ToIndex(
                         frame.function.chunk.code.items[ip],
@@ -530,11 +525,6 @@ pub const VirtualMachine = struct {
                     const slot = frame.function.chunk.code.items[ip];
                     ip += 1;
                     self.push(frame.upvalues.?[slot].?.location.*);
-                },
-                .SetUpvalue => {
-                    const slot = frame.function.chunk.code.items[ip];
-                    ip += 1;
-                    frame.upvalues.?[slot].?.location.* = self.pop();
                 },
                 .CloseUpvalue => {
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);

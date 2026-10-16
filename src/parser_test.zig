@@ -54,7 +54,7 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
         },
         .Function => |func| {
             if (func.name) |name| {
-                try std.testing.expectEqualStrings(name, actual.Function.name.?);
+                try std.testing.expectEqualStrings(name.data, actual.Function.name.?.data);
             } else {
                 try std.testing.expect(actual.Function.name == null);
             }
@@ -1011,7 +1011,7 @@ test "function literal" {
                             .Function = .{
                                 .params = .empty,
                                 .body = &e(.{ .Unit = {} }),
-                                .name = "foo",
+                                .name = s("foo"),
                             },
                         },
                     ),

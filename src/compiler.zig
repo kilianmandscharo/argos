@@ -33,10 +33,10 @@ pub const Function = struct {
         depth: u32,
     };
 
-    pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, name: ?[]const u8) !*@This() {
+    pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, name: ?scanner.Token) !*@This() {
         const function = try object.allocateFunction(vm);
-        if (name) |func_name| {
-            const obj = try object.copyString(vm, func_name);
+        if (name) |token| {
+            const obj = try object.copyString(vm, token.data);
             function.name = obj.asString();
         }
         const owned = try compiler.arena.create(Function);
@@ -204,14 +204,14 @@ pub const Compiler = struct {
 
     pub fn addFunction(
         self: *Compiler,
-        name: ?[]const u8,
+        name: ?scanner.Token,
     ) !*Function {
         const index = self.functions.items.len;
         var function = try Function.init(self.vm, self, @intCast(index), name);
         try function.locals.append(self.arena, .{
             .is_used = true,
             .is_captured = false,
-            .token = scanner.Token.dummy(),
+            .token = if (name) |token| token else scanner.Token.dummy(),
             .depth = 0,
         });
         try self.functions.append(self.arena, function);

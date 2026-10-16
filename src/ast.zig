@@ -62,7 +62,7 @@ const Unary = struct {
 const Function = struct {
     params: std.ArrayList(FunctionParam),
     body: *const Expression,
-    name: ?[]const u8 = null,
+    name: ?scanner.Token = null,
 };
 
 pub const FunctionParam = union(enum) {
