@@ -1,1 +1,5 @@
-- implement match patterns
+- match patterns
+- tail recursion
+- patterns in var declaration
+- list concatenation
+- type checker
