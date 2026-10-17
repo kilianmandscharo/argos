@@ -31,6 +31,7 @@ pub const TokenType = enum {
     Asterisk,
     Percent,
     Arrow,
+    Cons,
 
     And,
     Or,
@@ -259,6 +260,7 @@ pub const Scanner = struct {
             '>' => return self.scanGreater(),
             '!' => return if (self.match('=')) self.makeToken(.NotEq) else self.makeToken(.Bang),
             '=' => return if (self.match('=')) self.makeToken(.Eq) else self.makeToken(.Assign),
+            ':' => return if (self.match(':')) self.makeToken(.Cons) else self.scannerError("unexpected character"),
             '~' => return self.makeToken(.Tilde),
             '\n' => {
                 const token = self.makeToken(.NewLine);
@@ -273,7 +275,7 @@ pub const Scanner = struct {
                 if (Scanner.isAlpha(char)) {
                     return self.makeIdentifier();
                 }
-                return self.scannerError("Unexpected character.");
+                return self.scannerError("unexpected character");
             },
         }
     }
@@ -294,7 +296,7 @@ pub const Scanner = struct {
         while (self.peek() != '"' and !self.isAtEnd()) {
             _ = self.advance();
         }
-        if (self.isAtEnd()) return self.scannerError("Unterminated string.");
+        if (self.isAtEnd()) return self.scannerError("unterminated string");
         _ = self.advance();
         return self.makeToken(.String);
     }

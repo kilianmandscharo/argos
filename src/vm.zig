@@ -368,6 +368,15 @@ pub const VirtualMachine = struct {
                 .Unit => self.push(value.valueUnit()),
                 .True => self.push(value.wrapBool(true)),
                 .False => self.push(value.wrapBool(false)),
+                .Cons => {
+                    const b = self.pop();
+                    const a = self.peek(0);
+                    if (!b.isObjType(.List)) {
+                        return self.runtimeError("invalid right side in cons operation: {s}", .{b.getType()});
+                    }
+                    const new_list = value.wrapObj(try b.asObj().asList().cloneAndPrepend(self, a));
+                    self.swapInPlace(new_list, 0);
+                },
                 .Add => {
                     if (self.peek(0).isObjType(.String) and self.peek(1).isObjType(.String)) {
                         try self.concatenate();
@@ -545,7 +554,7 @@ pub const VirtualMachine = struct {
                     );
                     ip += 2;
                     for (0..count) |_| {
-                        try list.data.append(self.gpa, self.pop());
+                        try list.prepend(self, self.pop());
                     }
                     self.push(val);
                 },

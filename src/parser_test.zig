@@ -625,6 +625,17 @@ test "binary expression" {
                 },
             },
         },
+        .{
+            .description = "should parse cons",
+            .input = "1 :: []",
+            .expected_expression = .{
+                .Binary = .{
+                    .left = &e(.{ .Integer = 1 }),
+                    .right = &e(.{ .List = .empty }),
+                    .operator = .Cons,
+                },
+            },
+        },
     };
 
     try test_utils.runTestsWithArena(

@@ -205,23 +205,6 @@ pub const Parser = struct {
     }
 };
 
-const Precedence = enum(u8) {
-    Lowest = 1,
-    Assign,
-    LogicalOr,
-    LogicalAnd,
-    Equals,
-    BitwiseOr,
-    BitwiseXor,
-    BitwiseAnd,
-    LessGreater,
-    Shift,
-    Sum,
-    Product,
-    Prefix,
-    Call,
-};
-
 fn parseString(parser: *Parser) !ast.Expression {
     const token = parser.getPrevious();
     const s = token.toString();
@@ -425,6 +408,23 @@ fn parseDeclaration(parser: *Parser, left: ast.Expression) !ast.Expression {
     return .init(.{ .Declaration = .{ .left = left.token, .right = right } }, left.token);
 }
 
+const Precedence = enum(u8) {
+    Lowest = 1,
+    Assign,
+    LogicalOr,
+    LogicalAnd,
+    Equals,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseAnd,
+    LessGreater,
+    Shift,
+    Sum,
+    Product,
+    Prefix,
+    Call,
+};
+
 const ParseRule = struct {
     prefix: ?*const fn (parser: *Parser) anyerror!ast.Expression,
     infix: ?*const fn (parser: *Parser, left: ast.Expression) anyerror!ast.Expression,
@@ -474,6 +474,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .Else => .{ .prefix = null, .infix = null, .precedence = null },
         .NewLine => .{ .prefix = null, .infix = null, .precedence = null },
         .Eof => .{ .prefix = null, .infix = null, .precedence = null },
+        .Cons => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
     };
 }
 

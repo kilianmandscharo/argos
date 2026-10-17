@@ -835,3 +835,68 @@ test "function tests" {
 
     try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
 }
+
+test "list tests" {
+    const test_cases = [_]TestCase{
+        .{
+            .description = "empty list",
+            .source =
+            \\foo = []
+            \\l = @len(foo)
+            \\@assert(l == 0)
+            ,
+        },
+        .{
+            .description = "with items",
+            .source =
+            \\foo = [1, 2, 3]
+            \\@assert(@nth(foo, 0) == 1)
+            \\@assert(@nth(foo, 1) == 2)
+            \\@assert(@nth(foo, 2) == 3)
+            \\@assert(@len(foo) == 3)
+            ,
+        },
+        .{
+            .description = "cons with empty list",
+            .source =
+            \\foo = 1 :: []
+            \\@assert(@nth(foo, 0) == 1)
+            \\@assert(@len(foo) == 1)
+            ,
+        },
+        .{
+            .description = "cons with filled list",
+            .source =
+            \\foo = 1 :: [2]
+            \\@assert(@nth(foo, 0) == 1)
+            \\@assert(@nth(foo, 1) == 2)
+            \\@assert(@len(foo) == 2)
+            ,
+        },
+        .{
+            .description = "nested cons",
+            .source =
+            \\foo = 1 :: (2 :: [])
+            \\@assert(@len(foo) == 2)
+            \\@assert(@nth(foo, 0) == 1)
+            \\@assert(@nth(foo, 1) == 2)
+            ,
+        },
+        .{
+            .description = "immutable list",
+            .source =
+            \\foo = [1]
+            \\bar = 2 :: foo
+            \\
+            \\@assert(@len(foo) == 1)
+            \\@assert(@nth(foo, 0) == 1)
+            \\
+            \\@assert(@len(bar) == 2)
+            \\@assert(@nth(bar, 0) == 2)
+            \\@assert(@nth(bar, 1) == 1)
+            ,
+        },
+    };
+
+    try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
+}

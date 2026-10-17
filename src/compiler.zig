@@ -379,6 +379,7 @@ pub const Compiler = struct {
                         .LeftShift => try self.emitOp(.LeftShift),
                         .RightShift => try self.emitOp(.RightShift),
                         .Percent => try self.emitOp(.Mod),
+                        .Cons => try self.emitOp(.Cons),
                         else => @panic("unknown operator"),
                     }
                 }
@@ -467,10 +468,8 @@ pub const Compiler = struct {
                 try self.emitOpU8(.Call, @intCast(count));
             },
             .List => |val| {
-                var index = val.items.len;
-                while (index > 0) {
-                    index -= 1;
-                    try self.compileExpression(val.items[index]);
+                for (val.items) |item| {
+                    try self.compileExpression(item);
                 }
                 try self.emitConstant(value.wrapObj(try object.allocateList(self.vm)));
                 try self.emitOpU16(.ListInit, @intCast(val.items.len));

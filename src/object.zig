@@ -46,8 +46,15 @@ pub fn allocateObject(vm: *virtual_machine.VirtualMachine, T: type) !*T {
 
 pub fn allocateList(vm: *virtual_machine.VirtualMachine) !*Obj {
     const list = try allocateObject(vm, ObjList);
-    list.data = .empty;
+    list.data = .{};
     return &list.obj;
+}
+
+pub fn allocateListItem(vm: *virtual_machine.VirtualMachine) !*ObjListItem {
+    const list_item = try allocateObject(vm, ObjListItem);
+    list_item.value = undefined;
+    list_item.node = undefined;
+    return list_item;
 }
 
 pub fn allocateUpvalue(vm: *virtual_machine.VirtualMachine, slot: *value.Value) !*ObjUpvalue {
@@ -104,6 +111,7 @@ pub const ObjType = enum {
     Closure,
     Upvalue,
     List,
+    ListItem,
 };
 
 pub const Obj = struct {
@@ -126,6 +134,7 @@ pub const Obj = struct {
             .Closure => try self.asClosure().format(writer),
             .Upvalue => try self.asUpvalue().format(writer),
             .List => try self.asList().format(writer),
+            .ListItem => try self.asList().format(writer),
         }
     }
 
@@ -167,9 +176,13 @@ pub const Obj = struct {
             },
             .List => {
                 const list_obj = self.asList();
-                list_obj.data.deinit(gpa);
                 gpa.destroy(list_obj);
                 vm.bytes_allocated -= @sizeOf(ObjList);
+            },
+            .ListItem => {
+                const list_item_obj = self.asListItem();
+                gpa.destroy(list_item_obj);
+                vm.bytes_allocated -= @sizeOf(ObjListItem);
             },
         }
     }
@@ -195,6 +208,10 @@ pub const Obj = struct {
     }
 
     pub inline fn asList(self: *@This()) *ObjList {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
+
+    pub inline fn asListItem(self: *@This()) *ObjListItem {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 };
@@ -284,7 +301,44 @@ pub const ObjList = struct {
     pub const KIND = ObjType.List;
 
     obj: Obj = undefined,
-    data: std.ArrayList(value.Value),
+    data: std.SinglyLinkedList,
+
+    pub inline fn getValueFromNode(listNode: *const std.SinglyLinkedList.Node) value.Value {
+        return getItemFromNode(listNode).value;
+    }
+
+    pub inline fn getItemFromNode(node: *const std.SinglyLinkedList.Node) *ObjListItem {
+        return @alignCast(@constCast(@fieldParentPtr("node", node)));
+    }
+
+    pub fn cloneAndPrepend(self: *ObjList, vm: *virtual_machine.VirtualMachine, val: value.Value) !*Obj {
+        const obj = try allocateList(vm);
+        const item = try allocateListItem(vm);
+        obj.asList().data.prepend(&item.node);
+        item.value = val;
+        item.node = .{
+            .next = self.data.first,
+        };
+        return obj;
+    }
+
+    pub fn prepend(self: *ObjList, vm: *virtual_machine.VirtualMachine, val: value.Value) !void {
+        const item = try allocateListItem(vm);
+        item.value = val;
+        item.node = .{};
+        self.data.prepend(&item.node);
+    }
+
+    pub fn popFirst(self: *ObjList) ?value.Value {
+        if (self.data.popFirst()) |node| {
+            return getValueFromNode(node);
+        }
+        return null;
+    }
+
+    pub fn len(self: *ObjList) usize {
+        return self.data.len();
+    }
 
     pub fn format(
         self: @This(),
@@ -292,5 +346,37 @@ pub const ObjList = struct {
     ) std.Io.Writer.Error!void {
         _ = self;
         try writer.print("<List>", .{});
+    }
+
+    const ListIterator = struct {
+        current: ?*const std.SinglyLinkedList.Node,
+
+        pub fn next(self: *ListIterator) ?*ObjListItem {
+            if (self.current) |node| {
+                self.current = node.next;
+                return getItemFromNode(node);
+            }
+            return null;
+        }
+    };
+
+    pub fn iterator(self: *ObjList) ListIterator {
+        return .{ .current = self.data.first };
+    }
+};
+
+pub const ObjListItem = struct {
+    pub const KIND = ObjType.ListItem;
+
+    obj: Obj = undefined,
+    node: std.SinglyLinkedList.Node,
+    value: value.Value,
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        _ = self;
+        try writer.print("<ListItem>", .{});
     }
 };
