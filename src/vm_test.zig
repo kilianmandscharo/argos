@@ -88,426 +88,72 @@ test "vm tests" {
             \\@assert(a == 5)
             ,
         },
-        // .{
-        //     .description = "match as expression",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\let b = match (a) 5 -> 10
-        //     \\
-        //     \\assert(b == 10)
-        //     ,
-        // },
-        // .{
-        //     .description = "match as expression null",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\let b = match (a) 4 -> 10
-        //     \\
-        //     \\assert(b == null)
-        //     ,
-        // },
-        // .{
-        //     .description = "match one liner true",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match (a) 5 -> { a = 1 }
-        //     \\
-        //     \\assert(a == 1)
-        //     ,
-        // },
-        // .{
-        //     .description = "match one liner false",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match (a) 4 -> { a = 1 }
-        //     \\
-        //     \\assert(a == 5)
-        //     ,
-        // },
-        // .{
-        //     .description = "match first branch",
-        //     .source =
-        //     \\let a = true
-        //     \\let b
-        //     \\
-        //     \\match (a) {
-        //     \\    true -> {
-        //     \\        b = 1
-        //     \\    }
-        //     \\    false -> {
-        //     \\        b = 2
-        //     \\    }
-        //     \\    else -> {
-        //     \\        b = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(b == 1)
-        //     ,
-        // },
-        // .{
-        //     .description = "match second branch",
-        //     .source =
-        //     \\let a = false
-        //     \\let b
-        //     \\
-        //     \\match (a) {
-        //     \\    true -> {
-        //     \\        b = 1
-        //     \\    }
-        //     \\    false -> {
-        //     \\        b = 2
-        //     \\    }
-        //     \\    else -> {
-        //     \\        b = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(b == 2)
-        //     ,
-        // },
-        // .{
-        //     .description = "match else branch",
-        //     .source =
-        //     \\let a = "foo"
-        //     \\let b
-        //     \\
-        //     \\match (a) {
-        //     \\    true -> {
-        //     \\        b = 1
-        //     \\    }
-        //     \\    false -> {
-        //     \\        b = 2
-        //     \\    }
-        //     \\    _ -> {
-        //     \\        b = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(b == 3)
-        //     ,
-        // },
-        // .{
-        //     .description = "no match",
-        //     .source =
-        //     \\let a = "foo"
-        //     \\let b
-        //     \\
-        //     \\match (a) {
-        //     \\    true -> {
-        //     \\        b = 1
-        //     \\    }
-        //     \\    false -> {
-        //     \\        b = 2
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(b == null)
-        //     ,
-        // },
-        // .{
-        //     .description = "multi line with assignment first branch",
-        //     .source =
-        //     \\let a = match {
-        //     \\    true -> 1
-        //     \\    false -> 2
-        //     \\}
-        //     \\
-        //     \\assert(a == 1)
-        //     ,
-        // },
-        // .{
-        //     .description = "multi line with assignment second branch",
-        //     .source =
-        //     \\let a = match {
-        //     \\    false -> 1
-        //     \\    true -> 2
-        //     \\}
-        //     \\
-        //     \\assert(a == 2)
-        //     ,
-        // },
-        // .{
-        //     .description = "multi line with assignment else branch",
-        //     .source =
-        //     \\let a = match {
-        //     \\    5 < 3 -> 1
-        //     \\    3 > 5 -> 2
-        //     \\    _ -> 3
-        //     \\}
-        //     \\
-        //     \\assert(a == 3)
-        //     ,
-        // },
-        // .{
-        //     .description = "multi line with assignment no match",
-        //     .source =
-        //     \\let a = match {
-        //     \\    5 < 3 -> 1
-        //     \\    3 > 5 -> 2
-        //     \\}
-        //     \\
-        //     \\assert(a == null)
-        //     ,
-        // },
-        // .{
-        //     .description = "match one liner no target true",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match true -> { a = 1 }
-        //     \\
-        //     \\assert(a == 1)
-        //     ,
-        // },
-        // .{
-        //     .description = "match one liner no target false",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match false -> { a = 1 }
-        //     \\
-        //     \\assert(a == 5)
-        //     ,
-        // },
-        // .{
-        //     .description = "match first branch no target",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match {
-        //     \\    5 < 10 -> {
-        //     \\        a = 1
-        //     \\    }
-        //     \\    3 < 11 -> {
-        //     \\        a = 2
-        //     \\    }
-        //     \\    _ -> {
-        //     \\        a = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(a == 1)
-        //     ,
-        // },
-        // .{
-        //     .description = "match second branch no target",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match {
-        //     \\    5 > 10 -> {
-        //     \\        a = 1
-        //     \\    }
-        //     \\    3 < 11 -> {
-        //     \\        a = 2
-        //     \\    }
-        //     \\    else -> {
-        //     \\        a = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(a == 2)
-        //     ,
-        // },
-        // .{
-        //     .description = "match else branch no target",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match {
-        //     \\    5 > 10 -> {
-        //     \\        a = 1
-        //     \\    }
-        //     \\    3 > 11 -> {
-        //     \\        a = 2
-        //     \\    }
-        //     \\    _ -> {
-        //     \\        a = 3
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(a == 3)
-        //     ,
-        // },
-        // .{
-        //     .description = "no match no target",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\match {
-        //     \\    5 > 10 -> {
-        //     \\        a = 1
-        //     \\    }
-        //     \\    3 > 11 -> {
-        //     \\        a = 2
-        //     \\    }
-        //     \\}
-        //     \\
-        //     \\assert(a == 5)
-        //     ,
-        // },
-        // .{
-        //     .description = "match block expression",
-        //     .source =
-        //     \\let a = 5
-        //     \\
-        //     \\let b = match(a) {
-        //     \\    5 -> {
-        //     \\        a = 1
-        //     \\        10 + 4
-        //     \\    }
-        //     \\    _ -> 3 + 3
-        //     \\}
-        //     \\
-        //     \\assert(a == 1)
-        //     \\assert(b == 14)
-        //     ,
-        // },
-        // .{
-        //     .description = "logical and true",
-        //     .source =
-        //     \\let a = true and true
-        //     \\
-        //     \\assert(a == true)
-        //     ,
-        // },
-        // .{
-        //     .description = "logical and false",
-        //     .source =
-        //     \\let a = false and true
-        //     \\
-        //     \\assert(a == false)
-        //     ,
-        // },
-        // .{
-        //     .description = "logical and false on right hand side",
-        //     .source =
-        //     \\let a = true and false
-        //     \\
-        //     \\assert(a == false)
-        //     ,
-        // },
-        // .{
-        //     .description = "logical or false",
-        //     .source =
-        //     \\let a = false or false
-        //     \\
-        //     \\assert(a == false)
-        //     ,
-        // },
-        // .{
-        //     .description = "logical or true both",
-        //     .source =
-        //     \\let a = true or true
-        //     \\
-        //     \\assert(a == true)
-        //     ,
-        // },
-        // .{
-        //     .description = "logical or true left",
-        //     .source =
-        //     \\let a = true or false
-        //     \\
-        //     \\assert(a == true)
-        //     ,
-        // },
-        // .{
-        //     .description = "logical or true right",
-        //     .source =
-        //     \\let a = false or true
-        //     \\
-        //     \\assert(a == true)
-        //     ,
-        // },
-        // .{
-        //     .description = "string concatenation",
-        //     .source =
-        //     \\let foo = "foo"
-        //     \\let bar = "bar"
-        //     \\let result = foo + bar
-        //     \\
-        //     \\assert(result == "foobar")
-        //     ,
-        // },
-        // .{
-        //     .description = "list index",
-        //     .source =
-        //     \\let foo = List{1, 2, 3, 4, 5}
-        //     \\let result = foo[0] + foo[-1]
-        //     \\
-        //     \\assert(result == 6)
-        //     ,
-        // },
-        // .{
-        //     .description = "list index assignment",
-        //     .source =
-        //     \\let foo = List{1, 2, 3, 4, 5}
-        //     \\foo[0] = 42
-        //     \\
-        //     \\assert(foo[0] == 42)
-        //     ,
-        // },
-        // .{
-        //     .description = "local list index assignment",
-        //     .source =
-        //     \\let foo = fn(index) {
-        //     \\    let l = List{1, 2, 3}
-        //     \\    return l[index]
-        //     \\}
-        //     \\
-        //     \\let result = foo(1)
-        //     \\
-        //     \\assert(result == 2)
-        //     ,
-        // },
-        // .{
-        //     .description = "table index",
-        //     .source =
-        //     \\let foo = Table{"a" = 1, "b" = 2}
-        //     \\let result = foo["a"] + foo["b"]
-        //     \\
-        //     \\assert(result == 3)
-        //     ,
-        // },
-        // .{
-        //     .description = "table index assignment",
-        //     .source =
-        //     \\let foo = Table{"a" = 1, "b" = 2}
-        //     \\foo["a"] = 10
-        //     \\
-        //     \\assert(foo["a"] == 10)
-        //     ,
-        // },
-        // .{
-        //     .description = "local table index assignment",
-        //     .source =
-        //     \\let foo = fn(key) {
-        //     \\    let t = Table{"a" = 10, "b" = 11}
-        //     \\    return t[key]
-        //     \\}
-        //     \\
-        //     \\let result = foo("b")
-        //     \\
-        //     \\assert(result == 11)
-        //     ,
-        // },
-        // .{
-        //     .description = "var as table key",
-        //     .source =
-        //     \\let first = "a"
-        //     \\let second = "b"
-        //     \\
-        //     \\let foo = Table{first = 10, second = 11}
-        //     \\let result = foo[first] + foo["b"]
-        //     \\
-        //     \\assert(result == 21)
-        //     ,
-        // },
+        .{
+            .description = "logical and true",
+            .source =
+            \\a = true and true
+            \\
+            \\@assert(a == true)
+            ,
+        },
+        .{
+            .description = "logical and false",
+            .source =
+            \\a = false and true
+            \\
+            \\@assert(a == false)
+            ,
+        },
+        .{
+            .description = "logical and false on right hand side",
+            .source =
+            \\a = true and false
+            \\
+            \\@assert(a == false)
+            ,
+        },
+        .{
+            .description = "logical or false",
+            .source =
+            \\a = false or false
+            \\
+            \\@assert(a == false)
+            ,
+        },
+        .{
+            .description = "logical or true both",
+            .source =
+            \\a = true or true
+            \\
+            \\@assert(a == true)
+            ,
+        },
+        .{
+            .description = "logical or true left",
+            .source =
+            \\a = true or false
+            \\
+            \\@assert(a == true)
+            ,
+        },
+        .{
+            .description = "logical or true right",
+            .source =
+            \\a = false or true
+            \\
+            \\@assert(a == true)
+            ,
+        },
+        .{
+            .description = "string concatenation",
+            .source =
+            \\foo = "foo"
+            \\bar = "bar"
+            \\result = foo + bar
+            \\
+            \\@assert(result == "foobar")
+            ,
+        },
         .{
             .description = "binary and unary",
             .source =
