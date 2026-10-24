@@ -35,16 +35,6 @@ const CallFrame = struct {
     stack_offset: usize,
 };
 
-const GlobalContext = struct {
-    pub fn hash(_: @This(), key: *object.ObjString) u64 {
-        return key.hash;
-    }
-
-    pub fn eql(_: @This(), a: *object.ObjString, b: *object.ObjString) bool {
-        return a == b;
-    }
-};
-
 const StringContext = struct {
     pub fn hash(_: @This(), key: *object.ObjString) u64 {
         return key.hash;
@@ -61,8 +51,7 @@ pub const VirtualMachine = struct {
     io: std.Io,
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
-    // TODO: why does a larger stack size crash
-    stack: [1000]value.Value,
+    stack: [constants.stack_max]value.Value,
     stack_top: usize,
     frames: [constants.frames_max]CallFrame,
     frame_count: usize,
@@ -144,8 +133,16 @@ pub const VirtualMachine = struct {
         return self.stack[self.stack_top - 1 - distance];
     }
 
+    inline fn peekTop(self: *VirtualMachine) value.Value {
+        return self.peek(0);
+    }
+
     inline fn swapInPlace(self: *VirtualMachine, val: value.Value, distance: usize) void {
         self.stack[self.stack_top - 1 - distance] = val;
+    }
+
+    inline fn swapTop(self: *VirtualMachine, val: value.Value) void {
+        self.swapInPlace(val, 0);
     }
 
     pub fn compile(self: *VirtualMachine, file_name: []const u8, source: []const u8) !*object.ObjFunction {
@@ -346,102 +343,102 @@ pub const VirtualMachine = struct {
                 .False => self.push(value.wrapBool(false)),
                 .Cons => {
                     const b = self.pop();
-                    const a = self.peek(0);
+                    const a = self.peekTop();
                     if (!b.isObjType(.List)) {
                         return self.runtimeError("invalid right side in cons operation: {s}", .{b.getType()});
                     }
                     const new_list = value.wrapObj(try b.asObj().asList().cloneAndPrepend(self, a));
-                    self.swapInPlace(new_list, 0);
+                    self.swapTop(new_list);
                 },
                 .Add => {
-                    if (self.peek(0).isObjType(.String) and self.peek(1).isObjType(.String)) {
+                    if (self.peekTop().isObjType(.String) and self.peek(1).isObjType(.String)) {
                         try self.concatenate();
                     } else {
                         const b = self.pop();
-                        const a = self.peek(0);
-                        self.swapInPlace(try self.add(a, b), 0);
+                        const a = self.peekTop();
+                        self.swapTop(try self.add(a, b));
                     }
                 },
                 .Subtract => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(try self.subtract(a, b), 0);
+                    const a = self.peekTop();
+                    self.swapTop(try self.subtract(a, b));
                 },
                 .Multiply => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(try self.multiply(a, b), 0);
+                    const a = self.peekTop();
+                    self.swapTop(try self.multiply(a, b));
                 },
                 .Divide => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(try self.divide(a, b), 0);
+                    const a = self.peekTop();
+                    self.swapTop(try self.divide(a, b));
                 },
                 .Negate => {
-                    const val = self.peek(0);
-                    self.swapInPlace(try self.negate(val), 0);
+                    const val = self.peekTop();
+                    self.swapTop(try self.negate(val));
                 },
                 .Not => {
-                    const val = self.peek(0);
-                    self.swapInPlace(value.wrapBool(isFalsey(val)), 0);
+                    const val = self.peekTop();
+                    self.swapTop(value.wrapBool(isFalsey(val)));
                 },
                 .Equal => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(value.wrapBool(try isEqual(a, b)), 0);
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapBool(try isEqual(a, b)));
                 },
                 .Greater => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(value.wrapBool(try self.greater(a, b)), 0);
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapBool(try self.greater(a, b)));
                 },
                 .Less => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(value.wrapBool(try self.less(a, b)), 0);
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapBool(try self.less(a, b)));
                 },
                 .BitwiseAnd => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(try self.bitwiseInfix(a, b, .BitwiseAnd), 0);
+                    const a = self.peekTop();
+                    self.swapTop(try self.bitwiseInfix(a, b, .BitwiseAnd));
                 },
                 .BitwiseOr => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(try self.bitwiseInfix(a, b, .BitwiseOr), 0);
+                    const a = self.peekTop();
+                    self.swapTop(try self.bitwiseInfix(a, b, .BitwiseOr));
                 },
                 .BitwiseXor => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(try self.bitwiseInfix(a, b, .BitwiseXor), 0);
+                    const a = self.peekTop();
+                    self.swapTop(try self.bitwiseInfix(a, b, .BitwiseXor));
                 },
                 .BitwiseNot => {
-                    const val = self.peek(0);
+                    const val = self.peekTop();
                     if (val != .Int) {
                         return self.runtimeError("Invalid type in bitwise not: {s}", .{val.getType()});
                     }
-                    self.swapInPlace(value.wrapInt(~val.Int), 0);
+                    self.swapTop(value.wrapInt(~val.Int));
                 },
                 .Mod => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(try self.mod(a, b), 0);
+                    const a = self.peekTop();
+                    self.swapTop(try self.mod(a, b));
                 },
                 .LeftShift => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(try self.bitwiseInfix(a, b, .LeftShift), 0);
+                    const a = self.peekTop();
+                    self.swapTop(try self.bitwiseInfix(a, b, .LeftShift));
                 },
                 .RightShift => {
                     const b = self.pop();
-                    const a = self.peek(0);
-                    self.swapInPlace(try self.bitwiseInfix(a, b, .RightShift), 0);
+                    const a = self.peekTop();
+                    self.swapTop(try self.bitwiseInfix(a, b, .RightShift));
                 },
                 .Pop => {
                     _ = self.pop();
                 },
                 .SwapPop => {
-                    self.swapInPlace(self.peek(0), 1);
+                    self.swapInPlace(self.peekTop(), 1);
                     _ = self.pop();
                 },
                 .GetLocal => {
@@ -450,13 +447,20 @@ pub const VirtualMachine = struct {
                 },
                 .JumpIfFalse => {
                     const offset = readU16(&ip, frame);
-                    if (isFalsey(self.peek(0))) ip += offset;
+                    if (isFalsey(self.peekTop())) ip += offset;
                 },
                 .JumpIfNotEq => {
                     const offset = readU16(&ip, frame);
-                    if (!try isEqual(self.peek(1), self.peek(0))) {
+                    if (!try isEqual(self.peek(1), self.peekTop())) {
                         ip += offset;
                     }
+                },
+                .IsEmpty => {
+                    const val = self.peekTop();
+                    if (!val.isObjType(.List)) {
+                        return self.runtimeError("can't check value of type {s} for emptiness", .{val.getType()});
+                    }
+                    self.push(value.wrapBool(val.asObj().asList().isEmpty()));
                 },
                 .Jump => {
                     const offset = readU16(&ip, frame);
@@ -531,6 +535,12 @@ pub const VirtualMachine = struct {
                     frame = &self.frames[self.frame_count - 1];
                     ip = frame.ip;
                 },
+                .CloneAndPopFirst => {
+                    const list = self.pop().asObj().asList();
+                    const result = try list.cloneAndPopFirst(self);
+                    self.push(result.value.?);
+                    self.push(value.wrapObj(&result.new_list.obj));
+                },
             }
         }
     }
@@ -574,7 +584,7 @@ pub const VirtualMachine = struct {
 
     fn concatenate(self: *VirtualMachine) !void {
         const left = self.peek(1).asObj().asString().chars;
-        const right = self.peek(0).asObj().asString().chars;
+        const right = self.peekTop().asObj().asString().chars;
 
         const data: [2][]const u8 = .{ left, right };
         const chars = try std.mem.concat(self.gpa, u8, &data);
@@ -593,7 +603,7 @@ pub const VirtualMachine = struct {
         }
 
         _ = self.pop();
-        self.swapInPlace(result, 0);
+        self.swapTop(result);
     }
 
     fn add(self: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {

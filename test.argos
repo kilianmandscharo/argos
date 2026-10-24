@@ -1,3 +1,6 @@
-foo = (n, acc) -> if n <= 0 then acc else foo(n-1, acc+1)
-result = foo(100000000, 0)
-@print(result)
+list = [1, 2, 3]
+foo = match list with 
+| [] -> false
+| h :: t -> h == 1 and @len(t) == 2
+@assert(foo == true)
+@assert(@len(list) == 3)

@@ -147,7 +147,7 @@ pub const Function = struct {
         }
     }
 
-    fn endScope(self: *Function) !void {
+    fn endScope(self: *Function) void {
         self.scope_depth -= 1;
         if (comptime constants.debug_compiler) {
             const name = self.getDisplayName();
@@ -412,7 +412,7 @@ pub const Compiler = struct {
                     self.log("leaving grouping for fn {s}", .{function.getDisplayName()});
                 }
 
-                try function.endScope();
+                function.endScope();
                 try function.cleanupLocals();
             },
             .Function => |function| {
@@ -443,7 +443,7 @@ pub const Compiler = struct {
                 try self.compileExpression(function.body);
                 try self.emitOp(.Return);
 
-                try new_function.endScope();
+                new_function.endScope();
 
                 if (comptime constants.debug_disassemble) {
                     const name = new_function.getDisplayName();
@@ -493,7 +493,8 @@ pub const Compiler = struct {
                 for (list.items) |item| {
                     try self.compileExpression(item);
                 }
-                try self.emitConstant(value.wrapObj(try object.allocateList(self.vm)));
+                const new_list = try object.allocateList(self.vm);
+                try self.emitConstant(value.wrapObj(&new_list.obj));
                 try self.emitOpU16(.ListInit, @intCast(list.items.len));
             },
             .Match => |match| {
@@ -510,6 +511,55 @@ pub const Compiler = struct {
                         try self.compileExpression(arm.expression);
                         found_else = true;
                         break;
+                    }
+
+                    if (arm.pattern.data == .List and arm.pattern.data.List.items.len == 0) {
+                        try self.emitOp(.IsEmpty);
+                        const jump = try self.emitJump(.JumpIfFalse);
+
+                        try self.emitOp(.Pop);
+                        try self.emitOp(.Pop);
+
+                        try self.compileExpression(arm.expression);
+
+                        try end_jumps.append(self.gpa, try self.emitJump(.Jump));
+
+                        try self.patchJump(jump);
+                        try self.emitOp(.Pop);
+
+                        continue;
+                    }
+
+                    if (arm.pattern.data == .Binary and arm.pattern.data.Binary.operator == .Cons) {
+                        const cons = arm.pattern.data.Binary;
+                        if (cons.left.data != .Identifier) {
+                            return self.errorAt(&arm.pattern.token, "expect identifier on left side of cons pattern");
+                        }
+                        if (cons.right.data != .Identifier) {
+                            return self.errorAt(&arm.pattern.token, "expect identifier on right side of cons pattern");
+                        }
+
+                        try self.emitOp(.IsEmpty);
+                        try self.emitOp(.Not);
+                        const jump = try self.emitJump(.JumpIfFalse);
+
+                        try self.emitOp(.Pop);
+                        try self.emitOp(.CloneAndPopFirst);
+
+                        const currentFunction = self.getFunction();
+                        currentFunction.beginScope();
+                        try currentFunction.addLocal(&cons.left.token);
+                        try currentFunction.addLocal(&cons.right.token);
+                        try self.compileExpression(arm.expression);
+                        currentFunction.endScope();
+                        try currentFunction.cleanupLocals();
+
+                        try end_jumps.append(self.gpa, try self.emitJump(.Jump));
+
+                        try self.patchJump(jump);
+                        try self.emitOp(.Pop);
+
+                        continue;
                     }
 
                     try self.compileExpression(arm.pattern);

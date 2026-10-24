@@ -263,6 +263,7 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
 
     if (try parser.match(.RParen)) {
         if (try parser.match(.Arrow)) {
+            try parser.chopNewlines();
             const name = parser.ctx.current_var_token;
             const body = try parser.parseExpression();
             return .init(.{ .Function = .{ .params = .empty, .body = body, .name = name } }, token);
@@ -282,6 +283,7 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
     );
 
     if (try parser.match(.Arrow)) {
+        try parser.chopNewlines();
         const functionName = parser.ctx.current_var_token;
         const body = try parser.parseExpression();
 

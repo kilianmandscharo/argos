@@ -371,6 +371,39 @@ test "match tests" {
             \\@assert(foo == 3)
             ,
         },
+        .{
+            .description = "match on empty list",
+            .source =
+            \\list = []
+            \\foo = match list with 
+            \\| 42 -> 1
+            \\| [] -> 2
+            \\| 43 -> 3
+            \\@assert(foo == 2)
+            ,
+        },
+        .{
+            .description = "match on cons pattern",
+            .source =
+            \\list = [1, 2, 3]
+            \\foo = match list with 
+            \\| [] -> false
+            \\| h :: t -> h == 1 and @len(t) == 2
+            \\@assert(foo == true)
+            \\@assert(@len(list) == 3)
+            ,
+        },
+        .{
+            .description = "sum list",
+            .source =
+            \\sum = (list) -> 
+            \\    match list with 
+            \\    | [] -> 0 
+            \\    | h :: t -> h + sum(t)
+            \\result = sum([1, 2, 3])
+            \\@assert(result == 6)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);

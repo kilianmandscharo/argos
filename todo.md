@@ -3,3 +3,4 @@
 - patterns in var declaration
 - list concatenation
 - type checker
+- fix match single line (pipe is detected as part of the expression)

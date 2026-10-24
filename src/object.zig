@@ -44,16 +44,16 @@ pub fn allocateObject(vm: *virtual_machine.VirtualMachine, T: type) !*T {
     return object;
 }
 
-pub fn allocateList(vm: *virtual_machine.VirtualMachine) !*Obj {
+pub fn allocateList(vm: *virtual_machine.VirtualMachine) !*ObjList {
     const list = try allocateObject(vm, ObjList);
     list.data = .{};
-    return &list.obj;
+    return list;
 }
 
 pub fn allocateListItem(vm: *virtual_machine.VirtualMachine) !*ObjListItem {
     const list_item = try allocateObject(vm, ObjListItem);
     list_item.value = undefined;
-    list_item.node = undefined;
+    list_item.node = .{};
     return list_item;
 }
 
@@ -311,22 +311,30 @@ pub const ObjList = struct {
         return @alignCast(@constCast(@fieldParentPtr("node", node)));
     }
 
+    pub inline fn clone(self: *ObjList, vm: *virtual_machine.VirtualMachine) !*ObjList {
+        const new_list = try allocateList(vm);
+        new_list.data.first = self.data.first;
+        return new_list;
+    }
+
     pub fn cloneAndPrepend(self: *ObjList, vm: *virtual_machine.VirtualMachine, val: value.Value) !*Obj {
-        const obj = try allocateList(vm);
-        const item = try allocateListItem(vm);
-        obj.asList().data.prepend(&item.node);
-        item.value = val;
-        item.node = .{
-            .next = self.data.first,
-        };
-        return obj;
+        const new_list = try self.clone(vm);
+        try new_list.prepend(vm, val);
+        return &new_list.obj;
     }
 
     pub fn prepend(self: *ObjList, vm: *virtual_machine.VirtualMachine, val: value.Value) !void {
         const item = try allocateListItem(vm);
         item.value = val;
-        item.node = .{};
         self.data.prepend(&item.node);
+    }
+
+    pub fn cloneAndPopFirst(self: *ObjList, vm: *virtual_machine.VirtualMachine) !struct { value: ?value.Value, new_list: *ObjList } {
+        if (self.data.first == null) {
+            return .{ .value = null, .new_list = self };
+        }
+        const new_list = try self.clone(vm);
+        return .{ .value = new_list.popFirst().?, .new_list = new_list };
     }
 
     pub fn popFirst(self: *ObjList) ?value.Value {
@@ -338,6 +346,10 @@ pub const ObjList = struct {
 
     pub fn len(self: *ObjList) usize {
         return self.data.len();
+    }
+
+    pub fn isEmpty(self: *ObjList) bool {
+        return self.data.first == null;
     }
 
     pub fn format(

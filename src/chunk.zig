@@ -30,6 +30,7 @@ pub const OpCode = enum(u8) {
     JumpIfFalse,
     JumpIfNotEq,
     Jump,
+    IsEmpty,
     Call,
     TailCall,
     Closure,
@@ -44,6 +45,7 @@ pub const OpCode = enum(u8) {
     Mod,
     LeftShift,
     RightShift,
+    CloneAndPopFirst,
 };
 
 pub const OpByte = union(enum) {
@@ -127,6 +129,7 @@ pub const Chunk = struct {
             .Equal => return simpleInstruction("OP_EQUAL", offset),
             .Pop => return simpleInstruction("OP_POP", offset),
             .SwapPop => return simpleInstruction("OP_SWAP_POP", offset),
+            .IsEmpty => return simpleInstruction("OP_IS_EMPTY", offset),
             .Constant => return constantInstruction(self, "OP_CONSTANT", offset),
             .GetLocal => return byteInstruction(self, "OP_GET_LOCAL", offset),
             .JumpIfFalse => return jumpByteInstruction(self, "OP_JUMP_IF_FALSE", offset, 1),
@@ -137,6 +140,7 @@ pub const Chunk = struct {
             .GetUpvalue => return byteInstruction(self, "OP_GET_UPVALUE", offset),
             .CloseUpvalue => return simpleInstruction("OP_CLOSE_UPVALUE", offset),
             .SwapCloseUpvalue => return simpleInstruction("OP_SWAP_CLOSE_UPVALUE", offset),
+            .CloneAndPopFirst => return simpleInstruction("OP_CLONE_AND_POP_FIRST", offset),
             .Closure => {
                 var curr_offset = offset;
                 const constant = u16ToIndex(
