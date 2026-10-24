@@ -304,6 +304,21 @@ pub const VirtualMachine = struct {
         return @intCast(resolved);
     }
 
+    pub inline fn readU16(ip: *usize, frame: *const CallFrame) usize {
+        const idx = chunk.u16ToIndex(
+            frame.function.chunk.code.items[ip.*],
+            frame.function.chunk.code.items[ip.* + 1],
+        );
+        ip.* += 2;
+        return idx;
+    }
+
+    pub inline fn readByte(ip: *usize, frame: *const CallFrame) u8 {
+        const b = frame.function.chunk.code.items[ip.*];
+        ip.* += 1;
+        return b;
+    }
+
     pub fn run(self: *VirtualMachine) !void {
         var frame = &self.frames[self.frame_count - 1];
         var ip = frame.ip;
@@ -319,16 +334,11 @@ pub const VirtualMachine = struct {
                 _ = frame.function.chunk.disassembleInstruction(frame.ip);
             }
 
-            const instruction = frame.function.chunk.code.items[ip];
-            ip += 1;
+            const instruction = readByte(&ip, frame);
 
             switch (@as(chunk.OpCode, @fromBackingInt(@intCast(instruction)))) {
                 .Constant => {
-                    const idx = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
+                    const idx = readU16(&ip, frame);
                     self.push(frame.function.chunk.constants.items[idx]);
                 },
                 .Unit => self.push(value.valueUnit()),
@@ -435,47 +445,32 @@ pub const VirtualMachine = struct {
                     _ = self.pop();
                 },
                 .GetLocal => {
-                    const slot = frame.function.chunk.code.items[ip];
-                    ip += 1;
+                    const slot = readByte(&ip, frame);
                     self.push(self.stack[frame.stack_offset + slot]);
                 },
                 .JumpIfFalse => {
-                    const offset = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
+                    const offset = readU16(&ip, frame);
                     if (isFalsey(self.peek(0))) ip += offset;
                 },
                 .JumpIfNotEq => {
-                    const offset = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
+                    const offset = readU16(&ip, frame);
                     if (!try isEqual(self.peek(1), self.peek(0))) {
                         ip += offset;
                     }
                 },
                 .Jump => {
-                    const offset = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
+                    const offset = readU16(&ip, frame);
                     ip += offset;
                 },
                 .Call => {
-                    const arg_count = frame.function.chunk.code.items[ip];
-                    ip += 1;
+                    const arg_count = readByte(&ip, frame);
                     frame.ip = ip;
                     try self.callValue(self.peek(arg_count), arg_count);
                     frame = &self.frames[self.frame_count - 1];
                     ip = frame.ip;
                 },
                 .TailCall => {
-                    const arg_count = frame.function.chunk.code.items[ip];
-                    ip += 1;
+                    const arg_count = readByte(&ip, frame);
                     const offset = self.stack_top - frame.stack_offset - 1 - arg_count;
                     for (0..arg_count) |i| {
                         self.swapInPlace(self.peek(i), offset + i);
@@ -485,20 +480,14 @@ pub const VirtualMachine = struct {
                     ip = 0;
                 },
                 .Closure => {
-                    const fn_idx = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
+                    const fn_idx = readU16(&ip, frame);
                     const function = frame.function.chunk.constants.items[fn_idx].asObj().asFunction();
                     const closure = try object.allocateClosure(self, function);
                     self.push(value.wrapObj(&closure.obj));
 
                     for (0..closure.upvalues.len) |i| {
-                        const is_local = frame.function.chunk.code.items[ip] == 1;
-                        ip += 1;
-                        const index = frame.function.chunk.code.items[ip];
-                        ip += 1;
+                        const is_local = readByte(&ip, frame) == 1;
+                        const index = readByte(&ip, frame);
                         if (is_local) {
                             closure.upvalues[i] = try self.captureUpvalue(&self.stack[frame.stack_offset + index]);
                         } else {
@@ -507,8 +496,7 @@ pub const VirtualMachine = struct {
                     }
                 },
                 .GetUpvalue => {
-                    const slot = frame.function.chunk.code.items[ip];
-                    ip += 1;
+                    const slot = readByte(&ip, frame);
                     self.push(frame.upvalues.?[slot].?.location.*);
                 },
                 .CloseUpvalue => {
@@ -524,11 +512,7 @@ pub const VirtualMachine = struct {
                 .ListInit => {
                     const val = self.pop();
                     const list = val.asObj().asList();
-                    const count = chunk.u16ToIndex(
-                        frame.function.chunk.code.items[ip],
-                        frame.function.chunk.code.items[ip + 1],
-                    );
-                    ip += 2;
+                    const count = readU16(&ip, frame);
                     for (0..count) |_| {
                         try list.prepend(self, self.pop());
                     }
