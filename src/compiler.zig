@@ -18,6 +18,7 @@ pub const Function = struct {
     function: *object.ObjFunction,
     index: u8,
     compiler: *Compiler,
+    tail_recursive: bool,
 
     const UINT8_COUNT = std.math.maxInt(u8) + 1;
 
@@ -33,7 +34,7 @@ pub const Function = struct {
         depth: u32,
     };
 
-    pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, name: ?scanner.Token) !*@This() {
+    pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, name: ?scanner.Token, tail_recursive: bool) !*@This() {
         const function = try object.allocateFunction(vm);
         if (name) |token| {
             const obj = try object.copyString(vm, token.data);
@@ -47,13 +48,17 @@ pub const Function = struct {
             .function = function,
             .index = index,
             .compiler = compiler,
+            .tail_recursive = tail_recursive,
         };
         return owned;
     }
 
-    fn getName(self: *const Function) []const u8 {
-        if (self.function.name) |name| return name.chars;
-        return "anonymous";
+    fn getDisplayName(self: *const Function) []const u8 {
+        return self.getName() orelse "anonymous";
+    }
+
+    fn getName(self: *const Function) ?[]const u8 {
+        return if (self.function.name) |name| name.chars else null;
     }
 
     fn getLocal(self: *Function, index: u8) *VariableInfo {
@@ -137,23 +142,25 @@ pub const Function = struct {
     fn beginScope(self: *Function) void {
         self.scope_depth += 1;
         if (comptime constants.debug_compiler) {
-            const name = self.getName();
+            const name = self.getDisplayName();
             self.compiler.log("new scope depth for function {s} = {d}", .{ name, self.scope_depth });
         }
     }
 
     fn endScope(self: *Function) !void {
         self.scope_depth -= 1;
-
         if (comptime constants.debug_compiler) {
-            const name = self.getName();
+            const name = self.getDisplayName();
             self.compiler.log("new scope depth for function {s} = {d}", .{ name, self.scope_depth });
         }
+    }
 
+    fn cleanupLocals(self: *Function) !void {
         var i = self.locals.items.len;
-        while (i > 0 and self.locals.items[i - 1].depth > self.scope_depth) {
+        const locals = self.locals.items;
+        while (i > 0 and locals[i - 1].depth > self.scope_depth) {
             i -= 1;
-            if (self.locals.items[i].is_captured) {
+            if (locals[i].is_captured) {
                 try self.compiler.emitOp(.SwapCloseUpvalue);
             } else {
                 try self.compiler.emitOp(.SwapPop);
@@ -205,9 +212,10 @@ pub const Compiler = struct {
     pub fn addFunction(
         self: *Compiler,
         name: ?scanner.Token,
+        tail_recursive: bool,
     ) !*Function {
         const index = self.functions.items.len;
-        var function = try Function.init(self.vm, self, @intCast(index), name);
+        var function = try Function.init(self.vm, self, @intCast(index), name, tail_recursive);
         try function.locals.append(self.arena, .{
             .is_used = true,
             .is_captured = false,
@@ -387,9 +395,11 @@ pub const Compiler = struct {
             .Grouping => |grouping| {
                 var function = self.getFunction();
                 if (comptime constants.debug_compiler) {
-                    self.log("entering grouping in fn {s}", .{function.getName()});
+                    self.log("entering grouping in fn {s}", .{function.getDisplayName()});
                 }
+
                 function.beginScope();
+
                 for (grouping.items, 0..) |item, i| {
                     try self.compileExpression(item);
                     const is_last = i == grouping.items.len - 1;
@@ -397,18 +407,21 @@ pub const Compiler = struct {
                         try self.emitOp(.Pop);
                     }
                 }
+
                 if (comptime constants.debug_compiler) {
-                    self.log("leaving grouping for fn {s}", .{function.getName()});
+                    self.log("leaving grouping for fn {s}", .{function.getDisplayName()});
                 }
+
                 try function.endScope();
+                try function.cleanupLocals();
             },
             .Function => |function| {
-                var new_function = try self.addFunction(function.name);
+                var new_function = try self.addFunction(function.name, isTailRecursive(&function));
 
                 if (comptime constants.debug_compiler) {
                     self.log("added new function, current function stack:", .{});
                     for (self.functions.items) |func| {
-                        self.log("{s}", .{func.getName()});
+                        self.log("{s}", .{func.getDisplayName()});
                     }
                 }
 
@@ -419,8 +432,7 @@ pub const Compiler = struct {
                         .Positional => |*name| {
                             new_function.function.arity += 1;
                             if (new_function.function.arity > 255) {
-                                // TODO: pass correct token
-                                return self.errorAt(&scanner.Token.dummy(), "can't have more than 255 parameters");
+                                return self.errorAt(name, "can't have more than 255 parameters");
                             }
                             try new_function.addLocal(name);
                         },
@@ -430,10 +442,11 @@ pub const Compiler = struct {
 
                 try self.compileExpression(function.body);
                 try self.emitOp(.Return);
+
                 try new_function.endScope();
 
                 if (comptime constants.debug_disassemble) {
-                    const name = new_function.getName();
+                    const name = new_function.getDisplayName();
                     self.log("Finished compiling {s}", .{name});
                     new_function.function.chunk.disassemble(name);
                 }
@@ -461,18 +474,27 @@ pub const Compiler = struct {
                 if (count == 255) {
                     return self.errorAt(&call.function.token, "can't have more than 255 arguments");
                 }
-                try self.compileExpression(call.function);
-                for (call.args.items) |arg| {
-                    try self.compileExpression(arg);
+
+                const current_function = self.getFunction();
+                if (isRecursiveCall(current_function, &call) and current_function.tail_recursive) {
+                    for (call.args.items) |arg| {
+                        try self.compileExpression(arg);
+                    }
+                    try self.emitOpU8(.TailCall, @intCast(count));
+                } else {
+                    try self.compileExpression(call.function);
+                    for (call.args.items) |arg| {
+                        try self.compileExpression(arg);
+                    }
+                    try self.emitOpU8(.Call, @intCast(count));
                 }
-                try self.emitOpU8(.Call, @intCast(count));
             },
-            .List => |val| {
-                for (val.items) |item| {
+            .List => |list| {
+                for (list.items) |item| {
                     try self.compileExpression(item);
                 }
                 try self.emitConstant(value.wrapObj(try object.allocateList(self.vm)));
-                try self.emitOpU16(.ListInit, @intCast(val.items.len));
+                try self.emitOpU16(.ListInit, @intCast(list.items.len));
             },
             .Match => |match| {
                 try self.compileExpression(match.target);
@@ -551,5 +573,87 @@ pub const Compiler = struct {
         if (comptime constants.debug_compiler) {
             self.debug_indent -= 1;
         }
+    }
+
+    pub fn isRecursiveCall(function: *const Function, call: *const ast.Call) bool {
+        if (function.getName()) |name| {
+            if (call.function.data != .Identifier) return false;
+            return std.mem.eql(u8, name, call.function.data.Identifier);
+        }
+        return false;
+    }
+
+    pub fn isTailRecursive(function: *const ast.Function) bool {
+        if (function.name) |function_name| {
+            return checkTail(function_name.data, function.body, true);
+        }
+        return false;
+    }
+
+    fn checkTail(function_name: []const u8, expr: *const ast.Expression, in_tail: bool) bool {
+        return switch (expr.data) {
+            .Call => |call| {
+                for (call.args.items) |arg| {
+                    if (!checkTail(function_name, arg, false)) return false;
+                }
+                if (call.function.data == .Identifier and
+                    std.mem.eql(u8, call.function.data.Identifier, function_name))
+                {
+                    return in_tail;
+                }
+                return true;
+            },
+            .Declaration => |declaration| {
+                return checkTail(function_name, declaration.right, false);
+            },
+            .Unary => |unary| {
+                return checkTail(function_name, unary.right, false);
+            },
+            .Binary => |binary| {
+                return checkTail(function_name, binary.left, false) and
+                    checkTail(function_name, binary.right, false);
+            },
+            .Grouping => |grouping| {
+                for (grouping.items, 0..) |item, i| {
+                    const tail = if (i == grouping.items.len - 1) in_tail else false;
+                    if (!checkTail(function_name, item, tail)) return false;
+                }
+                return true;
+            },
+            .List => |list| {
+                for (list.items) |item| {
+                    if (!checkTail(function_name, item, false)) return false;
+                }
+                return true;
+            },
+            .Match => |match| {
+                if (!checkTail(function_name, match.target, false)) return false;
+                for (match.arms.items) |arm| {
+                    if (!checkTail(function_name, arm.pattern, false)) return false;
+                    if (!checkTail(function_name, arm.expression, in_tail)) return false;
+                }
+                return true;
+            },
+            .If => |ifExpr| {
+                for (ifExpr.arms.items) |arm| {
+                    if (!checkTail(function_name, arm.condition, false)) return false;
+                    if (!checkTail(function_name, arm.then, in_tail)) return false;
+                }
+                if (ifExpr.alt) |alt| {
+                    if (!checkTail(function_name, alt, in_tail)) return false;
+                }
+                return true;
+            },
+            .Function => |function| {
+                return checkTail(function_name, function.body, false);
+            },
+            .Identifier,
+            .String,
+            .Integer,
+            .Float,
+            .Boolean,
+            .Unit,
+            => return true,
+        };
     }
 };

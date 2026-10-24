@@ -452,6 +452,21 @@ test "function tests" {
             ,
         },
         .{
+            .description = "closure in grouping",
+            .source =
+            \\foo = () -> (
+            \\    bar = (
+            \\        a = 2
+            \\        (b) -> a + b
+            \\    )
+            \\    bar
+            \\)
+            \\func = foo()
+            \\result = func(10)
+            \\@assert(result == 12)
+            ,
+        },
+        .{
             .description = "iife",
             .source =
             \\foo = ((a, b) -> a + b)(1, 2)
@@ -467,6 +482,17 @@ test "function tests" {
             ,
         },
         .{
+            .description = "recursion with acc",
+            .source =
+            \\fac = (val) -> (
+            \\    inner = (n, acc) -> if n <= 1 then acc else inner(n-1, acc*n)
+            \\    inner(val, 1)
+            \\)
+            \\result = fac(5)
+            \\@assert(result == 120)
+            ,
+        },
+        .{
             .description = "fib",
             .source =
             \\fib = (index) -> (
@@ -475,6 +501,14 @@ test "function tests" {
             \\)
             \\result = fib(5)
             \\@assert(result == 5)
+            ,
+        },
+        .{
+            .description = "tail recursion",
+            .source =
+            \\count_up = (n, acc) -> if n <= 0 then acc else count_up(n-1, acc+1)
+            \\result = count_up(5000, 0)
+            \\@assert(result == 5000)
             ,
         },
     };

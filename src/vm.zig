@@ -32,7 +32,7 @@ const CallFrame = struct {
     function: *object.ObjFunction,
     upvalues: ?[]?*object.ObjUpvalue,
     ip: usize,
-    slot: usize,
+    stack_offset: usize,
 };
 
 const GlobalContext = struct {
@@ -66,7 +66,6 @@ pub const VirtualMachine = struct {
     stack_top: usize,
     frames: [constants.frames_max]CallFrame,
     frame_count: usize,
-    frame: *CallFrame,
     strings: std.HashMapUnmanaged(*object.ObjString, void, StringContext, 80),
     objects: ?*object.Obj,
     open_upvalues: ?*object.ObjUpvalue,
@@ -87,7 +86,6 @@ pub const VirtualMachine = struct {
             .stack = undefined,
             .stack_top = 0,
             .frames = undefined,
-            .frame = undefined,
             .frame_count = 0,
             .strings = .empty,
             .objects = null,
@@ -191,7 +189,6 @@ pub const VirtualMachine = struct {
 
         self.push(value.wrapObj(&function.obj));
         try self.call(function, 0, null);
-        self.frame = &self.frames[self.frame_count - 1];
 
         if (comptime constants.debug_trace_execution) {
             logDebug("Global function set up.", .{});
@@ -208,12 +205,6 @@ pub const VirtualMachine = struct {
         }
 
         return .Ok;
-    }
-
-    pub inline fn readByte(self: *VirtualMachine) u8 {
-        const instruction = self.frame.function.chunk.code.items[self.frame.ip];
-        self.frame.ip += 1;
-        return instruction;
     }
 
     pub fn runtimeError(self: *VirtualMachine, comptime format: []const u8, args: anytype) anyerror {
@@ -234,31 +225,6 @@ pub const VirtualMachine = struct {
 
         self.resetStack();
         return error.RuntimeError;
-    }
-
-    inline fn readU16(self: *VirtualMachine) usize {
-        const code = self.frame.function.chunk.code.items;
-        const ip = self.frame.ip;
-        const val = chunk.u16ToIndex(code[ip], code[ip + 1]);
-        self.frame.ip += 2;
-        return val;
-    }
-
-    inline fn readConstant(self: *VirtualMachine) value.Value {
-        return self.frame.function.chunk.constants.items[self.readU16()];
-    }
-
-    inline fn readString(self: *VirtualMachine) *object.ObjString {
-        const constant = self.readConstant();
-        return constant.Obj.asString();
-    }
-
-    inline fn getSlot(self: *VirtualMachine, slot: usize) value.Value {
-        return self.stack[self.frame.slot + slot];
-    }
-
-    inline fn setSlot(self: *VirtualMachine, slot: usize, val: value.Value) void {
-        self.stack[self.frame.slot + slot] = val;
     }
 
     fn callValue(self: *VirtualMachine, callee: value.Value, argCount: u8) !void {
@@ -319,14 +285,14 @@ pub const VirtualMachine = struct {
             return self.runtimeError("Expected {d} arguments but got {d}", .{ function.arity, argCount });
         }
         if (self.frame_count == constants.frames_max) {
-            return self.runtimeError("Stack overflow.", .{});
+            return self.runtimeError("stack overflow", .{});
         }
         const frame = &self.frames[self.frame_count];
         self.frame_count += 1;
         frame.function = function;
         frame.upvalues = upvalues;
         frame.ip = 0;
-        frame.slot = self.stack_top - argCount - 1;
+        frame.stack_offset = self.stack_top - argCount - 1;
     }
 
     fn resolveListIndex(self: *VirtualMachine, len: usize, index: i64) !usize {
@@ -471,7 +437,7 @@ pub const VirtualMachine = struct {
                 .GetLocal => {
                     const slot = frame.function.chunk.code.items[ip];
                     ip += 1;
-                    self.push(self.stack[frame.slot + slot]);
+                    self.push(self.stack[frame.stack_offset + slot]);
                 },
                 .JumpIfFalse => {
                     const offset = chunk.u16ToIndex(
@@ -502,11 +468,21 @@ pub const VirtualMachine = struct {
                 .Call => {
                     const arg_count = frame.function.chunk.code.items[ip];
                     ip += 1;
-                    // sync ip before call since callValue may trigger GC or errors
                     frame.ip = ip;
                     try self.callValue(self.peek(arg_count), arg_count);
                     frame = &self.frames[self.frame_count - 1];
                     ip = frame.ip;
+                },
+                .TailCall => {
+                    const arg_count = frame.function.chunk.code.items[ip];
+                    ip += 1;
+                    const offset = self.stack_top - frame.stack_offset - 1 - arg_count;
+                    for (0..arg_count) |i| {
+                        self.swapInPlace(self.peek(i), offset + i);
+                    }
+                    self.stack_top = frame.stack_offset + 1 + arg_count;
+                    frame.ip = 0;
+                    ip = 0;
                 },
                 .Closure => {
                     const fn_idx = chunk.u16ToIndex(
@@ -524,7 +500,7 @@ pub const VirtualMachine = struct {
                         const index = frame.function.chunk.code.items[ip];
                         ip += 1;
                         if (is_local) {
-                            closure.upvalues[i] = try self.captureUpvalue(&self.stack[frame.slot + index]);
+                            closure.upvalues[i] = try self.captureUpvalue(&self.stack[frame.stack_offset + index]);
                         } else {
                             closure.upvalues[i] = frame.upvalues.?[index];
                         }
@@ -560,13 +536,13 @@ pub const VirtualMachine = struct {
                 },
                 .Return => {
                     const result = self.pop();
-                    self.closeUpvalues(&self.stack[frame.slot]);
+                    self.closeUpvalues(&self.stack[frame.stack_offset]);
                     self.frame_count -= 1;
                     if (self.frame_count == 0) {
                         _ = self.pop();
                         return;
                     }
-                    self.stack_top = frame.slot;
+                    self.stack_top = frame.stack_offset;
                     self.push(result);
                     frame = &self.frames[self.frame_count - 1];
                     ip = frame.ip;

@@ -4,7 +4,7 @@ pub const debug_parser = false;
 pub const debug_compiler = false;
 pub const debug_disassemble = false;
 
-pub const debug_trace_execution = true;
+pub const debug_trace_execution = false;
 pub const frames_max = 64;
 pub const stack_max = std.math.maxInt(u8) * frames_max;
 

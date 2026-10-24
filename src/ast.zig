@@ -59,7 +59,7 @@ const Unary = struct {
     right: *const Expression,
 };
 
-const Function = struct {
+pub const Function = struct {
     params: std.ArrayList(FunctionParam),
     body: *const Expression,
     name: ?scanner.Token = null,
@@ -75,7 +75,7 @@ const FunctionParamDefault = struct {
     value: *const Expression,
 };
 
-const Call = struct {
+pub const Call = struct {
     function: *const Expression,
     args: std.ArrayList(*const Expression),
 };

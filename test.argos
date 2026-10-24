@@ -1,5 +1,3 @@
-a = 1 + 2
-b = a != 4
-c = !b
-foo = (a, b) -> a * b
-foo(1, 2)
+foo = (n, acc) -> if n <= 0 then acc else foo(n-1, acc+1)
+result = foo(100000000, 0)
+@print(result)
