@@ -707,3 +707,119 @@ pub const Compiler = struct {
         };
     }
 };
+
+const TypeChecker = struct {
+    const Type = union(enum) {
+        Var: *Var,
+        Const: enum {
+            Unit,
+            String,
+            Integer,
+            Float,
+            Boolean,
+        },
+        Function: struct {
+            from: std.ArrayList(Type),
+            to: Type,
+        },
+    };
+
+    const Var = struct {
+        id: u32,
+        link: ?Type = null,
+    };
+
+    const Scheme = struct {
+        vars: std.ArrayList(*Var),
+        t: Type,
+    };
+
+    const Env = struct {
+        store: std.StringHashMapUnmanaged(Scheme),
+        outer: ?*Env,
+
+        pub fn init(arena: std.mem.Allocator, outer: ?*Env) !*Env {
+            const env = try arena.create(Env);
+            env.* = .{
+                .outer = outer,
+                .store = .{},
+            };
+            return env;
+        }
+
+        pub fn get(self: *Env, key: []const u8) ?Scheme {
+            if (self.store.get(key)) |val| {
+                return val;
+            }
+            if (self.outer) |outer| {
+                return outer.get(key);
+            }
+            return null;
+        }
+
+        pub fn set(self: *Env, key: []const u8, val: Scheme) !void {
+            try self.store.put(self.gpa, key, val);
+        }
+    };
+
+    arena: std.mem.Allocator,
+    current_var_id: u32 = 0,
+
+    fn newVar(self: *TypeChecker) !*Var {
+        const new_var = try self.arena.create(Var);
+        new_var.* = .{
+            .id = self.current_var_id,
+        };
+        self.current_var_id += 1;
+        return new_var;
+    }
+
+    fn infer(self: *TypeChecker, env: *Env, expr: *const ast.Expression) !Type {
+        return switch (expr.data) {
+            .Call => |call| {},
+            .Declaration => |declaration| {},
+            .Unary => |unary| {},
+            .Binary => |binary| {},
+            .Grouping => |grouping| {},
+            .List => |list| {},
+            .Match => |match| {},
+            .If => |ifExpr| {},
+            .Function => |function| {
+                if (function.name == null) {
+                    var inner_env = try Env.init(self.arena, env);
+                    var params: std.ArrayList(*Var) = .empty;
+
+                    for (function.params.items) |param| {
+                        switch (param) {
+                            .Positional => |name| {
+                                const fresh_var = try self.newVar();
+                                const scheme: Scheme = .{
+                                    .vars = .empty,
+                                    .t = .{ .Var = fresh_var },
+                                };
+                                try inner_env.set(name.data, scheme);
+                                try params.append(self.arena, fresh_var);
+                            },
+                            .Default => @panic("not implemented"),
+                        }
+                    }
+
+                    return .{
+                        .Function = .{
+                            .from = params,
+                            .to = try self.infer(inner_env, function.body),
+                        },
+                    };
+                }
+
+                @panic("not implemented");
+            },
+            .Identifier => {},
+            .String => .{ .Const = .String },
+            .Integer => .{ .Const = .Integer },
+            .Float => .{ .Const = .Float },
+            .Boolean => .{ .Const = .Boolean },
+            .Unit => .{ .Const = .Unit },
+        };
+    }
+};
