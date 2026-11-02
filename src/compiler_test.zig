@@ -62,6 +62,7 @@ fn expectType(expected: compiler.Type, actual: compiler.Type) !void {
     switch (expected) {
         .Var => |v| {
             try std.testing.expectEqual(v.id, actual.Var.id);
+            try std.testing.expectEqual(v.classes, actual.Var.classes);
             if (v.link) |link| {
                 try expectType(link.*, actual.Var.link.?.*);
             } else {
@@ -84,44 +85,49 @@ fn expectType(expected: compiler.Type, actual: compiler.Type) !void {
     }
 }
 
-fn newVar(arena: std.mem.Allocator, id: u32) !*compiler.Var {
+fn newVar(arena: std.mem.Allocator, id: u32, classes: std.EnumSet(compiler.Class)) !*compiler.Var {
     const v = try arena.create(compiler.Var);
-    v.* = .{ .id = id, .link = null };
+    v.* = .{ .id = id, .link = null, .classes = classes };
     return v;
 }
 
-test "type checker" {
-    const TestCase = struct {
-        description: []const u8,
-        source: []const u8,
-        expected: compiler.Type,
-    };
+const TypeCheckerTestCase = struct {
+    description: []const u8,
+    source: []const u8,
+    expected: ?compiler.Type = null,
+    expect_error: ?anyerror = null,
+};
 
-    const run = struct {
-        fn runTest(test_case: TestCase) anyerror!void {
-            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-            defer arena.deinit();
+const runTypeCheckerTest = struct {
+    fn runTest(test_case: TypeCheckerTestCase) anyerror!void {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
 
-            var script_context = vm.ScriptContext{
-                .file_name = "",
-                .source = test_case.source,
-                .lines = .empty,
-            };
+        var script_context = vm.ScriptContext{
+            .file_name = "",
+            .source = test_case.source,
+            .lines = .empty,
+        };
 
-            const ast = try parser.createAst(arena.allocator(), &script_context);
-            const expression = ast.data.Function.body;
-            var checker = compiler.TypeChecker.init(arena.allocator());
-            const result = try checker.checkTypes(expression);
-            try expectType(test_case.expected, result.*);
+        const ast = try parser.createAst(arena.allocator(), &script_context);
+        const expression = ast.data.Function.body;
+        var checker = compiler.TypeChecker.init(arena.allocator());
+        const result = checker.checkTypes(expression);
+        if (test_case.expect_error) |err| {
+            try std.testing.expectError(err, result);
+        } else {
+            try expectType(test_case.expected.?, (try result).*);
         }
-    }.runTest;
+    }
+}.runTest;
 
+test "type checker" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const c = compiler.TypeChecker.c;
 
-    const test_cases = [_]TestCase{
+    const test_cases = [_]TypeCheckerTestCase{
         .{
             .description = "lambda without params",
             .source =
@@ -136,8 +142,8 @@ test "type checker" {
             ,
             .expected = .{
                 .Func = .{
-                    .from = &.{&.{ .Var = try newVar(arena.allocator(), 0) }},
-                    .to = &.{ .Var = try newVar(arena.allocator(), 0) },
+                    .from = &.{&.{ .Var = try newVar(arena.allocator(), 0, .empty) }},
+                    .to = &.{ .Var = try newVar(arena.allocator(), 0, .empty) },
                 },
             },
         },
@@ -195,5 +201,97 @@ test "type checker" {
         },
     };
 
-    try test_utils.runTests(TestCase, "evaluate type checker tests", &test_cases, run);
+    try test_utils.runTests(TypeCheckerTestCase, "evaluate type checker tests", &test_cases, runTypeCheckerTest);
+}
+
+test "type check unary" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const c = compiler.TypeChecker.c;
+
+    const test_cases = [_]TypeCheckerTestCase{
+        .{
+            .description = "minus integer",
+            .source =
+            \\-5
+            ,
+            .expected = c(.Integer).*,
+        },
+        .{
+            .description = "minus float",
+            .source =
+            \\-5.6
+            ,
+            .expected = c(.Float).*,
+        },
+        .{
+            .description = "minus invalid type",
+            .source =
+            \\-"foo"
+            ,
+            .expect_error = error.MissingInstance,
+        },
+        .{
+            .description = "minus constrain",
+            .source =
+            \\(x) -> -x
+            ,
+            .expected = .{
+                .Func = .{
+                    .from = &.{&.{ .Var = try newVar(arena.allocator(), 0, .initMany(&.{.Num})) }},
+                    .to = &.{ .Var = try newVar(arena.allocator(), 0, .initMany(&.{.Num})) },
+                },
+            },
+        },
+        .{
+            .description = "minus constrain at call",
+            .source =
+            \\foo = (x) -> -x
+            \\foo("foo")
+            ,
+            .expect_error = error.MissingInstance,
+        },
+        .{
+            .description = "bang",
+            .source =
+            \\!true
+            ,
+            .expected = c(.Boolean).*,
+        },
+        .{
+            .description = "bang with var",
+            .source =
+            \\a = false
+            \\!a
+            ,
+            .expected = c(.Boolean).*,
+        },
+        .{
+            .description = "bang invalid",
+            .source =
+            \\a = 5
+            \\!a
+            ,
+            .expect_error = error.CantUnify,
+        },
+        .{
+            .description = "tilde",
+            .source =
+            \\a = 5
+            \\~5
+            ,
+            .expected = c(.Integer).*,
+        },
+        .{
+            .description = "tilde invalid",
+            .source =
+            \\a = "foo"
+            \\~a
+            ,
+            .expect_error = error.CantUnify,
+        },
+    };
+
+    try test_utils.runTests(TypeCheckerTestCase, "evaluate type check unary tests", &test_cases, runTypeCheckerTest);
 }

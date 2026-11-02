@@ -726,6 +726,31 @@ pub const Type = union(enum) {
         }
     }
 
+    pub fn hasInstance(self: *const Type, class: Class) bool {
+        return switch (class) {
+            .Plus => switch (self.*) {
+                .Const => |c| c == .Integer or c == .Float or c == .String,
+                else => false,
+            },
+            .Num => switch (self.*) {
+                .Const => |c| c == .Integer or c == .Float,
+                else => false,
+            },
+            .Show => switch (self.*) {
+                .Const => true,
+                else => false,
+            },
+            .Eq => switch (self.*) {
+                .Const => |c| c == .Integer or c == .Float or c == .Boolean,
+                else => false,
+            },
+            .Ord => switch (self.*) {
+                .Const => |c| c == .Integer or c == .Float,
+                else => false,
+            },
+        };
+    }
+
     pub fn format(
         self: @This(),
         writer: *std.Io.Writer,
@@ -733,7 +758,20 @@ pub const Type = union(enum) {
         const resolved = self.prune();
         switch (resolved.*) {
             .Const => |c| try writer.print("{s}", .{@tagName(c)}),
-            .Var => |v| try writer.print("t{d}", .{v.id}),
+            .Var => |v| {
+                try writer.print("t{d}", .{v.id});
+                if (v.classes.count() > 0) {
+                    try writer.print(" {{", .{});
+                    var first = true;
+                    var it = v.classes.iterator();
+                    while (it.next()) |class| {
+                        if (!first) try writer.print(", ", .{});
+                        first = false;
+                        try writer.print("{s}", .{@tagName(class)});
+                    }
+                    try writer.print("}}", .{});
+                }
+            },
             .List => |l| {
                 try writer.print("[", .{});
                 try l.format(writer);
@@ -767,9 +805,12 @@ const Const = enum {
     Boolean,
 };
 
+pub const Class = enum { Plus, Num, Show, Eq, Ord };
+
 pub const Var = struct {
     id: u32,
     link: ?*const Type = null,
+    classes: std.EnumSet(Class),
 };
 
 const Scheme = union(enum) {
@@ -832,6 +873,7 @@ pub const TypeChecker = struct {
         const new_var = try self.arena.create(Var);
         new_var.* = .{
             .id = self.current_var_id,
+            .classes = .empty,
         };
         self.current_var_id += 1;
         return new_var;
@@ -886,11 +928,13 @@ pub const TypeChecker = struct {
                 return try self.copy(.empty, t.prune());
             },
             .Poly => |s| {
-                var freshVars: std.AutoHashMapUnmanaged(*Var, *const Type) = .empty;
+                var fresh_vars: std.AutoHashMapUnmanaged(*Var, *const Type) = .empty;
                 for (s.vars.items) |v| {
-                    try freshVars.put(self.arena, v, try self.createVar());
+                    const fresh_var = try self.createVar();
+                    fresh_var.Var.classes = v.classes;
+                    try fresh_vars.put(self.arena, v, fresh_var);
                 }
-                return try self.copy(freshVars, s.t.prune());
+                return try self.copy(fresh_vars, s.t.prune());
             },
         };
     }
@@ -961,6 +1005,14 @@ pub const TypeChecker = struct {
         }
     }
 
+    fn constrain(t: *const Type, class: Class) !void {
+        const resolved = t.prune();
+        switch (resolved.*) {
+            .Var => |v| v.classes.insert(class),
+            else => if (!resolved.hasInstance(class)) return error.MissingInstance,
+        }
+    }
+
     fn unify(type_a: *const Type, type_b: *const Type) !void {
         const a = type_a.prune();
         const b = type_b.prune();
@@ -971,6 +1023,13 @@ pub const TypeChecker = struct {
 
         if (a.* == .Var) {
             if (occurs(a.Var, b)) return error.InfiniteType;
+            switch (b.*) {
+                .Var => |other| other.classes.setUnion(a.Var.classes),
+                else => {
+                    var it = a.Var.classes.iterator();
+                    while (it.next()) |class| if (!b.hasInstance(class)) return error.MissingInstance;
+                },
+            }
             a.Var.link = b;
         } else if (b.* == .Var) {
             try unify(b, a);
@@ -990,6 +1049,7 @@ pub const TypeChecker = struct {
     }
 
     fn infer(self: *TypeChecker, env: *Env, expr: *const ast.Expression) !*const Type {
+        logging.log("infer {s}", .{@tagName(expr.data)}, .{});
         return switch (expr.data) {
             .Call => |call| {
                 const f = try self.infer(env, call.function);
@@ -1005,15 +1065,64 @@ pub const TypeChecker = struct {
                 try env.set(self.arena, declaration.left.data, scheme);
                 return c(.Unit);
             },
-            // .Unary => |unary| {},
-            .Binary => |binary| {
-                switch (binary.operator) {
-                    .Plus => {
-                        try unify(try self.infer(env, binary.left), c(.Integer));
-                        try unify(try self.infer(env, binary.right), c(.Integer));
+            .Unary => |unary| {
+                const t = try self.infer(env, unary.right);
+                switch (unary.operator) {
+                    .Minus => {
+                        try constrain(t, .Num);
+                        return t;
+                    },
+                    .Bang => {
+                        try unify(t, c(.Boolean));
+                        return c(.Boolean);
+                    },
+                    .Tilde => {
+                        try unify(t, c(.Integer));
                         return c(.Integer);
                     },
-                    else => @panic("invalid operator"),
+                    else => return error.InvalidUnaryOperator,
+                }
+            },
+            .Binary => |binary| {
+                const lt = try self.infer(env, binary.left);
+                const rt = try self.infer(env, binary.right);
+                switch (binary.operator) {
+                    .And, .Or => {
+                        try unify(lt, c(.Boolean));
+                        try unify(rt, c(.Boolean));
+                        return c(.Boolean);
+                    },
+                    .Plus => {
+                        try unify(lt, rt);
+                        try constrain(lt, .Plus);
+                        return lt;
+                    },
+                    .Minus, .Asterisk, .Slash, .Percent => {
+                        try unify(lt, rt);
+                        try constrain(lt, .Num);
+                        return lt;
+                    },
+                    .Eq, .NotEq => {
+                        try unify(lt, rt);
+                        try constrain(lt, .Eq);
+                        return c(.Boolean);
+                    },
+                    .Gt, .GtOrEq, .Lt, .LtOrEq => {
+                        try unify(lt, rt);
+                        try constrain(lt, .Ord);
+                        return c(.Boolean);
+                    },
+                    .Ampersand, .Pipe, .Caret, .LeftShift, .RightShift => {
+                        try unify(lt, c(.Integer));
+                        try unify(rt, c(.Integer));
+                        return c(.Integer);
+                    },
+                    .Cons => {
+                        const list_t = try self.createList(lt);
+                        try unify(rt, list_t);
+                        return list_t;
+                    },
+                    else => return error.InvalidBinaryOperator,
                 }
             },
             .Grouping => |grouping| {
@@ -1030,7 +1139,10 @@ pub const TypeChecker = struct {
                 }
                 return try self.createList(t);
             },
-            // .Match => |match| {},
+            .Match => |match| {
+                _ = match;
+                @panic("not implemented");
+            },
             .If => |ifExpr| {
                 var t: ?*const Type = null;
                 for (ifExpr.arms.items) |arm| {
@@ -1077,7 +1189,6 @@ pub const TypeChecker = struct {
             .Float => c(.Float),
             .Boolean => c(.Boolean),
             .Unit => c(.Unit),
-            else => @panic("not implemented"),
         };
     }
 };
