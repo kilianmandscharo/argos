@@ -3,4 +3,7 @@
 - patterns in var declaration
 - list concatenation
 - type checker
+    - error handling
+    - make match exhaustive
 - fix match single line (pipe is detected as part of the expression)
+- optimize: a unit is pushed and popped immediately 
