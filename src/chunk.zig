@@ -11,19 +11,45 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
 pub const OpCode = enum(u8) {
     Return,
     Constant,
-    Negate,
+
+    NegateInt,
+    NegateFloat,
+
     Cons,
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
+
+    AddInt,
+    AddFloat,
+    Concat,
+
+    SubtractInt,
+    SubtractFloat,
+
+    MultiplyInt,
+    MultiplyFloat,
+
+    DivideInt,
+    DivideFloat,
+
     Unit,
     True,
     False,
     Not,
-    Equal,
-    Greater,
-    Less,
+
+    EqualInt,
+    EqualFloat,
+    EqualString,
+
+    GreaterInt,
+    GreaterFloat,
+    GreaterString,
+
+    LessInt,
+    LessFloat,
+    LessString,
+
+    ModInt,
+    ModFloat,
+
     Pop,
     SwapPop,
     GetLocal,
@@ -42,7 +68,7 @@ pub const OpCode = enum(u8) {
     BitwiseOr,
     BitwiseXor,
     BitwiseNot,
-    Mod,
+
     LeftShift,
     RightShift,
     CloneAndPopFirst,
@@ -115,18 +141,30 @@ pub const Chunk = struct {
         switch (@as(OpCode, @fromBackingInt(@intCast(self.code.items[offset])))) {
             .Return => return simpleInstruction("OP_RETURN", offset),
             .Cons => return simpleInstruction("OP_CONS", offset),
-            .Add => return simpleInstruction("OP_ADD", offset),
-            .Subtract => return simpleInstruction("OP_SUBTRACT", offset),
-            .Multiply => return simpleInstruction("OP_MULTIPLY", offset),
-            .Divide => return simpleInstruction("OP_DIVIDE", offset),
-            .Negate => return simpleInstruction("OP_NEGATE", offset),
+            .AddInt => return simpleInstruction("OP_ADD_INT", offset),
+            .AddFloat => return simpleInstruction("OP_ADD_FLOAT", offset),
+            .Concat => return simpleInstruction("OP_CONCAT", offset),
+            .SubtractInt => return simpleInstruction("OP_SUBTRACT_INT", offset),
+            .SubtractFloat => return simpleInstruction("OP_SUBTRACT_FLOAT", offset),
+            .MultiplyInt => return simpleInstruction("OP_MULTIPLY_INT", offset),
+            .MultiplyFloat => return simpleInstruction("OP_MULTIPLY_FLOAT", offset),
+            .DivideInt => return simpleInstruction("OP_DIVIDE_INT", offset),
+            .DivideFloat => return simpleInstruction("OP_DIVIDE_FLOAT", offset),
+            .NegateInt => return simpleInstruction("OP_NEGATE_INT", offset),
+            .NegateFloat => return simpleInstruction("OP_NEGATE_FLOAT", offset),
             .True => return simpleInstruction("OP_TRUE", offset),
             .False => return simpleInstruction("OP_FALSE", offset),
             .Unit => return simpleInstruction("OP_UNIT", offset),
             .Not => return simpleInstruction("OP_NOT", offset),
-            .Greater => return simpleInstruction("OP_GREATER", offset),
-            .Less => return simpleInstruction("OP_LESS", offset),
-            .Equal => return simpleInstruction("OP_EQUAL", offset),
+            .GreaterInt => return simpleInstruction("OP_GREATER_INT", offset),
+            .GreaterFloat => return simpleInstruction("OP_GREATER_FLOAT", offset),
+            .GreaterString => return simpleInstruction("OP_GREATER_STRING", offset),
+            .LessInt => return simpleInstruction("OP_LESS_INT", offset),
+            .LessFloat => return simpleInstruction("OP_LESS_FLOAT", offset),
+            .LessString => return simpleInstruction("OP_LESS_STRING", offset),
+            .EqualInt => return simpleInstruction("OP_EQUAL_INT", offset),
+            .EqualFloat => return simpleInstruction("OP_EQUAL_FLOAT", offset),
+            .EqualString => return simpleInstruction("OP_EQUAL_STRING", offset),
             .Pop => return simpleInstruction("OP_POP", offset),
             .SwapPop => return simpleInstruction("OP_SWAP_POP", offset),
             .IsEmpty => return simpleInstruction("OP_IS_EMPTY", offset),
@@ -141,6 +179,15 @@ pub const Chunk = struct {
             .CloseUpvalue => return simpleInstruction("OP_CLOSE_UPVALUE", offset),
             .SwapCloseUpvalue => return simpleInstruction("OP_SWAP_CLOSE_UPVALUE", offset),
             .CloneAndPopFirst => return simpleInstruction("OP_CLONE_AND_POP_FIRST", offset),
+            .ListInit => return twoByteInstruction(self, "OP_LIST_INIT", offset),
+            .BitwiseAnd => return simpleInstruction("OP_BITWISE_AND", offset),
+            .BitwiseOr => return simpleInstruction("OP_BITWISE_OR", offset),
+            .BitwiseXor => return simpleInstruction("OP_BITWISE_XOR", offset),
+            .BitwiseNot => return simpleInstruction("OP_BITWISE_NOT", offset),
+            .ModInt => return simpleInstruction("OP_MOD_INT", offset),
+            .ModFloat => return simpleInstruction("OP_MOD_FLOAT", offset),
+            .LeftShift => return simpleInstruction("OP_LEFT_SHIFT", offset),
+            .RightShift => return simpleInstruction("OP_RIGHT_SHIFT", offset),
             .Closure => {
                 var curr_offset = offset;
                 const constant = u16ToIndex(
@@ -160,14 +207,6 @@ pub const Chunk = struct {
                 }
                 return curr_offset;
             },
-            .ListInit => return twoByteInstruction(self, "OP_LIST_INIT", offset),
-            .BitwiseAnd => return simpleInstruction("OP_BITWISE_AND", offset),
-            .BitwiseOr => return simpleInstruction("OP_BITWISE_OR", offset),
-            .BitwiseXor => return simpleInstruction("OP_BITWISE_XOR", offset),
-            .BitwiseNot => return simpleInstruction("OP_BITWISE_NOT", offset),
-            .Mod => return simpleInstruction("OP_MOD", offset),
-            .LeftShift => return simpleInstruction("OP_LEFT_SHIFT", offset),
-            .RightShift => return simpleInstruction("OP_RIGHT_SHIFT", offset),
         }
     }
 };

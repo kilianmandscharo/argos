@@ -177,6 +177,7 @@ pub const Compiler = struct {
     functions: std.ArrayList(*Function),
     globals: std.StringHashMapUnmanaged(*object.Obj),
     debug_indent: usize = 0,
+    type_map: TypeChecker.TypeMap,
 
     pub fn init(
         vm: *virtual_machine.VirtualMachine,
@@ -189,6 +190,7 @@ pub const Compiler = struct {
             .arena = arena,
             .functions = .empty,
             .globals = .empty,
+            .type_map = .empty,
         };
         try compiler.initNativeFunctions();
         return compiler;
@@ -231,9 +233,19 @@ pub const Compiler = struct {
     }
 
     pub fn compile(self: *Compiler, program: *const ast.Expression) !*object.ObjFunction {
+        var type_checker = TypeChecker.init(self.arena);
+        defer type_checker.deinit();
+
+        const result = try type_checker.checkTypes(program);
+        self.type_map = result.type_map;
+
         try self.compileExpression(program);
         const function = self.functions.pop().?;
         return function.function;
+    }
+
+    fn getType(self: *Compiler, expr: *const ast.Expression) *const Type {
+        return self.type_map.get(expr).?.prune();
     }
 
     fn identifierConstant(self: *Compiler, name: []const u8) !u16 {
@@ -371,7 +383,12 @@ pub const Compiler = struct {
                 } else {
                     try self.compileExpression(binary.right);
                     switch (binary.operator) {
-                        .Plus => try self.emitOp(.Add),
+                        .Plus => {
+                            switch (self.type_map.get(binary.left).?) {
+                                .String => {},
+                            }
+                            try self.emitOp(.Add);
+                        },
                         .Minus => try self.emitOp(.Subtract),
                         .Asterisk => try self.emitOp(.Multiply),
                         .Slash => try self.emitOp(.Divide),
@@ -853,13 +870,16 @@ pub const TypeChecker = struct {
     arena: std.mem.Allocator,
     scratch_arena: std.heap.ArenaAllocator,
     current_var_id: u32 = 0,
+    type_map: TypeMap,
 
     const VarSet = std.AutoArrayHashMapUnmanaged(*Var, void);
+    const TypeMap = std.AutoArrayHashMapUnmanaged(*const ast.Expression, *const Type);
 
     pub fn init(arena: std.mem.Allocator) @This() {
         return .{
             .arena = arena,
             .scratch_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+            .type_map = .empty,
         };
     }
 
@@ -891,9 +911,10 @@ pub const TypeChecker = struct {
         return new_var;
     }
 
-    pub fn checkTypes(self: *TypeChecker, expr: *const ast.Expression) !*const Type {
+    pub fn checkTypes(self: *TypeChecker, expr: *const ast.Expression) !struct { root: *const Type, type_map: TypeMap } {
         const env = try Env.init(self.scratch(), null);
-        return try self.infer(env, expr);
+        const type_map: TypeMap = .empty;
+        return .{ .root = try self.infer(env, expr), .type_map = type_map };
     }
 
     pub fn variable(self: *TypeChecker) !*const Type {
@@ -1062,7 +1083,13 @@ pub const TypeChecker = struct {
         }
     }
 
-    fn infer(self: *TypeChecker, env: *Env, expr: *const ast.Expression) !*const Type {
+    fn infer(self: *TypeChecker, env: *Env, expr: *const ast.Expression) anyerror!*const Type {
+        const t = try self.inferType(env, expr);
+        try self.type_map.put(self.arena, expr, t);
+        return t;
+    }
+
+    fn inferType(self: *TypeChecker, env: *Env, expr: *const ast.Expression) !*const Type {
         logging.log("infer {s}", .{@tagName(expr.data)}, .{});
         return switch (expr.data) {
             .Call => |call| {

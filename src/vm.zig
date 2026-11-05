@@ -350,33 +350,56 @@ pub const VirtualMachine = struct {
                     const new_list = value.wrapObj(try b.asObj().asList().cloneAndPrepend(self, a));
                     self.swapTop(new_list);
                 },
-                .Add => {
-                    if (self.peekTop().isObjType(.String) and self.peek(1).isObjType(.String)) {
-                        try self.concatenate();
-                    } else {
-                        const b = self.pop();
-                        const a = self.peekTop();
-                        self.swapTop(try self.add(a, b));
-                    }
-                },
-                .Subtract => {
+                .AddInt => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(try self.subtract(a, b));
+                    self.swapTop(value.wrapInt(a.Int + b.Int));
                 },
-                .Multiply => {
+                .AddFloat => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(try self.multiply(a, b));
+                    self.swapTop(value.wrapFloat(a.Float + b.Float));
                 },
-                .Divide => {
+                .SubtractInt => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(try self.divide(a, b));
+                    self.swapTop(value.wrapInt(a.Int - b.Int));
                 },
-                .Negate => {
+                .SubtractFloat => {
+                    const b = self.pop();
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapFloat(a.Float - b.Float));
+                },
+                .Concat => {
+                    self.swapTop(try self.concatenate());
+                },
+                .MultiplyInt => {
+                    const b = self.pop();
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapInt(a.Int * b.Int));
+                },
+                .MultiplyFloat => {
+                    const b = self.pop();
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapFloat(a.Float * b.Float));
+                },
+                .DivideInt => {
+                    const b = self.pop();
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapInt(a.Int / b.Int));
+                },
+                .DivideFloat => {
+                    const b = self.pop();
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapFloat(a.Float / b.Float));
+                },
+                .NegateInt => {
                     const val = self.peekTop();
-                    self.swapTop(try self.negate(val));
+                    self.swapTop(value.wrapInt(-val.Int));
+                },
+                .NegateFloat => {
+                    const val = self.peekTop();
+                    self.swapTop(value.wrapFloat(-val.Float));
                 },
                 .Not => {
                     const val = self.peekTop();
@@ -400,17 +423,17 @@ pub const VirtualMachine = struct {
                 .BitwiseAnd => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(try self.bitwiseInfix(a, b, .BitwiseAnd));
+                    self.swapTop(bitwiseInfix(a, b, .BitwiseAnd));
                 },
                 .BitwiseOr => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(try self.bitwiseInfix(a, b, .BitwiseOr));
+                    self.swapTop(bitwiseInfix(a, b, .BitwiseOr));
                 },
                 .BitwiseXor => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(try self.bitwiseInfix(a, b, .BitwiseXor));
+                    self.swapTop(bitwiseInfix(a, b, .BitwiseXor));
                 },
                 .BitwiseNot => {
                     const val = self.peekTop();
@@ -419,20 +442,25 @@ pub const VirtualMachine = struct {
                     }
                     self.swapTop(value.wrapInt(~val.Int));
                 },
-                .Mod => {
+                .ModInt => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(try self.mod(a, b));
+                    self.swapTop(value.wrapInt(a.Int % b.Int));
+                },
+                .ModFloat => {
+                    const b = self.pop();
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapFloat(a.Float % b.Float));
                 },
                 .LeftShift => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(try self.bitwiseInfix(a, b, .LeftShift));
+                    self.swapTop(bitwiseInfix(a, b, .LeftShift));
                 },
                 .RightShift => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(try self.bitwiseInfix(a, b, .RightShift));
+                    self.swapTop(bitwiseInfix(a, b, .RightShift));
                 },
                 .Pop => {
                     _ = self.pop();
@@ -545,33 +573,7 @@ pub const VirtualMachine = struct {
         }
     }
 
-    fn mod(self: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {
-        switch (a) {
-            .Int => |left| {
-                switch (b) {
-                    .Int => |right| return value.wrapInt(@rem(left, right)),
-                    .Float => |right| return value.wrapFloat(@rem(@as(f64, @floatFromInt(left)), right)),
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            .Float => |left| {
-                switch (b) {
-                    .Int => |right| return value.wrapFloat(@rem(left, @as(f64, @floatFromInt(right)))),
-                    .Float => |right| return value.wrapFloat(@rem(left, right)),
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            else => return self.runtimeError("Operand must be a number", .{}),
-        }
-    }
-
-    fn bitwiseInfix(self: *VirtualMachine, a: value.Value, b: value.Value, op: chunk.OpCode) !value.Value {
-        if (a != .Int) {
-            return self.runtimeError("Invalid left side in operation {s}: {s}", .{ @tagName(op), a.getType() });
-        }
-        if (b != .Int) {
-            return self.runtimeError("Invalid right side in operation {s}: {s}", .{ @tagName(op), b.getType() });
-        }
+    fn bitwiseInfix(a: value.Value, b: value.Value, op: chunk.OpCode) value.Value {
         return switch (op) {
             .BitwiseAnd => value.wrapInt(a.Int & b.Int),
             .BitwiseOr => value.wrapInt(a.Int | b.Int),
@@ -594,7 +596,6 @@ pub const VirtualMachine = struct {
         const interned = self.findString(chars, hash);
 
         var result: value.Value = undefined;
-
         if (interned) |string_object| {
             self.gpa.free(chars);
             result = value.wrapObj(string_object);
@@ -604,134 +605,6 @@ pub const VirtualMachine = struct {
 
         _ = self.pop();
         self.swapTop(result);
-    }
-
-    fn add(self: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {
-        switch (a) {
-            .Int => |left| {
-                switch (b) {
-                    .Int => |right| return value.wrapInt(left + right),
-                    .Float => |right| return value.wrapFloat(@as(f64, @floatFromInt(left)) + right),
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            .Float => |left| {
-                switch (b) {
-                    .Int => |right| return value.wrapFloat(left + @as(f64, @floatFromInt(right))),
-                    .Float => |right| return value.wrapFloat(left + right),
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            else => return self.runtimeError("Operand must be a number", .{}),
-        }
-    }
-
-    fn greater(self: *VirtualMachine, a: value.Value, b: value.Value) !bool {
-        switch (a) {
-            .Int => |left| {
-                switch (b) {
-                    .Int => |right| return left > right,
-                    .Float => |right| return @as(f64, @floatFromInt(left)) > right,
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            .Float => |left| {
-                switch (b) {
-                    .Int => |right| return left > @as(f64, @floatFromInt(right)),
-                    .Float => |right| return left > right,
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            else => return self.runtimeError("Operand must be a number", .{}),
-        }
-    }
-
-    fn less(self: *VirtualMachine, a: value.Value, b: value.Value) !bool {
-        switch (a) {
-            .Int => |left| {
-                switch (b) {
-                    .Int => |right| return left < right,
-                    .Float => |right| return @as(f64, @floatFromInt(left)) < right,
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            .Float => |left| {
-                switch (b) {
-                    .Int => |right| return left < @as(f64, @floatFromInt(right)),
-                    .Float => |right| return left < right,
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            else => return self.runtimeError("Operand must be a number", .{}),
-        }
-    }
-
-    fn subtract(self: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {
-        switch (a) {
-            .Int => |left| {
-                switch (b) {
-                    .Int => |right| return value.wrapInt(left - right),
-                    .Float => |right| return value.wrapFloat(@as(f64, @floatFromInt(left)) - right),
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            .Float => |left| {
-                switch (b) {
-                    .Int => |right| return value.wrapFloat(left - @as(f64, @floatFromInt(right))),
-                    .Float => |right| return value.wrapFloat(left - right),
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            else => return self.runtimeError("Operand must be a number", .{}),
-        }
-    }
-
-    fn multiply(self: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {
-        switch (a) {
-            .Int => |left| {
-                switch (b) {
-                    .Int => |right| return value.wrapInt(left * right),
-                    .Float => |right| return value.wrapFloat(@as(f64, @floatFromInt(left)) * right),
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            .Float => |left| {
-                switch (b) {
-                    .Float => |right| return value.wrapFloat(left * right),
-                    .Int => |right| return value.wrapFloat(left * @as(f64, @floatFromInt(right))),
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            else => return self.runtimeError("Operand must be a number", .{}),
-        }
-    }
-
-    fn divide(self: *VirtualMachine, a: value.Value, b: value.Value) !value.Value {
-        switch (a) {
-            .Int => |left| {
-                switch (b) {
-                    .Int => |right| return value.wrapFloat(@as(f64, @floatFromInt(left)) / @as(f64, @floatFromInt(right))),
-                    .Float => |right| return value.wrapFloat(@as(f64, @floatFromInt(left)) / right),
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            .Float => |left| {
-                switch (b) {
-                    .Float => |right| return value.wrapFloat(left / right),
-                    .Int => |right| return value.wrapFloat(left / @as(f64, @floatFromInt(right))),
-                    else => return self.runtimeError("Right operand must be a number.", .{}),
-                }
-            },
-            else => return self.runtimeError("Operand must be a number", .{}),
-        }
-    }
-
-    fn negate(self: *VirtualMachine, val: value.Value) !value.Value {
-        return switch (val) {
-            .Float => |float| value.wrapFloat(-float),
-            .Int => |int| value.wrapInt(-int),
-            else => return self.runtimeError("Operand must be a number.", .{}),
-        };
     }
 
     fn isFalsey(val: value.Value) bool {

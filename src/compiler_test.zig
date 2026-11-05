@@ -155,7 +155,8 @@ const runTypeCheckerTest = struct {
         if (test_case.expect_error) |err| {
             try std.testing.expectError(err, result);
         } else {
-            try expectType(test_case.expected.?, (try result));
+            const unwrapped = try result;
+            try expectType(test_case.expected.?, unwrapped.root);
         }
     }
 }.runTest;
