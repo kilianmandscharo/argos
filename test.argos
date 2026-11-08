@@ -1,6 +1,6 @@
-list = [1, 2, 3]
-foo = match list with 
-| [] -> false
-| h :: t -> h == 1 and @len(t) == 2
-@assert(foo == true)
-@assert(@len(list) == 3)
+sum = (list) ->
+    match list with
+    | [] -> 0
+    | h :: t -> h + sum(t)
+result = sum([1, 2, 3])
+@assert(result == 6)

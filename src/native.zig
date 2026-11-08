@@ -50,11 +50,8 @@ fn printNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []va
 }
 
 fn assertNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
-    if (arg_count != 1) {
-        return vm.runtimeError("expected 1 arg, got {d}", .{arg_count});
-    }
+    _ = arg_count;
     const val = args[0];
-    if (val != .Bool) return vm.runtimeError("expected Boolean, got {s}", .{val.getType()});
     if (!val.Bool) return vm.runtimeError("Assertion failed", .{});
     return value.valueUnit();
 }

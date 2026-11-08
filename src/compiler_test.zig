@@ -102,8 +102,10 @@ fn varType(arena: std.mem.Allocator, classes: std.EnumSet(compiler.Class)) !*com
 }
 
 fn funcType(arena: std.mem.Allocator, params: []const *const compiler.Type, ret: *const compiler.Type) !*const compiler.Type {
+    const f = try arena.create(compiler.Func);
+    f.* = .{ .from = try arena.dupe(*const compiler.Type, params), .to = ret };
     const t = try arena.create(compiler.Type);
-    t.* = .{ .Func = .{ .from = try arena.dupe(*const compiler.Type, params), .to = ret } };
+    t.* = .{ .Func = f };
     return t;
 }
 
@@ -282,31 +284,21 @@ test "type checker" {
             .source =
             \\() -> "foo"
             ,
-            .expected = &.{ .Func = .{ .from = &.{}, .to = c(.String) } },
+            .expected = try funcType(alloc, &.{}, c(.String)),
         },
         .{
             .description = "identity lambda",
             .source =
             \\(x) -> x
             ,
-            .expected = &.{
-                .Func = .{
-                    .from = &.{&.{ .Var = try createVar(alloc, .empty) }},
-                    .to = &.{ .Var = try createVar(alloc, .empty) },
-                },
-            },
+            .expected = try funcType(alloc, &.{try varType(alloc, .empty)}, try varType(alloc, .empty)),
         },
         .{
             .description = "lambda with binary return",
             .source =
             \\() -> 1 + 2
             ,
-            .expected = &.{
-                .Func = .{
-                    .from = &.{},
-                    .to = c(.Integer),
-                },
-            },
+            .expected = try funcType(alloc, &.{}, c(.Integer)),
         },
         .{
             .description = "lambda with binary return (from vars)",
@@ -317,28 +309,7 @@ test "type checker" {
             \\    a + b
             \\)
             ,
-            .expected = &.{
-                .Func = .{
-                    .from = &.{},
-                    .to = c(.Integer),
-                },
-            },
-        },
-        .{
-            .description = "lambda with binary return (from vars)",
-            .source =
-            \\() -> (
-            \\    a = 1
-            \\    b = 1
-            \\    a + b
-            \\)
-            ,
-            .expected = &.{
-                .Func = .{
-                    .from = &.{},
-                    .to = c(.Integer),
-                },
-            },
+            .expected = try funcType(alloc, &.{}, c(.Integer)),
         },
         .{
             .description = "function call",

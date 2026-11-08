@@ -178,6 +178,8 @@ pub const Compiler = struct {
     globals: std.StringHashMapUnmanaged(*object.Obj),
     debug_indent: usize = 0,
     type_map: TypeChecker.TypeMap,
+    var_map: std.AutoHashMapUnmanaged(*const Type, *const Type),
+    scratch_arena: std.heap.ArenaAllocator,
 
     pub fn init(
         vm: *virtual_machine.VirtualMachine,
@@ -191,9 +193,19 @@ pub const Compiler = struct {
             .functions = .empty,
             .globals = .empty,
             .type_map = .empty,
+            .var_map = .empty,
+            .scratch_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
         };
         try compiler.initNativeFunctions();
         return compiler;
+    }
+
+    pub fn deinit(self: *Compiler) void {
+        self.scratch_arena.deinit();
+    }
+
+    pub inline fn scratch(self: *Compiler) std.mem.Allocator {
+        return self.scratch_arena.allocator();
     }
 
     fn log(self: *const Compiler, comptime fmt: []const u8, args: anytype) void {
@@ -245,7 +257,13 @@ pub const Compiler = struct {
     }
 
     fn getType(self: *Compiler, expr: *const ast.Expression) *const Type {
-        return self.type_map.get(expr).?;
+        if (self.type_map.get(expr)) |t| {
+            return switch (t.*) {
+                .Var => self.var_map.get(t).?.prune(),
+                else => t,
+            };
+        }
+        @panic("type not found");
     }
 
     fn identifierConstant(self: *Compiler, name: []const u8) !u16 {
@@ -318,6 +336,82 @@ pub const Compiler = struct {
         return error.CompileError;
     }
 
+    fn compileIdentifier(self: *Compiler, token: *const scanner.Token) !void {
+        if (self.getFunction().resolveLocal(token)) |index| {
+            try self.emitOpU8(.GetLocal, index);
+        } else if (try self.getFunction().resolveUpvalue(token)) |index| {
+            try self.emitOpU8(.GetUpvalue, index);
+        } else if (self.globals.get(token.data)) |func_obj| {
+            try self.emitConstant(value.wrapObj(func_obj));
+        } else {
+            return self.errorAt(token, "unknown identifier");
+        }
+    }
+
+    fn compileFunction(self: *Compiler, name: ?scanner.Token, function: *const ast.Function, tail_recursive: bool) !void {
+        var new_function = try self.addFunction(name, tail_recursive);
+
+        if (comptime constants.debug_compiler) {
+            self.log("added new function, current function stack:", .{});
+            for (self.functions.items) |func| {
+                self.log("{s}", .{func.getDisplayName()});
+            }
+        }
+
+        new_function.beginScope();
+
+        for (function.params.items) |*param| {
+            switch (param.*) {
+                .Positional => |*param_name| {
+                    new_function.function.arity += 1;
+                    if (new_function.function.arity > 255) {
+                        return self.errorAt(param_name, "can't have more than 255 parameters");
+                    }
+                    try new_function.addLocal(param_name);
+                },
+                .Default => @panic("not implemented"),
+            }
+        }
+
+        try self.compileExpression(function.body);
+        try self.emitOp(.Return);
+
+        new_function.endScope();
+
+        if (comptime constants.debug_disassemble) {
+            const func_name = new_function.getDisplayName();
+            self.log("Finished compiling {s}", .{func_name});
+            new_function.function.chunk.disassemble(func_name);
+        }
+
+        if (new_function.index > 0) {
+            const compiled_function = self.functions.pop().?;
+
+            if (compiled_function.upvalues.items.len > 0) {
+                const constant = try self.makeConstant(value.wrapObj(&compiled_function.function.obj));
+                try self.emitOpU16(.Closure, constant);
+            } else {
+                try self.emitConstant(value.wrapObj(&compiled_function.function.obj));
+            }
+
+            for (compiled_function.upvalues.items) |upvalue| {
+                try self.emitByte(@intFromBool(upvalue.is_local));
+                try self.emitByte(upvalue.index);
+            }
+        } else {
+            try self.emitConstant(value.wrapObj(&new_function.function.obj));
+        }
+    }
+
+    fn getGenericFunctionName(self: *Compiler, name: []const u8, t: *const Type) ![]const u8 {
+        var buf: std.Io.Writer.Allocating = .init(self.scratch());
+        try buf.writer.print("{s}", .{name});
+        for (t.Func.from) |item_t| {
+            try buf.writer.print("_{f}", .{item_t});
+        }
+        return buf.written();
+    }
+
     fn compileExpression(self: *Compiler, expr: *const ast.Expression) anyerror!void {
         if (comptime constants.debug_compiler) {
             self.log("compiling {s}", .{@tagName(expr.data)});
@@ -326,20 +420,44 @@ pub const Compiler = struct {
 
         switch (expr.data) {
             .Declaration => |declaration| {
-                try self.compileExpression(declaration.right);
-                try self.getFunction().addLocal(&declaration.left);
+                if (declaration.right.data != .Function) {
+                    try self.compileExpression(declaration.right);
+                    try self.getFunction().addLocal(&declaration.left);
+                    try self.emitOp(.Unit);
+                    return;
+                }
+
+                const function = declaration.right.data.Function;
+                const func_t = self.type_map.get(declaration.right).?.Func;
+                const tail_recursive = isTailRecursive(&function);
+
+                if (!func_t.is_generic) {
+                    try self.compileFunction(function.name, &function, tail_recursive);
+                    try self.getFunction().addLocal(&declaration.left);
+                    try self.emitOp(.Unit);
+                    return;
+                }
+
+                for (func_t.resolved.items) |resolved_t| {
+                    for (0..func_t.from.len) |i| {
+                        if (func_t.from[i].* == .Var) {
+                            try self.var_map.put(self.scratch(), func_t.from[i], resolved_t.Func.from[i]);
+                        }
+                    }
+
+                    var name = scanner.Token.dummy();
+                    name.data = try self.getGenericFunctionName(function.name.?.data, resolved_t);
+
+                    try self.compileFunction(name, &function, tail_recursive);
+                    self.var_map.clearRetainingCapacity();
+
+                    try self.getFunction().addLocal(&name);
+                }
+
                 try self.emitOp(.Unit);
             },
             .Identifier => {
-                if (self.getFunction().resolveLocal(&expr.token)) |index| {
-                    try self.emitOpU8(.GetLocal, index);
-                } else if (try self.getFunction().resolveUpvalue(&expr.token)) |index| {
-                    try self.emitOpU8(.GetUpvalue, index);
-                } else if (self.globals.get(expr.token.data)) |func_obj| {
-                    try self.emitConstant(value.wrapObj(func_obj));
-                } else {
-                    return self.errorAt(&expr.token, "unknown identifier");
-                }
+                try self.compileIdentifier(&expr.token);
             },
             .String => |string| {
                 try self.emitConstant(value.wrapObj(try object.copyString(self.vm, string)));
@@ -471,66 +589,16 @@ pub const Compiler = struct {
                 try function.cleanupLocals();
             },
             .Function => |function| {
-                std.debug.print("{f}\n", .{self.type_map.get(expr).?});
-
-                var new_function = try self.addFunction(function.name, isTailRecursive(&function));
-
-                if (comptime constants.debug_compiler) {
-                    self.log("added new function, current function stack:", .{});
-                    for (self.functions.items) |func| {
-                        self.log("{s}", .{func.getDisplayName()});
-                    }
-                }
-
-                new_function.beginScope();
-
-                for (function.params.items) |*param| {
-                    switch (param.*) {
-                        .Positional => |*name| {
-                            new_function.function.arity += 1;
-                            if (new_function.function.arity > 255) {
-                                return self.errorAt(name, "can't have more than 255 parameters");
-                            }
-                            try new_function.addLocal(name);
-                        },
-                        .Default => @panic("not implemented"),
-                    }
-                }
-
-                try self.compileExpression(function.body);
-                try self.emitOp(.Return);
-
-                new_function.endScope();
-
-                if (comptime constants.debug_disassemble) {
-                    const name = new_function.getDisplayName();
-                    self.log("Finished compiling {s}", .{name});
-                    new_function.function.chunk.disassemble(name);
-                }
-
-                if (new_function.index > 0) {
-                    const compiled_function = self.functions.pop().?;
-
-                    if (compiled_function.upvalues.items.len > 0) {
-                        const constant = try self.makeConstant(value.wrapObj(&compiled_function.function.obj));
-                        try self.emitOpU16(.Closure, constant);
-                    } else {
-                        try self.emitConstant(value.wrapObj(&compiled_function.function.obj));
-                    }
-
-                    for (compiled_function.upvalues.items) |upvalue| {
-                        try self.emitByte(@intFromBool(upvalue.is_local));
-                        try self.emitByte(upvalue.index);
-                    }
-                } else {
-                    try self.emitConstant(value.wrapObj(&new_function.function.obj));
-                }
+                try self.compileFunction(null, &function, false);
             },
             .Call => |call| {
                 const count = call.args.items.len;
                 if (count == 255) {
                     return self.errorAt(&call.function.token, "can't have more than 255 arguments");
                 }
+
+                const func_t = self.getType(call.function);
+                std.debug.print("called function = {f}, {}\n", .{ func_t, func_t.Func.is_generic });
 
                 const current_function = self.getFunction();
                 if (isRecursiveCall(current_function, &call) and current_function.tail_recursive) {
@@ -539,7 +607,13 @@ pub const Compiler = struct {
                     }
                     try self.emitOpU8(.TailCall, @intCast(count));
                 } else {
-                    try self.compileExpression(call.function);
+                    if (func_t.Func.is_generic) {
+                        var token = scanner.Token.dummy();
+                        token.data = try self.getGenericFunctionName(call.function.data.Identifier, func_t);
+                        try self.compileIdentifier(&token);
+                    } else {
+                        try self.compileExpression(call.function);
+                    }
                     for (call.args.items) |arg| {
                         try self.compileExpression(arg);
                     }
@@ -768,7 +842,7 @@ pub const Compiler = struct {
 pub const Type = union(enum) {
     Var: *Var,
     Const: Const,
-    Func: Func,
+    Func: *Func,
     List: *const Type,
 
     pub fn prune(self: *const Type) *const Type {
@@ -849,9 +923,11 @@ pub const Type = union(enum) {
     }
 };
 
-const Func = struct {
+pub const Func = struct {
     from: []const *const Type,
     to: *const Type,
+    is_generic: bool = false,
+    resolved: std.ArrayList(*const Type) = .empty,
 };
 
 const Const = enum {
@@ -996,7 +1072,9 @@ pub const TypeChecker = struct {
     }
 
     pub fn function(self: *TypeChecker, from: []const *const Type, to: *const Type) !*const Type {
-        return try self.createType(.{ .Func = .{ .from = from, .to = to } });
+        const func = try self.arena.create(Func);
+        func.* = .{ .from = from, .to = to };
+        return try self.createType(.{ .Func = func });
     }
 
     pub fn createType(self: *TypeChecker, t: Type) !*const Type {
@@ -1122,7 +1200,7 @@ pub const TypeChecker = struct {
         const b = type_b.prune();
 
         if (comptime constants.debug_type_checker) {
-            logging.log("Unify {f} with {f}", .{ a, b }, .{});
+            logging.log("Unify {f} with {f}", .{ a, b }, .{ .module = "TypeChecker" });
         }
 
         if (a.* == .Var and b.* == .Var and a.Var == b.Var) return;
@@ -1156,26 +1234,51 @@ pub const TypeChecker = struct {
 
     fn infer(self: *TypeChecker, env: *Env, expr: *const ast.Expression) anyerror!*const Type {
         if (comptime constants.debug_type_checker) {
-            logging.log("infer {s}", .{@tagName(expr.data)}, .{});
+            logging.log("infer {s}", .{@tagName(expr.data)}, .{ .module = "TypeChecker" });
         }
         const t = try self.inferType(env, expr);
         try self.type_map.put(self.arena, expr, t);
         return t;
     }
 
+    fn mustResolveIdentifier(self: *TypeChecker, env: *Env, expr: *const ast.Expression, name: []const u8) !Scheme {
+        if (env.get(name)) |scheme| {
+            return scheme;
+        }
+        expr.token.printError("unbound var", self.script_context, "TypeChecker");
+        return error.UnboundVar;
+    }
+
     fn inferType(self: *TypeChecker, env: *Env, expr: *const ast.Expression) !*const Type {
         return switch (expr.data) {
             .Call => |call| {
+                var generic_func_type: ?*const Type = null;
+                if (call.function.data == .Identifier) {
+                    const original_scheme = try self.mustResolveIdentifier(env, expr, call.function.data.Identifier);
+                    if (original_scheme == .Poly and original_scheme.Poly.t.* == .Func) {
+                        generic_func_type = original_scheme.Poly.t;
+                    }
+                }
+
                 const f = try self.infer(env, call.function);
                 var args: std.ArrayList(*const Type) = .empty;
                 for (call.args.items) |arg| try args.append(self.arena, try self.infer(env, arg));
                 const r = try self.variable();
                 try unify(f, try self.function(args.items, r));
+
+                if (generic_func_type) |original_f| {
+                    try original_f.Func.resolved.append(self.arena, f);
+                    f.Func.is_generic = true;
+                }
+
                 return r.prune();
             },
             .Declaration => |declaration| {
                 const t = try self.infer(env, declaration.right);
                 const scheme = try self.generalize(env, t);
+                if (t.* == .Func and scheme == .Poly) {
+                    t.Func.is_generic = true;
+                }
                 try env.set(self.scratch(), declaration.left.data, scheme);
                 return c(.Unit);
             },
@@ -1273,12 +1376,12 @@ pub const TypeChecker = struct {
                                     const inner_env = try Env.init(self.scratch(), env);
                                     if (!std.mem.eql(u8, binary.left.data.Identifier, "_")) {
                                         const fresh_var = try self.variable();
-                                        try unify(fresh_var, target_t.List);
+                                        try unify(fresh_var, target_t.prune().List);
                                         try inner_env.set(self.scratch(), binary.left.data.Identifier, .{ .Mono = fresh_var });
                                     }
                                     if (!std.mem.eql(u8, binary.right.data.Identifier, "_")) {
                                         const fresh_var = try self.variable();
-                                        try unify(fresh_var, target_t);
+                                        try unify(fresh_var, target_t.prune());
                                         try inner_env.set(self.scratch(), binary.right.data.Identifier, .{ .Mono = fresh_var });
                                     }
                                     const t = try self.infer(inner_env, arm.expression);
@@ -1309,11 +1412,7 @@ pub const TypeChecker = struct {
                 return result;
             },
             .Identifier => |name| {
-                if (env.get(name)) |scheme| {
-                    return try self.instantiate(scheme);
-                }
-                expr.token.printError("unbound var", self.script_context, "TypeChecker");
-                return error.UnboundVar;
+                return try self.instantiate(try self.mustResolveIdentifier(env, expr, name));
             },
             .Function => |f| {
                 var inner_env = try Env.init(self.scratch(), env);

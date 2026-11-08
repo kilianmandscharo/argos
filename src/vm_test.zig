@@ -391,17 +391,17 @@ test "match tests" {
             \\@assert(@len(list) == 3)
             ,
         },
-        // .{
-        //     .description = "sum list",
-        //     .source =
-        //     \\sum = (list) ->
-        //     \\    match list with
-        //     \\    | [] -> 0
-        //     \\    | h :: t -> h + sum(t)
-        //     \\result = sum([1, 2, 3])
-        //     \\@assert(result == 6)
-        //     ,
-        // },
+        .{
+            .description = "sum list",
+            .source =
+            \\sum = (list) ->
+            \\    match list with
+            \\    | [] -> 0
+            \\    | h :: t -> h + sum(t)
+            \\result = sum([1, 2, 3])
+            \\@assert(result == 6)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
