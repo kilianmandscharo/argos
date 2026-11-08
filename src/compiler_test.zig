@@ -64,7 +64,6 @@ fn expectType(expected_t: *const compiler.Type, actual_t: *const compiler.Type) 
 
     switch (expected.*) {
         .Var => |v| {
-            try std.testing.expectEqual(v.id, actual.Var.id);
             try std.testing.expectEqual(v.classes, actual.Var.classes);
             if (v.link) |link| {
                 try expectType(link, actual.Var.link.?);
@@ -88,15 +87,15 @@ fn expectType(expected_t: *const compiler.Type, actual_t: *const compiler.Type) 
     }
 }
 
-fn createVar(arena: std.mem.Allocator, id: u32, classes: std.EnumSet(compiler.Class)) !*compiler.Var {
+fn createVar(arena: std.mem.Allocator, classes: std.EnumSet(compiler.Class)) !*compiler.Var {
     const v = try arena.create(compiler.Var);
-    v.* = .{ .id = id, .link = null, .classes = classes };
+    v.* = .{ .id = 0, .link = null, .classes = classes };
     return v;
 }
 
-fn varType(arena: std.mem.Allocator, id: u32, classes: std.EnumSet(compiler.Class)) !*compiler.Type {
+fn varType(arena: std.mem.Allocator, classes: std.EnumSet(compiler.Class)) !*compiler.Type {
     const v = try arena.create(compiler.Var);
-    v.* = .{ .id = id, .link = null, .classes = classes };
+    v.* = .{ .id = 0, .link = null, .classes = classes };
     const t = try arena.create(compiler.Type);
     t.* = .{ .Var = v };
     return t;
@@ -115,17 +114,17 @@ fn listType(arena: std.mem.Allocator, l_type: *const compiler.Type) !*const comp
 }
 
 fn unarySame(arena: std.mem.Allocator, classes: std.EnumSet(compiler.Class)) !*const compiler.Type {
-    const v = try varType(arena, 0, classes);
+    const v = try varType(arena, classes);
     return funcType(arena, &.{v}, v);
 }
 
 fn binarySame(arena: std.mem.Allocator, classes: std.EnumSet(compiler.Class)) !*const compiler.Type {
-    const v = try varType(arena, 1, classes);
+    const v = try varType(arena, classes);
     return funcType(arena, &.{ v, v }, v);
 }
 
 fn binaryTo(arena: std.mem.Allocator, classes: std.EnumSet(compiler.Class), ret: *const compiler.Type) !*const compiler.Type {
-    const v = try varType(arena, 1, classes);
+    const v = try varType(arena, classes);
     return funcType(arena, &.{ v, v }, ret);
 }
 
@@ -292,8 +291,8 @@ test "type checker" {
             ,
             .expected = &.{
                 .Func = .{
-                    .from = &.{&.{ .Var = try createVar(alloc, 0, .empty) }},
-                    .to = &.{ .Var = try createVar(alloc, 0, .empty) },
+                    .from = &.{&.{ .Var = try createVar(alloc, .empty) }},
+                    .to = &.{ .Var = try createVar(alloc, .empty) },
                 },
             },
         },
@@ -352,7 +351,7 @@ test "type checker" {
     };
 
     const list_test_cases = [_]TypeCheckerTestCase{
-        .{ .description = "list empty", .source = "[]", .expected = try listType(alloc, try varType(alloc, 0, .empty)) },
+        .{ .description = "list empty", .source = "[]", .expected = try listType(alloc, try varType(alloc, .empty)) },
         .{ .description = "list integer", .source = "[1, 2]", .expected = try listType(alloc, c(.Integer)) },
         .{ .description = "list cons integer", .source = "1 :: []", .expected = try listType(alloc, c(.Integer)) },
         .{ .description = "list cons invalid", .source = "1 :: [1.2]", .expect_error = error.CantUnify },

@@ -471,6 +471,8 @@ pub const Compiler = struct {
                 try function.cleanupLocals();
             },
             .Function => |function| {
+                std.debug.print("{f}\n", .{self.type_map.get(expr).?});
+
                 var new_function = try self.addFunction(function.name, isTailRecursive(&function));
 
                 if (comptime constants.debug_compiler) {
@@ -796,7 +798,7 @@ pub const Type = union(enum) {
                 else => false,
             },
             .Eq => switch (self.*) {
-                .Const => |c| c == .Integer or c == .Float or c == .Boolean or c == .String,
+                .Const => true,
                 else => false,
             },
             .Ord => switch (self.*) {
@@ -958,6 +960,18 @@ pub const TypeChecker = struct {
             .Mono = try self.function(&.{c(.Boolean)}, c(.Unit)),
         });
 
+        try env.set(self.arena, "@print", .{
+            .Mono = try self.function(&.{try self.variable()}, c(.Unit)),
+        });
+
+        try env.set(self.arena, "@len", .{
+            .Mono = try self.function(&.{try self.genericList()}, c(.Integer)),
+        });
+
+        try env.set(self.arena, "@nth", .{
+            .Mono = try self.function(&.{ try self.genericList(), c(.Integer) }, c(.Integer)),
+        });
+
         const root = try self.infer(env, expr);
 
         var it = self.type_map.iterator();
@@ -975,6 +989,10 @@ pub const TypeChecker = struct {
 
     pub fn list(self: *TypeChecker, t: *const Type) !*const Type {
         return try self.createType(.{ .List = t });
+    }
+
+    pub fn genericList(self: *TypeChecker) !*const Type {
+        return try self.createType(.{ .List = try self.variable() });
     }
 
     pub fn function(self: *TypeChecker, from: []const *const Type, to: *const Type) !*const Type {
@@ -1103,7 +1121,9 @@ pub const TypeChecker = struct {
         const a = type_a.prune();
         const b = type_b.prune();
 
-        logging.log("Unify {f} with {f}", .{ a, b }, .{});
+        if (comptime constants.debug_type_checker) {
+            logging.log("Unify {f} with {f}", .{ a, b }, .{});
+        }
 
         if (a.* == .Var and b.* == .Var and a.Var == b.Var) return;
 
@@ -1135,13 +1155,15 @@ pub const TypeChecker = struct {
     }
 
     fn infer(self: *TypeChecker, env: *Env, expr: *const ast.Expression) anyerror!*const Type {
+        if (comptime constants.debug_type_checker) {
+            logging.log("infer {s}", .{@tagName(expr.data)}, .{});
+        }
         const t = try self.inferType(env, expr);
         try self.type_map.put(self.arena, expr, t);
         return t;
     }
 
     fn inferType(self: *TypeChecker, env: *Env, expr: *const ast.Expression) !*const Type {
-        logging.log("infer {s}", .{@tagName(expr.data)}, .{});
         return switch (expr.data) {
             .Call => |call| {
                 const f = try self.infer(env, call.function);
@@ -1225,7 +1247,7 @@ pub const TypeChecker = struct {
                 return try self.infer(inner_env, grouping.items[grouping.items.len - 1]);
             },
             .List => |l| {
-                if (l.items.len == 0) return try self.list(try self.variable());
+                if (l.items.len == 0) return try self.genericList();
                 const t = try self.infer(env, l.items[0]);
                 for (l.items[1..l.items.len]) |e| {
                     try unify(t, try self.infer(env, e));
@@ -1247,7 +1269,7 @@ pub const TypeChecker = struct {
                         .Binary => |binary| {
                             switch (binary.operator) {
                                 .Cons => {
-                                    try unify(target_t, try self.list(try self.variable()));
+                                    try unify(target_t, try self.genericList());
                                     const inner_env = try Env.init(self.scratch(), env);
                                     if (!std.mem.eql(u8, binary.left.data.Identifier, "_")) {
                                         const fresh_var = try self.variable();
