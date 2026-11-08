@@ -233,7 +233,7 @@ pub const Compiler = struct {
     }
 
     pub fn compile(self: *Compiler, program: *const ast.Expression) !*object.ObjFunction {
-        var type_checker = TypeChecker.init(self.arena);
+        var type_checker = TypeChecker.init(self.arena, &self.vm.script_context);
         defer type_checker.deinit();
 
         const result = try type_checker.checkTypes(program);
@@ -245,7 +245,7 @@ pub const Compiler = struct {
     }
 
     fn getType(self: *Compiler, expr: *const ast.Expression) *const Type {
-        return self.type_map.get(expr).?.prune();
+        return self.type_map.get(expr).?;
     }
 
     fn identifierConstant(self: *Compiler, name: []const u8) !u16 {
@@ -359,7 +359,13 @@ pub const Compiler = struct {
             .Unary => |unary| {
                 try self.compileExpression(unary.right);
                 switch (unary.operator) {
-                    .Minus => try self.emitOp(.Negate),
+                    .Minus => {
+                        switch (self.getType(unary.right).Const) {
+                            .Integer => try self.emitOp(.NegateInt),
+                            .Float => try self.emitOp(.NegateFloat),
+                            else => return error.InvalidTypeForNegate,
+                        }
+                    },
                     .Bang => try self.emitOp(.Not),
                     .Tilde => try self.emitOp(.BitwiseNot),
                     else => unreachable,
@@ -383,27 +389,59 @@ pub const Compiler = struct {
                 } else {
                     try self.compileExpression(binary.right);
                     switch (binary.operator) {
-                        .Plus => {
-                            switch (self.type_map.get(binary.left).?) {
-                                .String => {},
-                            }
-                            try self.emitOp(.Add);
+                        .Plus => switch (self.getType(binary.left).Const) {
+                            .Integer => try self.emitOp(.AddInt),
+                            .Float => try self.emitOp(.AddFloat),
+                            .String => try self.emitOp(.Concat),
+                            else => return error.InvalidTypeForAdd,
                         },
-                        .Minus => try self.emitOp(.Subtract),
-                        .Asterisk => try self.emitOp(.Multiply),
-                        .Slash => try self.emitOp(.Divide),
+                        .Minus => switch (self.getType(binary.left).Const) {
+                            .Integer => try self.emitOp(.SubtractInt),
+                            .Float => try self.emitOp(.SubtractFloat),
+                            else => return error.InvalidTypeForSubtract,
+                        },
+                        .Asterisk => switch (self.getType(binary.left).Const) {
+                            .Integer => try self.emitOp(.MultiplyInt),
+                            .Float => try self.emitOp(.MultiplyFloat),
+                            else => return error.InvalidTypeForMultiply,
+                        },
+                        .Slash => switch (self.getType(binary.left).Const) {
+                            .Integer => try self.emitOp(.DivideInt),
+                            .Float => try self.emitOp(.DivideFloat),
+                            else => return error.InvalidTypeForDivide,
+                        },
                         .Eq => try self.emitOp(.Equal),
                         .NotEq => try self.emitOpCodes(.Equal, .Not),
-                        .Gt => try self.emitOp(.Greater),
-                        .GtOrEq => try self.emitOpCodes(.Less, .Not),
-                        .Lt => try self.emitOp(.Less),
-                        .LtOrEq => try self.emitOpCodes(.Greater, .Not),
+                        .Gt => switch (self.getType(binary.left).Const) {
+                            .Integer => try self.emitOp(.GreaterInt),
+                            .Float => try self.emitOp(.GreaterFloat),
+                            else => return error.InvalidTypeForGreater,
+                        },
+                        .GtOrEq => switch (self.getType(binary.left).Const) {
+                            .Integer => try self.emitOpCodes(.LessInt, .Not),
+                            .Float => try self.emitOpCodes(.LessFloat, .Not),
+                            else => return error.InvalidTypeForGreaterOrEqual,
+                        },
+                        .Lt => switch (self.getType(binary.left).Const) {
+                            .Integer => try self.emitOp(.LessInt),
+                            .Float => try self.emitOp(.LessFloat),
+                            else => return error.InvalidTypeForLess,
+                        },
+                        .LtOrEq => switch (self.getType(binary.left).Const) {
+                            .Integer => try self.emitOpCodes(.GreaterInt, .Not),
+                            .Float => try self.emitOpCodes(.GreaterFloat, .Not),
+                            else => return error.InvalidTypeForLessOrEqual,
+                        },
                         .Ampersand => try self.emitOp(.BitwiseAnd),
                         .Pipe => try self.emitOp(.BitwiseOr),
                         .Caret => try self.emitOp(.BitwiseXor),
                         .LeftShift => try self.emitOp(.LeftShift),
                         .RightShift => try self.emitOp(.RightShift),
-                        .Percent => try self.emitOp(.Mod),
+                        .Percent => switch (self.getType(binary.left).Const) {
+                            .Integer => try self.emitOp(.ModInt),
+                            .Float => try self.emitOp(.ModFloat),
+                            else => return error.InvalidTypeForMod,
+                        },
                         .Cons => try self.emitOp(.Cons),
                         else => @panic("unknown operator"),
                     }
@@ -871,15 +909,17 @@ pub const TypeChecker = struct {
     scratch_arena: std.heap.ArenaAllocator,
     current_var_id: u32 = 0,
     type_map: TypeMap,
+    script_context: *virtual_machine.ScriptContext,
 
     const VarSet = std.AutoArrayHashMapUnmanaged(*Var, void);
     const TypeMap = std.AutoArrayHashMapUnmanaged(*const ast.Expression, *const Type);
 
-    pub fn init(arena: std.mem.Allocator) @This() {
+    pub fn init(arena: std.mem.Allocator, script_context: *virtual_machine.ScriptContext) @This() {
         return .{
             .arena = arena,
             .scratch_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
             .type_map = .empty,
+            .script_context = script_context,
         };
     }
 
@@ -913,8 +953,19 @@ pub const TypeChecker = struct {
 
     pub fn checkTypes(self: *TypeChecker, expr: *const ast.Expression) !struct { root: *const Type, type_map: TypeMap } {
         const env = try Env.init(self.scratch(), null);
-        const type_map: TypeMap = .empty;
-        return .{ .root = try self.infer(env, expr), .type_map = type_map };
+
+        try env.set(self.arena, "@assert", .{
+            .Mono = try self.function(&.{c(.Boolean)}, c(.Unit)),
+        });
+
+        const root = try self.infer(env, expr);
+
+        var it = self.type_map.iterator();
+        while (it.next()) |entry| {
+            entry.value_ptr.* = entry.value_ptr.*.prune();
+        }
+
+        return .{ .root = root, .type_map = self.type_map };
     }
 
     pub fn variable(self: *TypeChecker) !*const Type {
@@ -926,7 +977,7 @@ pub const TypeChecker = struct {
         return try self.createType(.{ .List = t });
     }
 
-    pub fn function(self: *TypeChecker, from: []*const Type, to: *const Type) !*const Type {
+    pub fn function(self: *TypeChecker, from: []const *const Type, to: *const Type) !*const Type {
         return try self.createType(.{ .Func = .{ .from = from, .to = to } });
     }
 
@@ -1239,6 +1290,7 @@ pub const TypeChecker = struct {
                 if (env.get(name)) |scheme| {
                     return try self.instantiate(scheme);
                 }
+                expr.token.printError("unbound var", self.script_context, "TypeChecker");
                 return error.UnboundVar;
             },
             .Function => |f| {

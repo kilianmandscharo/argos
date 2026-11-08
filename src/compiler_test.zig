@@ -149,7 +149,7 @@ const runTypeCheckerTest = struct {
 
         const ast = try parser.createAst(arena.allocator(), &script_context);
         const expression = ast.data.Function.body;
-        var checker = compiler.TypeChecker.init(arena.allocator());
+        var checker = compiler.TypeChecker.init(arena.allocator(), &script_context);
         defer checker.deinit();
         const result = checker.checkTypes(expression);
         if (test_case.expect_error) |err| {

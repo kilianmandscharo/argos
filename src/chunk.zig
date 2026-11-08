@@ -34,10 +34,7 @@ pub const OpCode = enum(u8) {
     True,
     False,
     Not,
-
-    EqualInt,
-    EqualFloat,
-    EqualString,
+    Equal,
 
     GreaterInt,
     GreaterFloat,
@@ -162,9 +159,7 @@ pub const Chunk = struct {
             .LessInt => return simpleInstruction("OP_LESS_INT", offset),
             .LessFloat => return simpleInstruction("OP_LESS_FLOAT", offset),
             .LessString => return simpleInstruction("OP_LESS_STRING", offset),
-            .EqualInt => return simpleInstruction("OP_EQUAL_INT", offset),
-            .EqualFloat => return simpleInstruction("OP_EQUAL_FLOAT", offset),
-            .EqualString => return simpleInstruction("OP_EQUAL_STRING", offset),
+            .Equal => return simpleInstruction("OP_EQUAL", offset),
             .Pop => return simpleInstruction("OP_POP", offset),
             .SwapPop => return simpleInstruction("OP_SWAP_POP", offset),
             .IsEmpty => return simpleInstruction("OP_IS_EMPTY", offset),

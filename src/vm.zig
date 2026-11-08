@@ -371,7 +371,9 @@ pub const VirtualMachine = struct {
                     self.swapTop(value.wrapFloat(a.Float - b.Float));
                 },
                 .Concat => {
-                    self.swapTop(try self.concatenate());
+                    const result = try self.concatenate();
+                    _ = self.pop();
+                    self.swapTop(result);
                 },
                 .MultiplyInt => {
                     const b = self.pop();
@@ -386,7 +388,7 @@ pub const VirtualMachine = struct {
                 .DivideInt => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(value.wrapInt(a.Int / b.Int));
+                    self.swapTop(value.wrapInt(@divTrunc(a.Int, b.Int)));
                 },
                 .DivideFloat => {
                     const b = self.pop();
@@ -410,15 +412,31 @@ pub const VirtualMachine = struct {
                     const a = self.peekTop();
                     self.swapTop(value.wrapBool(try isEqual(a, b)));
                 },
-                .Greater => {
+                .GreaterInt => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(value.wrapBool(try self.greater(a, b)));
+                    self.swapTop(value.wrapBool(a.Int > b.Int));
                 },
-                .Less => {
+                .GreaterFloat => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(value.wrapBool(try self.less(a, b)));
+                    self.swapTop(value.wrapBool(a.Float > b.Float));
+                },
+                .GreaterString => {
+                    @panic("not implemented");
+                },
+                .LessInt => {
+                    const b = self.pop();
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapBool(a.Int < b.Int));
+                },
+                .LessFloat => {
+                    const b = self.pop();
+                    const a = self.peekTop();
+                    self.swapTop(value.wrapBool(a.Float < b.Float));
+                },
+                .LessString => {
+                    @panic("not implemented");
                 },
                 .BitwiseAnd => {
                     const b = self.pop();
@@ -445,12 +463,12 @@ pub const VirtualMachine = struct {
                 .ModInt => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(value.wrapInt(a.Int % b.Int));
+                    self.swapTop(value.wrapInt(@rem(a.Int, b.Int)));
                 },
                 .ModFloat => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(value.wrapFloat(a.Float % b.Float));
+                    self.swapTop(value.wrapFloat(@rem(a.Float, b.Float)));
                 },
                 .LeftShift => {
                     const b = self.pop();
@@ -584,7 +602,7 @@ pub const VirtualMachine = struct {
         };
     }
 
-    fn concatenate(self: *VirtualMachine) !void {
+    fn concatenate(self: *VirtualMachine) !value.Value {
         const left = self.peek(1).asObj().asString().chars;
         const right = self.peekTop().asObj().asString().chars;
 
@@ -603,8 +621,7 @@ pub const VirtualMachine = struct {
             result = value.wrapObj(try object.allocateString(self, chars, hash));
         }
 
-        _ = self.pop();
-        self.swapTop(result);
+        return result;
     }
 
     fn isFalsey(val: value.Value) bool {
