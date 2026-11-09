@@ -319,6 +319,14 @@ test "type checker" {
             ,
             .expected = c(.Integer),
         },
+        .{
+            .description = "recursion",
+            .source =
+            \\fact = (n) -> if n <= 1 then 1 else n * fact(n-1)
+            \\fact(5)
+            ,
+            .expected = c(.Integer),
+        },
     };
 
     const list_test_cases = [_]TypeCheckerTestCase{

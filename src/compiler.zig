@@ -1274,12 +1274,17 @@ pub const TypeChecker = struct {
                 return r.prune();
             },
             .Declaration => |declaration| {
-                const t = try self.infer(env, declaration.right);
-                const scheme = try self.generalize(env, t);
-                if (t.* == .Func and scheme == .Poly) {
-                    t.Func.is_generic = true;
+                if (declaration.right.data == .Function) {
+                    try env.set(self.scratch(), declaration.left.data, .{ .Mono = try self.variable() });
+                    const t = try self.infer(env, declaration.right);
+                    const scheme = try self.generalize(env, t);
+                    if (scheme == .Poly) t.Func.is_generic = true;
+                    try env.set(self.scratch(), declaration.left.data, scheme);
+                } else {
+                    const t = try self.infer(env, declaration.right);
+                    const scheme = try self.generalize(env, t);
+                    try env.set(self.scratch(), declaration.left.data, scheme);
                 }
-                try env.set(self.scratch(), declaration.left.data, scheme);
                 return c(.Unit);
             },
             .Unary => |unary| {
@@ -1415,7 +1420,7 @@ pub const TypeChecker = struct {
                 return try self.instantiate(try self.mustResolveIdentifier(env, expr, name));
             },
             .Function => |f| {
-                var inner_env = try Env.init(self.scratch(), env);
+                const inner_env = try Env.init(self.scratch(), env);
                 var params: std.ArrayList(*const Type) = .empty;
 
                 for (f.params.items) |param| {
