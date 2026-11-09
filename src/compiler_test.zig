@@ -30,27 +30,23 @@ test "tail recursion" {
     }.runTest;
 
     const test_cases = [_]TestCase{
+        .{ .description = "simple function", .source = "foo = () -> 1", .expected = true },
+        .{ .description = "simple non tail", .source = "foo = () -> foo() + 1", .expected = false },
+        .{ .description = "simple non tail", .source = "foo = () -> 1 + foo()", .expected = false },
+        .{ .description = "if non tail", .source = "foo = () -> if foo() then 1 else 2", .expected = false },
+        .{ .description = "if tail", .source = "foo = () -> if true then foo() else foo()", .expected = true },
         .{
-            .description = "simple function",
+            .description = "if in grouping",
             .source =
-            \\foo = () -> "foo"
-            ,
-            .expected = true,
-        },
-        .{
-            .description = "factorial non-tail",
-            .source =
-            \\fac = (n) -> if n <= 1 then 1 else n * fac(n-1)
+            \\foo = () -> (
+            \\    a = if true then 1 else foo()
+            \\    a + b
+            \\)
             ,
             .expected = false,
         },
-        .{
-            .description = "factorial tail",
-            .source =
-            \\fac = (n, acc) -> if n <= 1 then acc else fac(n-1, acc*n)
-            ,
-            .expected = true,
-        },
+        .{ .description = "factorial non-tail", .source = "fac = (n) -> if n <= 1 then 1 else n * fac(n-1)", .expected = false },
+        .{ .description = "factorial tail", .source = "fac = (n, acc) -> if n <= 1 then acc else fac(n-1, acc*n)", .expected = true },
     };
 
     try test_utils.runTests(TestCase, "evaluate tail recursion tests", &test_cases, run);
