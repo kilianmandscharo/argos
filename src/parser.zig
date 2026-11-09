@@ -64,7 +64,6 @@ pub const Parser = struct {
         program.* = .{
             .data = .{
                 .Function = .{
-                    .name = scanner.Token.dummyWithName("Program"),
                     .params = .empty,
                     .body = grouping,
                 },
