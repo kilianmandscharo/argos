@@ -169,6 +169,7 @@ pub const VirtualMachine = struct {
         }
 
         const function = try c.compile(ast);
+        c.deinit();
 
         if (comptime constants.debug_trace_execution) {
             logDebug("Compilation finished.", .{});

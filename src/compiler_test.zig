@@ -327,6 +327,25 @@ test "type checker" {
             ,
             .expected = c(.Integer),
         },
+        .{
+            .description = "lambda as param",
+            .source =
+            \\foo = (func) -> func(1, 2)
+            \\foo((a, b) -> a + b)
+            ,
+            .expected = c(.Integer),
+        },
+        .{
+            .description = "lambda not generalizable",
+            .source =
+            \\foo = (func) -> (
+            \\   func(1, 2)
+            \\   func(1.0, 2.0)
+            \\)
+            \\foo((a, b) -> a + b)
+            ,
+            .expect_error = error.CantUnify,
+        },
     };
 
     const list_test_cases = [_]TypeCheckerTestCase{

@@ -12,7 +12,7 @@ const ast = @import("ast.zig");
 const native = @import("native.zig");
 
 pub const Function = struct {
-    locals: std.ArrayList(VariableInfo),
+    locals: std.ArrayList(Local),
     upvalues: std.ArrayList(Upvalue),
     scope_depth: u32,
     function: *object.ObjFunction,
@@ -27,17 +27,16 @@ pub const Function = struct {
         is_local: bool,
     };
 
-    const VariableInfo = struct {
-        is_used: bool,
+    const Local = struct {
         is_captured: bool,
-        token: scanner.Token,
+        name: []const u8,
         depth: u32,
     };
 
-    pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, name: ?scanner.Token, tail_recursive: bool) !*@This() {
+    pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, func_name: ?[]const u8, tail_recursive: bool) !*@This() {
         const function = try object.allocateFunction(vm);
-        if (name) |token| {
-            const obj = try object.copyString(vm, token.data);
+        if (func_name) |name| {
+            const obj = try object.copyString(vm, name);
             function.name = obj.asString();
         }
         const owned = try compiler.arena.create(Function);
@@ -54,64 +53,52 @@ pub const Function = struct {
     }
 
     fn getDisplayName(self: *const Function) []const u8 {
-        return self.getName() orelse "anonymous";
+        return self.getName() orelse "lambda";
     }
 
     fn getName(self: *const Function) ?[]const u8 {
         return if (self.function.name) |name| name.chars else null;
     }
 
-    fn getLocal(self: *Function, index: u8) *VariableInfo {
+    fn getLocal(self: *Function, index: u8) *Local {
         return &self.locals.items[index];
     }
 
-    pub fn addLocal(self: *Function, name: *const scanner.Token) !void {
-        var i = self.locals.items.len;
-        while (i > 0) {
-            i -= 1;
-            const local = self.locals.items[i];
-            if (local.depth < self.scope_depth) {
-                break;
-            }
-            if (std.mem.eql(u8, name.data, local.token.data)) {
-                return self.compiler.errorAt(name, "already a variable with this name in this scope");
-            }
-        }
+    pub fn addLocal(self: *Function, name: []const u8) !void {
         if (self.locals.items.len == UINT8_COUNT) {
-            return self.compiler.errorAt(name, "too many local variables in function");
+            return error.TooManyVariables;
         }
         try self.locals.append(self.compiler.arena, .{
-            .is_used = false,
             .is_captured = false,
-            .token = name.*,
+            .name = name,
             .depth = self.scope_depth,
         });
     }
 
-    pub fn resolveLocal(self: *Function, name: *const scanner.Token) ?u8 {
+    pub fn resolveLocal(self: *Function, name: []const u8) ?u8 {
         var i = self.locals.items.len;
         while (i > 0) {
             i -= 1;
             const local = &self.locals.items[i];
-            if (std.mem.eql(u8, name.data, local.token.data)) {
+            if (std.mem.eql(u8, name, local.name)) {
                 return @intCast(i);
             }
         }
         return null;
     }
 
-    fn getUpvalue(self: *Function, index: u8) *VariableInfo {
+    fn getUpvalue(self: *Function, index: u8) *Local {
         return &self.locals.items[self.upvalues.items[index].index];
     }
 
-    pub fn addUpvalue(self: *Function, name: *const scanner.Token, index: u8, is_local: bool) !u8 {
+    pub fn addUpvalue(self: *Function, index: u8, is_local: bool) !u8 {
         for (self.upvalues.items, 0..) |upvalue, i| {
             if (upvalue.index == index and upvalue.is_local == is_local) {
                 return @intCast(i);
             }
         }
         if (self.upvalues.items.len == UINT8_COUNT) {
-            return self.compiler.errorAt(name, "too many closure variables in function");
+            return error.TooManyUpvalues;
         }
         try self.upvalues.append(self.compiler.arena, .{
             .is_local = is_local,
@@ -121,14 +108,14 @@ pub const Function = struct {
         return @intCast(self.upvalues.items.len - 1);
     }
 
-    fn resolveUpvalue(self: *Function, name: *const scanner.Token) !?u8 {
+    fn resolveUpvalue(self: *Function, name: []const u8) !?u8 {
         if (self.getParent()) |parent| {
             if (parent.resolveLocal(name)) |index| {
                 parent.getLocal(index).is_captured = true;
-                return try self.addUpvalue(name, index, true);
+                return try self.addUpvalue(index, true);
             }
             if (try parent.resolveUpvalue(name)) |index| {
-                return try self.addUpvalue(name, index, false);
+                return try self.addUpvalue(index, false);
             }
         }
         return null;
@@ -225,15 +212,14 @@ pub const Compiler = struct {
 
     pub fn addFunction(
         self: *Compiler,
-        name: ?scanner.Token,
+        name: ?[]const u8,
         tail_recursive: bool,
     ) !*Function {
         const index = self.functions.items.len;
         var function = try Function.init(self.vm, self, @intCast(index), name, tail_recursive);
         try function.locals.append(self.arena, .{
-            .is_used = true,
             .is_captured = false,
-            .token = if (name) |token| token else scanner.Token.dummy(),
+            .name = name orelse "",
             .depth = 0,
         });
         try self.functions.append(self.arena, function);
@@ -282,8 +268,7 @@ pub const Compiler = struct {
         const cur_chunk = self.currentChunk();
         const jump = cur_chunk.code.items.len - offset - 2;
         if (jump > std.math.maxInt(u16)) {
-            // TODO: pass correct token
-            return self.errorAt(&scanner.Token.dummy(), "Too much code to jump over.");
+            return error.JumpTooLarge;
         }
         const bytes = chunk.indexToU16(jump);
         cur_chunk.code.items[offset] = bytes[0];
@@ -336,20 +321,20 @@ pub const Compiler = struct {
         return error.CompileError;
     }
 
-    fn compileIdentifier(self: *Compiler, token: *const scanner.Token) !void {
-        if (self.getFunction().resolveLocal(token)) |index| {
+    fn compileIdentifier(self: *Compiler, name: []const u8) !void {
+        if (self.getFunction().resolveLocal(name)) |index| {
             try self.emitOpU8(.GetLocal, index);
-        } else if (try self.getFunction().resolveUpvalue(token)) |index| {
+        } else if (try self.getFunction().resolveUpvalue(name)) |index| {
             try self.emitOpU8(.GetUpvalue, index);
-        } else if (self.globals.get(token.data)) |func_obj| {
+        } else if (self.globals.get(name)) |func_obj| {
             try self.emitConstant(value.wrapObj(func_obj));
         } else {
-            return self.errorAt(token, "unknown identifier");
+            @panic("type checker messed up");
         }
     }
 
-    fn compileFunction(self: *Compiler, name: ?scanner.Token, function: *const ast.Function, tail_recursive: bool) !void {
-        var new_function = try self.addFunction(name, tail_recursive);
+    fn compileFunction(self: *Compiler, function: *const ast.Function, tail_recursive: bool) !void {
+        var new_function = try self.addFunction(if (function.name) |name| name.data else null, tail_recursive);
 
         if (comptime constants.debug_compiler) {
             self.log("added new function, current function stack:", .{});
@@ -367,7 +352,7 @@ pub const Compiler = struct {
                     if (new_function.function.arity > 255) {
                         return self.errorAt(param_name, "can't have more than 255 parameters");
                     }
-                    try new_function.addLocal(param_name);
+                    try new_function.addLocal(param_name.data);
                 },
                 .Default => @panic("not implemented"),
             }
@@ -422,7 +407,7 @@ pub const Compiler = struct {
             .Declaration => |declaration| {
                 if (declaration.right.data != .Function) {
                     try self.compileExpression(declaration.right);
-                    try self.getFunction().addLocal(&declaration.left);
+                    try self.getFunction().addLocal(declaration.left.data);
                     try self.emitOp(.Unit);
                     return;
                 }
@@ -432,8 +417,8 @@ pub const Compiler = struct {
                 const tail_recursive = isTailRecursive(&function);
 
                 if (!func_t.is_generic) {
-                    try self.compileFunction(function.name, &function, tail_recursive);
-                    try self.getFunction().addLocal(&declaration.left);
+                    try self.compileFunction(&function, tail_recursive);
+                    try self.getFunction().addLocal(declaration.left.data);
                     try self.emitOp(.Unit);
                     return;
                 }
@@ -445,19 +430,16 @@ pub const Compiler = struct {
                         }
                     }
 
-                    var name = scanner.Token.dummy();
-                    name.data = try self.getGenericFunctionName(function.name.?.data, resolved_t);
-
-                    try self.compileFunction(name, &function, tail_recursive);
+                    try self.compileFunction(&function, tail_recursive);
                     self.var_map.clearRetainingCapacity();
 
-                    try self.getFunction().addLocal(&name);
+                    try self.getFunction().addLocal(try self.getGenericFunctionName(function.name.?.data, resolved_t));
                 }
 
                 try self.emitOp(.Unit);
             },
             .Identifier => {
-                try self.compileIdentifier(&expr.token);
+                try self.compileIdentifier(expr.token.data);
             },
             .String => |string| {
                 try self.emitConstant(value.wrapObj(try object.copyString(self.vm, string)));
@@ -589,7 +571,7 @@ pub const Compiler = struct {
                 try function.cleanupLocals();
             },
             .Function => |function| {
-                try self.compileFunction(null, &function, false);
+                try self.compileFunction(&function, false);
             },
             .Call => |call| {
                 const count = call.args.items.len;
@@ -598,7 +580,6 @@ pub const Compiler = struct {
                 }
 
                 const func_t = self.getType(call.function);
-                std.debug.print("called function = {f}, {}\n", .{ func_t, func_t.Func.is_generic });
 
                 const current_function = self.getFunction();
                 if (isRecursiveCall(current_function, &call) and current_function.tail_recursive) {
@@ -608,9 +589,7 @@ pub const Compiler = struct {
                     try self.emitOpU8(.TailCall, @intCast(count));
                 } else {
                     if (func_t.Func.is_generic) {
-                        var token = scanner.Token.dummy();
-                        token.data = try self.getGenericFunctionName(call.function.data.Identifier, func_t);
-                        try self.compileIdentifier(&token);
+                        try self.compileIdentifier(try self.getGenericFunctionName(call.function.data.Identifier, func_t));
                     } else {
                         try self.compileExpression(call.function);
                     }
@@ -679,8 +658,8 @@ pub const Compiler = struct {
 
                         const currentFunction = self.getFunction();
                         currentFunction.beginScope();
-                        try currentFunction.addLocal(&cons.left.token);
-                        try currentFunction.addLocal(&cons.right.token);
+                        try currentFunction.addLocal(cons.left.token.data);
+                        try currentFunction.addLocal(cons.right.token.data);
                         try self.compileExpression(arm.expression);
                         currentFunction.endScope();
                         try currentFunction.cleanupLocals();

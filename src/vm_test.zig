@@ -43,6 +43,16 @@ test "vm tests" {
             ,
         },
         .{
+            .description = "shadowing",
+            .source =
+            \\a = 6
+            \\a = 11
+            \\b = 11
+            \\c = a + b
+            \\@assert(c == 22)
+            ,
+        },
+        .{
             .description = "nested variable declaration",
             .source =
             \\a = 6
@@ -412,7 +422,7 @@ test "function tests" {
         .{
             .description = "unit return",
             .source =
-            \\foo = () -> @print("foo")
+            \\foo = () -> @assert(true)
             \\result = foo()
             \\@assert(result == ())
             ,
@@ -429,123 +439,123 @@ test "function tests" {
             \\@assert(c == "foobar")
             ,
         },
-        // .{
-        //     .description = "grouping return",
-        //     .source =
-        //     \\foo = (a, b) -> (
-        //     \\    c = a + b
-        //     \\    c * c
-        //     \\)
-        //     \\result = foo(3, 4)
-        //     \\@assert(result == 49)
-        //     ,
-        // },
-        // .{
-        //     .description = "nested function",
-        //     .source =
-        //     \\foo = () -> (
-        //     \\    bar = (a, b) -> a * b
-        //     \\    bar(1, 2) * 3
-        //     \\)
-        //     \\result = foo()
-        //     \\@assert(result == 6)
-        //     ,
-        // },
-        // .{
-        //     .description = "closure",
-        //     .source =
-        //     \\foo = () -> (
-        //     \\    x = 2
-        //     \\    (a) -> a * x
-        //     \\)
-        //     \\func = foo()
-        //     \\result = func(10)
-        //     \\@assert(result == 20)
-        //     ,
-        // },
-        // .{
-        //     .description = "deep closure",
-        //     .source =
-        //     \\foo = () -> (
-        //     \\    x = 1
-        //     \\    bar = () -> (
-        //     \\        y = 2
-        //     \\        baz = () -> (
-        //     \\            z = 3
-        //     \\            x + y + z
-        //     \\        )
-        //     \\        baz
-        //     \\    )
-        //     \\    bar
-        //     \\)
-        //     \\
-        //     \\bar = foo()
-        //     \\baz = bar()
-        //     \\result = baz()
-        //     \\
-        //     \\@assert(result == 6)
-        //     ,
-        // },
-        // .{
-        //     .description = "closure in grouping",
-        //     .source =
-        //     \\foo = () -> (
-        //     \\    bar = (
-        //     \\        a = 2
-        //     \\        (b) -> a + b
-        //     \\    )
-        //     \\    bar
-        //     \\)
-        //     \\func = foo()
-        //     \\result = func(10)
-        //     \\@assert(result == 12)
-        //     ,
-        // },
-        // .{
-        //     .description = "iife",
-        //     .source =
-        //     \\foo = ((a, b) -> a + b)(1, 2)
-        //     \\@assert(foo == 3)
-        //     ,
-        // },
-        // .{
-        //     .description = "recursion",
-        //     .source =
-        //     \\fac = (n) -> if n <= 1 then 1 else n * fac(n-1)
-        //     \\result = fac(5)
-        //     \\@assert(result == 120)
-        //     ,
-        // },
-        // .{
-        //     .description = "recursion with acc",
-        //     .source =
-        //     \\fac = (val) -> (
-        //     \\    inner = (n, acc) -> if n <= 1 then acc else inner(n-1, acc*n)
-        //     \\    inner(val, 1)
-        //     \\)
-        //     \\result = fac(5)
-        //     \\@assert(result == 120)
-        //     ,
-        // },
-        // .{
-        //     .description = "fib",
-        //     .source =
-        //     \\fib = (index) -> (
-        //     \\    inner = (a, b, n) -> if n <= 0 then a else inner(b, a+b, n-1)
-        //     \\    inner(0, 1, index)
-        //     \\)
-        //     \\result = fib(5)
-        //     \\@assert(result == 5)
-        //     ,
-        // },
-        // .{
-        //     .description = "tail recursion",
-        //     .source =
-        //     \\count_up = (n, acc) -> if n <= 0 then acc else count_up(n-1, acc+1)
-        //     \\result = count_up(5000, 0)
-        //     \\@assert(result == 5000)
-        //     ,
-        // },
+        .{
+            .description = "grouping return",
+            .source =
+            \\foo = (a, b) -> (
+            \\    c = a + b
+            \\    c * c
+            \\)
+            \\result = foo(3, 4)
+            \\@assert(result == 49)
+            ,
+        },
+        .{
+            .description = "nested function",
+            .source =
+            \\foo = () -> (
+            \\    bar = (a, b) -> a * b
+            \\    bar(1, 2) * 3
+            \\)
+            \\result = foo()
+            \\@assert(result == 6)
+            ,
+        },
+        .{
+            .description = "closure",
+            .source =
+            \\foo = () -> (
+            \\    x = 2
+            \\    (a) -> a * x
+            \\)
+            \\func = foo()
+            \\result = func(10)
+            \\@assert(result == 20)
+            ,
+        },
+        .{
+            .description = "deep closure",
+            .source =
+            \\foo = () -> (
+            \\    x = 1
+            \\    bar = () -> (
+            \\        y = 2
+            \\        baz = () -> (
+            \\            z = 3
+            \\            x + y + z
+            \\        )
+            \\        baz
+            \\    )
+            \\    bar
+            \\)
+            \\
+            \\bar = foo()
+            \\baz = bar()
+            \\result = baz()
+            \\
+            \\@assert(result == 6)
+            ,
+        },
+        .{
+            .description = "closure in grouping",
+            .source =
+            \\foo = () -> (
+            \\    bar = (
+            \\        a = 2
+            \\        (b) -> a + b
+            \\    )
+            \\    bar
+            \\)
+            \\func = foo()
+            \\result = func(10)
+            \\@assert(result == 12)
+            ,
+        },
+        .{
+            .description = "iife",
+            .source =
+            \\foo = ((a, b) -> a + b)(1, 2)
+            \\@assert(foo == 3)
+            ,
+        },
+        .{
+            .description = "recursion",
+            .source =
+            \\fac = (n) -> if n <= 1 then 1 else n * fac(n-1)
+            \\result = fac(5)
+            \\@assert(result == 120)
+            ,
+        },
+        .{
+            .description = "recursion with acc",
+            .source =
+            \\fac = (val) -> (
+            \\    inner = (n, acc) -> if n <= 1 then acc else inner(n-1, acc*n)
+            \\    inner(val, 1)
+            \\)
+            \\result = fac(5)
+            \\@assert(result == 120)
+            ,
+        },
+        .{
+            .description = "fib",
+            .source =
+            \\fib = (index) -> (
+            \\    inner = (a, b, n) -> if n <= 0 then a else inner(b, a+b, n-1)
+            \\    inner(0, 1, index)
+            \\)
+            \\result = fib(5)
+            \\@assert(result == 5)
+            ,
+        },
+        .{
+            .description = "tail recursion",
+            .source =
+            \\count_up = (n, acc) -> if n <= 0 then acc else count_up(n-1, acc+1)
+            \\result = count_up(5000, 0)
+            \\@assert(result == 5000)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
