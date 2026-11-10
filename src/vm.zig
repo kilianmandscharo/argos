@@ -630,12 +630,6 @@ pub const VirtualMachine = struct {
     }
 
     fn isEqual(a: value.Value, b: value.Value) !bool {
-        if (a == .Int and b == .Float) {
-            return @as(f64, @floatFromInt(a.Int)) == b.Float;
-        }
-        if (a == .Float and b == .Int) {
-            return a.Float == @as(f64, @floatFromInt(b.Int));
-        }
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) {
             return false;
         }

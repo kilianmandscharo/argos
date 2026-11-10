@@ -10,6 +10,7 @@ const constants = @import("constants.zig");
 const parser = @import("parser.zig");
 const ast = @import("ast.zig");
 const native = @import("native.zig");
+const hm = @import("hm.zig");
 
 pub const Function = struct {
     locals: std.ArrayList(Local),
@@ -164,8 +165,8 @@ pub const Compiler = struct {
     functions: std.ArrayList(*Function),
     globals: std.StringHashMapUnmanaged(*object.Obj),
     debug_indent: usize = 0,
-    type_map: TypeChecker.TypeMap,
-    var_map: std.AutoHashMapUnmanaged(*const Type, *const Type),
+    type_map: hm.TypeChecker.TypeMap,
+    var_map: std.AutoHashMapUnmanaged(*const hm.Type, *const hm.Type),
     scratch_arena: std.heap.ArenaAllocator,
 
     pub fn init(
@@ -231,7 +232,7 @@ pub const Compiler = struct {
     }
 
     pub fn compile(self: *Compiler, program: *const ast.Expression) !*object.ObjFunction {
-        var type_checker = TypeChecker.init(self.arena, &self.vm.script_context);
+        var type_checker = hm.TypeChecker.init(self.arena, &self.vm.script_context);
         defer type_checker.deinit();
 
         const result = try type_checker.checkTypes(program);
@@ -242,7 +243,7 @@ pub const Compiler = struct {
         return function.function;
     }
 
-    fn getType(self: *Compiler, expr: *const ast.Expression) *const Type {
+    fn getType(self: *Compiler, expr: *const ast.Expression) *const hm.Type {
         if (self.type_map.get(expr)) |t| {
             return switch (t.*) {
                 .Var => self.var_map.get(t).?.prune(),
@@ -354,7 +355,13 @@ pub const Compiler = struct {
                     }
                     try new_function.addLocal(param_name.data);
                 },
-                .Default => @panic("not implemented"),
+                .Default => |*default_param| {
+                    new_function.function.arity += 1;
+                    if (new_function.function.arity > 255) {
+                        return self.errorAt(&default_param.name, "can't have more than 255 parameters");
+                    }
+                    try new_function.addLocal(default_param.name.data);
+                },
             }
         }
 
@@ -388,13 +395,28 @@ pub const Compiler = struct {
         }
     }
 
-    fn getGenericFunctionName(self: *Compiler, name: []const u8, t: *const Type) ![]const u8 {
+    fn getGenericFunctionName(self: *Compiler, name: []const u8, t: *const hm.Type) ![]const u8 {
         var buf: std.Io.Writer.Allocating = .init(self.scratch());
         try buf.writer.print("{s}", .{name});
-        for (t.Func.from) |item_t| {
-            try buf.writer.print("_{f}", .{item_t});
+        for (t.Func.from) |param| {
+            try buf.writer.print("_{f}", .{param.t()});
         }
         return buf.written();
+    }
+
+    fn compileArgs(self: *Compiler, function: *const ast.Function, args: []*const ast.Expression) !void {
+        for (function.params.items, 0..) |param, i| {
+            switch (param) {
+                .Positional => try self.compileExpression(args[i]),
+                .Default => |default_param| {
+                    if (i >= args.len) {
+                        try self.compileExpression(default_param.value);
+                    } else {
+                        try self.compileExpression(args[i]);
+                    }
+                },
+            }
+        }
     }
 
     fn compileExpression(self: *Compiler, expr: *const ast.Expression) anyerror!void {
@@ -425,8 +447,15 @@ pub const Compiler = struct {
 
                 for (func_t.resolved.items) |resolved_t| {
                     for (0..func_t.from.len) |i| {
-                        if (func_t.from[i].* == .Var) {
-                            try self.var_map.put(self.scratch(), func_t.from[i], resolved_t.Func.from[i]);
+                        if (func_t.from[i].t().* == .Var) {
+                            switch (resolved_t.Func.from[i]) {
+                                .Positional => |t| try self.var_map.put(self.scratch(), func_t.from[i].t(), t),
+                                .Default => try self.var_map.put(
+                                    self.scratch(),
+                                    func_t.from[i].t(),
+                                    self.getType(function.params.items[i].Default.value),
+                                ),
+                            }
                         }
                     }
 
@@ -814,615 +843,6 @@ pub const Compiler = struct {
             .Boolean,
             .Unit,
             => return true,
-        };
-    }
-};
-
-pub const Type = union(enum) {
-    Var: *Var,
-    Const: Const,
-    Func: *Func,
-    List: *const Type,
-
-    pub fn prune(self: *const Type) *const Type {
-        switch (self.*) {
-            .Var => |v| {
-                const link = v.link orelse return self;
-                const t = link.prune();
-                v.link = t;
-                return t;
-            },
-            else => return self,
-        }
-    }
-
-    pub fn hasInstance(self: *const Type, class: Class) bool {
-        return switch (class) {
-            .Plus => switch (self.*) {
-                .Const => |c| c == .Integer or c == .Float or c == .String,
-                else => false,
-            },
-            .Num => switch (self.*) {
-                .Const => |c| c == .Integer or c == .Float,
-                else => false,
-            },
-            .Show => switch (self.*) {
-                .Const => true,
-                else => false,
-            },
-            .Eq => switch (self.*) {
-                .Const => true,
-                else => false,
-            },
-            .Ord => switch (self.*) {
-                .Const => |c| c == .Integer or c == .Float,
-                else => false,
-            },
-        };
-    }
-
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
-        const resolved = self.prune();
-        switch (resolved.*) {
-            .Const => |c| try writer.print("{s}", .{@tagName(c)}),
-            .Var => |v| {
-                try writer.print("t{d}", .{v.id});
-                if (v.classes.count() > 0) {
-                    try writer.print(" {{", .{});
-                    var first = true;
-                    var it = v.classes.iterator();
-                    while (it.next()) |class| {
-                        if (!first) try writer.print(", ", .{});
-                        first = false;
-                        try writer.print("{s}", .{@tagName(class)});
-                    }
-                    try writer.print("}}", .{});
-                }
-            },
-            .List => |l| {
-                try writer.print("[", .{});
-                try l.format(writer);
-                try writer.print("]", .{});
-            },
-            .Func => |f| {
-                try writer.print("(", .{});
-                for (f.from, 0..) |param, i| {
-                    try param.format(writer);
-                    if (i != f.from.len - 1) {
-                        try writer.print(", ", .{});
-                    }
-                }
-                try writer.print(") -> ", .{});
-                try f.to.format(writer);
-            },
-        }
-    }
-};
-
-pub const Func = struct {
-    from: []const *const Type,
-    to: *const Type,
-    is_generic: bool = false,
-    resolved: std.ArrayList(*const Type) = .empty,
-};
-
-const Const = enum {
-    Unit,
-    String,
-    Integer,
-    Float,
-    Boolean,
-};
-
-pub const Class = enum { Plus, Num, Show, Eq, Ord };
-
-pub const Var = struct {
-    id: u32,
-    link: ?*const Type = null,
-    classes: std.EnumSet(Class),
-};
-
-const Scheme = union(enum) {
-    Mono: *const Type,
-    Poly: struct {
-        vars: std.ArrayList(*Var),
-        t: *const Type,
-    },
-};
-
-const Env = struct {
-    store: std.StringHashMapUnmanaged(Scheme),
-    outer: ?*Env,
-
-    pub fn init(arena: std.mem.Allocator, outer: ?*Env) !*Env {
-        const env = try arena.create(Env);
-        env.* = .{
-            .outer = outer,
-            .store = .{},
-        };
-        return env;
-    }
-
-    pub fn get(self: *Env, key: []const u8) ?Scheme {
-        if (self.store.get(key)) |val| {
-            return val;
-        }
-        if (self.outer) |outer| {
-            return outer.get(key);
-        }
-        return null;
-    }
-
-    pub fn set(self: *Env, arena: std.mem.Allocator, key: []const u8, val: Scheme) !void {
-        try self.store.put(arena, key, val);
-    }
-};
-
-pub const TypeChecker = struct {
-    arena: std.mem.Allocator,
-    scratch_arena: std.heap.ArenaAllocator,
-    current_var_id: u32 = 0,
-    type_map: TypeMap,
-    script_context: *virtual_machine.ScriptContext,
-
-    const VarSet = std.AutoArrayHashMapUnmanaged(*Var, void);
-    const TypeMap = std.AutoArrayHashMapUnmanaged(*const ast.Expression, *const Type);
-
-    pub fn init(arena: std.mem.Allocator, script_context: *virtual_machine.ScriptContext) @This() {
-        return .{
-            .arena = arena,
-            .scratch_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
-            .type_map = .empty,
-            .script_context = script_context,
-        };
-    }
-
-    pub fn deinit(self: *TypeChecker) void {
-        self.scratch_arena.deinit();
-    }
-
-    pub inline fn scratch(self: *TypeChecker) std.mem.Allocator {
-        return self.scratch_arena.allocator();
-    }
-
-    pub fn c(k: Const) *const Type {
-        return switch (k) {
-            .Unit => &.{ .Const = .Unit },
-            .String => &.{ .Const = .String },
-            .Integer => &.{ .Const = .Integer },
-            .Float => &.{ .Const = .Float },
-            .Boolean => &.{ .Const = .Boolean },
-        };
-    }
-
-    fn newVar(self: *TypeChecker) !*Var {
-        const new_var = try self.arena.create(Var);
-        new_var.* = .{
-            .id = self.current_var_id,
-            .classes = .empty,
-        };
-        self.current_var_id += 1;
-        return new_var;
-    }
-
-    pub fn checkTypes(self: *TypeChecker, expr: *const ast.Expression) !struct { root: *const Type, type_map: TypeMap } {
-        const env = try Env.init(self.scratch(), null);
-
-        try env.set(self.arena, "@assert", .{
-            .Mono = try self.function(&.{c(.Boolean)}, c(.Unit)),
-        });
-
-        try env.set(self.arena, "@print", .{
-            .Mono = try self.function(&.{try self.variable()}, c(.Unit)),
-        });
-
-        try env.set(self.arena, "@len", .{
-            .Mono = try self.function(&.{try self.genericList()}, c(.Integer)),
-        });
-
-        try env.set(self.arena, "@nth", .{
-            .Mono = try self.function(&.{ try self.genericList(), c(.Integer) }, c(.Integer)),
-        });
-
-        const root = try self.infer(env, expr);
-
-        var it = self.type_map.iterator();
-        while (it.next()) |entry| {
-            entry.value_ptr.* = entry.value_ptr.*.prune();
-        }
-
-        return .{ .root = root, .type_map = self.type_map };
-    }
-
-    pub fn variable(self: *TypeChecker) !*const Type {
-        const v = try self.newVar();
-        return try self.createType(.{ .Var = v });
-    }
-
-    pub fn list(self: *TypeChecker, t: *const Type) !*const Type {
-        return try self.createType(.{ .List = t });
-    }
-
-    pub fn genericList(self: *TypeChecker) !*const Type {
-        return try self.createType(.{ .List = try self.variable() });
-    }
-
-    pub fn function(self: *TypeChecker, from: []const *const Type, to: *const Type) !*const Type {
-        const func = try self.arena.create(Func);
-        func.* = .{ .from = from, .to = to };
-        return try self.createType(.{ .Func = func });
-    }
-
-    pub fn createType(self: *TypeChecker, t: Type) !*const Type {
-        const allocated = try self.arena.create(Type);
-        allocated.* = t;
-        return allocated;
-    }
-
-    fn copy(self: *TypeChecker, freshVars: std.AutoHashMapUnmanaged(*Var, *const Type), t: *const Type) !*const Type {
-        const resolved = t.prune();
-        return switch (resolved.*) {
-            .Var => |v| {
-                return freshVars.get(v) orelse resolved;
-            },
-            .List => |l| {
-                return try self.list(try self.copy(freshVars, l));
-            },
-            .Func => |f| {
-                var from: std.ArrayList(*const Type) = .empty;
-                for (f.from) |param| {
-                    try from.append(self.arena, try self.copy(freshVars, param));
-                }
-                const to = try self.copy(freshVars, f.to);
-                return try self.function(from.items, to);
-            },
-            else => resolved,
-        };
-    }
-
-    fn instantiate(self: *TypeChecker, scheme: Scheme) !*const Type {
-        return switch (scheme) {
-            .Mono => |t| {
-                return try self.copy(.empty, t);
-            },
-            .Poly => |s| {
-                var fresh_vars: std.AutoHashMapUnmanaged(*Var, *const Type) = .empty;
-                for (s.vars.items) |v| {
-                    const fresh_var = try self.variable();
-                    fresh_var.Var.classes = v.classes;
-                    try fresh_vars.put(self.scratch(), v, fresh_var);
-                }
-                return try self.copy(fresh_vars, s.t.prune());
-            },
-        };
-    }
-
-    fn freeVars(self: *TypeChecker, out: *VarSet, t: *const Type) !void {
-        switch (t.prune().*) {
-            .Var => |v| {
-                try out.put(self.scratch(), v, {});
-            },
-            .Func => |f| {
-                for (f.from) |param| {
-                    try self.freeVars(out, param);
-                }
-                try self.freeVars(out, f.to);
-            },
-            .List => |l| try self.freeVars(out, l),
-            .Const => {},
-        }
-    }
-
-    fn freeVarsFromEnv(self: *TypeChecker, env: *Env, out: *VarSet) !void {
-        var current: ?*const Env = env;
-        while (current) |e| : (current = e.outer) {
-            var it = e.store.valueIterator();
-            while (it.next()) |scheme| {
-                switch (scheme.*) {
-                    .Mono => |m| try self.freeVars(out, m),
-                    .Poly => |p| {
-                        var tmp: VarSet = .empty;
-                        try self.freeVars(&tmp, p.t);
-                        for (p.vars.items) |v| _ = tmp.swapRemove(v);
-                        for (tmp.keys()) |v| try out.put(self.scratch(), v, {});
-                    },
-                }
-            }
-        }
-    }
-
-    fn generalize(self: *TypeChecker, env: *Env, t: *const Type) !Scheme {
-        var varsFromEnv: VarSet = .empty;
-        try self.freeVarsFromEnv(env, &varsFromEnv);
-
-        var freeVarsFromType: VarSet = .empty;
-        try self.freeVars(&freeVarsFromType, t);
-
-        var vars: std.ArrayList(*Var) = .empty;
-
-        for (freeVarsFromType.keys()) |v| {
-            if (!varsFromEnv.contains(v)) {
-                try vars.append(self.scratch(), v);
-            }
-        }
-
-        return if (vars.items.len > 0) .{ .Poly = .{ .vars = vars, .t = t } } else .{ .Mono = t };
-    }
-
-    fn occurs(v: *Var, t: *const Type) bool {
-        switch (t.prune().*) {
-            .Var => |other| return other == v,
-            .Func => |f| {
-                for (f.from) |param| {
-                    if (occurs(v, param)) return true;
-                }
-                return occurs(v, f.to);
-            },
-            .List => |l| return occurs(v, l),
-            else => return false,
-        }
-    }
-
-    fn constrain(t: *const Type, class: Class) !void {
-        const resolved = t.prune();
-        switch (resolved.*) {
-            .Var => |v| v.classes.insert(class),
-            else => if (!resolved.hasInstance(class)) return error.MissingInstance,
-        }
-    }
-
-    fn unify(type_a: *const Type, type_b: *const Type) !void {
-        const a = type_a.prune();
-        const b = type_b.prune();
-
-        if (comptime constants.debug_type_checker) {
-            logging.log("Unify {f} with {f}", .{ a, b }, .{ .module = "TypeChecker" });
-        }
-
-        if (a.* == .Var and b.* == .Var and a.Var == b.Var) return;
-
-        if (a.* == .Var) {
-            if (occurs(a.Var, b)) return error.InfiniteType;
-            switch (b.*) {
-                .Var => |other| other.classes.setUnion(a.Var.classes),
-                else => {
-                    var it = a.Var.classes.iterator();
-                    while (it.next()) |class| if (!b.hasInstance(class)) return error.MissingInstance;
-                },
-            }
-            a.Var.link = b;
-        } else if (b.* == .Var) {
-            try unify(b, a);
-        } else if (a.* == .Const and b.* == .Const and @backingInt(a.Const) == @backingInt(b.Const)) {
-            return;
-        } else if (a.* == .Func and b.* == .Func) {
-            if (a.Func.from.len != b.Func.from.len) return error.ArityMismatch;
-            for (0..a.Func.from.len) |i| {
-                try unify(a.Func.from[i], b.Func.from[i]);
-            }
-            try unify(a.Func.to, b.Func.to);
-        } else if (a.* == .List and b.* == .List) {
-            try unify(a.List, b.List);
-        } else {
-            return error.CantUnify;
-        }
-    }
-
-    fn infer(self: *TypeChecker, env: *Env, expr: *const ast.Expression) anyerror!*const Type {
-        if (comptime constants.debug_type_checker) {
-            logging.log("infer {s}", .{@tagName(expr.data)}, .{ .module = "TypeChecker" });
-        }
-        const t = try self.inferType(env, expr);
-        try self.type_map.put(self.arena, expr, t);
-        return t;
-    }
-
-    fn mustResolveIdentifier(self: *TypeChecker, env: *Env, expr: *const ast.Expression, name: []const u8) !Scheme {
-        if (env.get(name)) |scheme| {
-            return scheme;
-        }
-        expr.token.printError("unbound var", self.script_context, "TypeChecker");
-        return error.UnboundVar;
-    }
-
-    fn inferType(self: *TypeChecker, env: *Env, expr: *const ast.Expression) !*const Type {
-        return switch (expr.data) {
-            .Call => |call| {
-                var generic_func_type: ?*const Type = null;
-                if (call.function.data == .Identifier) {
-                    const original_scheme = try self.mustResolveIdentifier(env, expr, call.function.data.Identifier);
-                    if (original_scheme == .Poly and original_scheme.Poly.t.* == .Func) {
-                        generic_func_type = original_scheme.Poly.t;
-                    }
-                }
-
-                const f = try self.infer(env, call.function);
-                var args: std.ArrayList(*const Type) = .empty;
-                for (call.args.items) |arg| try args.append(self.arena, try self.infer(env, arg));
-                const r = try self.variable();
-                try unify(f, try self.function(args.items, r));
-
-                if (generic_func_type) |original_f| {
-                    try original_f.Func.resolved.append(self.arena, f);
-                    f.Func.is_generic = true;
-                }
-
-                return r.prune();
-            },
-            .Declaration => |declaration| {
-                if (declaration.right.data == .Function) {
-                    try env.set(self.scratch(), declaration.left.data, .{ .Mono = try self.variable() });
-                    const t = try self.infer(env, declaration.right);
-                    const scheme = try self.generalize(env, t);
-                    if (scheme == .Poly) t.Func.is_generic = true;
-                    try env.set(self.scratch(), declaration.left.data, scheme);
-                } else {
-                    const t = try self.infer(env, declaration.right);
-                    const scheme = try self.generalize(env, t);
-                    try env.set(self.scratch(), declaration.left.data, scheme);
-                }
-                return c(.Unit);
-            },
-            .Unary => |unary| {
-                const t = try self.infer(env, unary.right);
-                switch (unary.operator) {
-                    .Minus => {
-                        try constrain(t, .Num);
-                        return t;
-                    },
-                    .Bang => {
-                        try unify(t, c(.Boolean));
-                        return c(.Boolean);
-                    },
-                    .Tilde => {
-                        try unify(t, c(.Integer));
-                        return c(.Integer);
-                    },
-                    else => return error.InvalidUnaryOperator,
-                }
-            },
-            .Binary => |binary| {
-                const lt = try self.infer(env, binary.left);
-                const rt = try self.infer(env, binary.right);
-                switch (binary.operator) {
-                    .And, .Or => {
-                        try unify(lt, c(.Boolean));
-                        try unify(rt, c(.Boolean));
-                        return c(.Boolean);
-                    },
-                    .Plus => {
-                        try unify(lt, rt);
-                        try constrain(lt, .Plus);
-                        return lt;
-                    },
-                    .Minus, .Asterisk, .Slash, .Percent => {
-                        try unify(lt, rt);
-                        try constrain(lt, .Num);
-                        return lt;
-                    },
-                    .Eq, .NotEq => {
-                        try unify(lt, rt);
-                        try constrain(lt, .Eq);
-                        return c(.Boolean);
-                    },
-                    .Gt, .GtOrEq, .Lt, .LtOrEq => {
-                        try unify(lt, rt);
-                        try constrain(lt, .Ord);
-                        return c(.Boolean);
-                    },
-                    .Ampersand, .Pipe, .Caret, .LeftShift, .RightShift => {
-                        try unify(lt, c(.Integer));
-                        try unify(rt, c(.Integer));
-                        return c(.Integer);
-                    },
-                    .Cons => {
-                        const list_t = try self.list(lt);
-                        try unify(rt, list_t);
-                        return list_t;
-                    },
-                    else => return error.InvalidBinaryOperator,
-                }
-            },
-            .Grouping => |grouping| {
-                const inner_env = try Env.init(self.scratch(), env);
-                for (grouping.items[0 .. grouping.items.len - 1]) |e| {
-                    _ = try self.infer(inner_env, e);
-                }
-                return try self.infer(inner_env, grouping.items[grouping.items.len - 1]);
-            },
-            .List => |l| {
-                if (l.items.len == 0) return try self.genericList();
-                const t = try self.infer(env, l.items[0]);
-                for (l.items[1..l.items.len]) |e| {
-                    try unify(t, try self.infer(env, e));
-                }
-                return try self.list(t);
-            },
-            .Match => |match| {
-                const target_t = try self.infer(env, match.target);
-                const result = try self.variable();
-                for (match.arms.items) |arm| {
-                    switch (arm.pattern.data) {
-                        .Identifier => |name| {
-                            if (std.mem.eql(u8, name, "_")) {
-                                try unify(try self.infer(env, arm.expression), result);
-                                continue;
-                            }
-                            return error.NotSupported;
-                        },
-                        .Binary => |binary| {
-                            switch (binary.operator) {
-                                .Cons => {
-                                    try unify(target_t, try self.genericList());
-                                    const inner_env = try Env.init(self.scratch(), env);
-                                    if (!std.mem.eql(u8, binary.left.data.Identifier, "_")) {
-                                        const fresh_var = try self.variable();
-                                        try unify(fresh_var, target_t.prune().List);
-                                        try inner_env.set(self.scratch(), binary.left.data.Identifier, .{ .Mono = fresh_var });
-                                    }
-                                    if (!std.mem.eql(u8, binary.right.data.Identifier, "_")) {
-                                        const fresh_var = try self.variable();
-                                        try unify(fresh_var, target_t.prune());
-                                        try inner_env.set(self.scratch(), binary.right.data.Identifier, .{ .Mono = fresh_var });
-                                    }
-                                    const t = try self.infer(inner_env, arm.expression);
-                                    try unify(t, result);
-                                },
-                                else => return error.NotSupported,
-                            }
-                        },
-                        else => {
-                            try unify(target_t, try self.infer(env, arm.pattern));
-                            try unify(try self.infer(env, arm.expression), result);
-                        },
-                    }
-                }
-                return result;
-            },
-            .If => |ifExpr| {
-                const result = try self.variable();
-                for (ifExpr.arms.items) |arm| {
-                    try unify(try self.infer(env, arm.condition), c(.Boolean));
-                    try unify(try self.infer(env, arm.then), result);
-                }
-                if (ifExpr.alt) |alt| {
-                    try unify(try self.infer(env, alt), result);
-                } else {
-                    try unify(result, c(.Unit));
-                }
-                return result;
-            },
-            .Identifier => |name| {
-                return try self.instantiate(try self.mustResolveIdentifier(env, expr, name));
-            },
-            .Function => |f| {
-                const inner_env = try Env.init(self.scratch(), env);
-                var params: std.ArrayList(*const Type) = .empty;
-
-                for (f.params.items) |param| {
-                    switch (param) {
-                        .Positional => |name| {
-                            const fresh_var = try self.variable();
-                            const scheme: Scheme = .{
-                                .Mono = fresh_var,
-                            };
-                            try inner_env.set(self.scratch(), name.data, scheme);
-                            try params.append(self.arena, fresh_var);
-                        },
-                        .Default => @panic("not implemented"),
-                    }
-                }
-
-                return try self.function(params.items, try self.infer(inner_env, f.body));
-            },
-            .String => c(.String),
-            .Integer => c(.Integer),
-            .Float => c(.Float),
-            .Boolean => c(.Boolean),
-            .Unit => c(.Unit),
         };
     }
 };
