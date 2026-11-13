@@ -124,18 +124,22 @@ const Params = []const Param;
 
 const Declaration = struct {
     scheme: Scheme,
-    params: ?Params = null,
+    param_types: ?Params = null,
 
     pub fn fromScheme(scheme: Scheme) Declaration {
         return .{ .scheme = scheme };
     }
 
-    pub fn initMono(t: *const Type, params: Params) Declaration {
-        return .{ .scheme = .{ .Mono = t }, .params = params };
+    pub fn initMono(t: *const Type, param_types: Params) Declaration {
+        return .{ .scheme = .{ .Mono = t }, .param_types = param_types };
+    }
+
+    pub fn initPoly(vars: []const *Var, t: *const Type, param_types: Params) Declaration {
+        return .{ .scheme = .{ .Poly = .{ .vars = vars, .t = t } }, .param_types = param_types };
     }
 
     pub fn initMonoEmpty(t: *const Type) Declaration {
-        return .{ .scheme = .{ .Mono = t }, .params = null };
+        return .{ .scheme = .{ .Mono = t }, .param_types = null };
     }
 
     pub fn getGenericFuncType(self: Declaration) ?*const Type {
@@ -149,7 +153,7 @@ const Declaration = struct {
 const Scheme = union(enum) {
     Mono: *const Type,
     Poly: struct {
-        vars: std.ArrayList(*Var),
+        vars: []const *Var,
         t: *const Type,
     },
 };
@@ -237,19 +241,25 @@ pub const TypeChecker = struct {
             &.{.Required},
         ));
 
-        try env.set(self.arena, "@print", .initMono(
-            try self.function(&.{try self.variable()}, c(.Unit)),
+        const generic_print_param = try self.variable();
+        try env.set(self.arena, "@print", .initPoly(
+            &.{generic_print_param.Var},
+            try self.function(&.{generic_print_param}, c(.Unit)),
             &.{.Required},
         ));
 
-        try env.set(self.arena, "@len", .initMono(
-            try self.function(&.{try self.genericList()}, c(.Integer)),
+        const genric_len_list_param = try self.variable();
+        try env.set(self.arena, "@len", .initPoly(
+            &.{genric_len_list_param.Var},
+            try self.function(&.{try self.list(genric_len_list_param)}, c(.Integer)),
             &.{.Required},
         ));
 
-        try env.set(self.arena, "@nth", .initMono(
-            try self.function(&.{ try self.genericList(), c(.Integer) }, c(.Integer)),
-            &.{.Required},
+        const genric_nth_list_param = try self.variable();
+        try env.set(self.arena, "@nth", .initPoly(
+            &.{genric_nth_list_param.Var},
+            try self.function(&.{ try self.list(genric_nth_list_param), c(.Integer) }, genric_nth_list_param),
+            &.{ .Required, .Required },
         ));
 
         const root = try self.infer(env, expr);
@@ -315,7 +325,7 @@ pub const TypeChecker = struct {
             },
             .Poly => |s| {
                 var fresh_vars: std.AutoHashMapUnmanaged(*Var, *const Type) = .empty;
-                for (s.vars.items) |v| {
+                for (s.vars) |v| {
                     const fresh_var = try self.variable();
                     fresh_var.Var.classes = v.classes;
                     try fresh_vars.put(self.scratch(), v, fresh_var);
@@ -351,7 +361,7 @@ pub const TypeChecker = struct {
                     .Poly => |poly| {
                         var tmp: VarSet = .empty;
                         try self.freeVars(&tmp, poly.t);
-                        for (poly.vars.items) |v| _ = tmp.swapRemove(v);
+                        for (poly.vars) |v| _ = tmp.swapRemove(v);
                         for (tmp.keys()) |v| try out.put(self.scratch(), v, {});
                     },
                 }
@@ -374,7 +384,7 @@ pub const TypeChecker = struct {
             }
         }
 
-        return if (vars.items.len > 0) .{ .Poly = .{ .vars = vars, .t = t } } else .{ .Mono = t };
+        return if (vars.items.len > 0) .{ .Poly = .{ .vars = vars.items, .t = t } } else .{ .Mono = t };
     }
 
     fn occurs(v: *Var, t: *const Type) bool {
@@ -454,7 +464,7 @@ pub const TypeChecker = struct {
 
     fn inferFunction(self: *TypeChecker, env: *Env, f: *const ast.Function) !struct { t: *const Type, params: Params } {
         var params: std.ArrayList(*const Type) = .empty;
-        var decl_params: std.ArrayList(Param) = .empty;
+        var param_types: std.ArrayList(Param) = .empty;
         var found_default = false;
 
         for (f.params.items) |param| {
@@ -467,7 +477,7 @@ pub const TypeChecker = struct {
                     };
                     try env.set(self.scratch(), name.data, .fromScheme(scheme));
                     try params.append(self.arena, fresh_var);
-                    try decl_params.append(self.scratch(), .Required);
+                    try param_types.append(self.scratch(), .Required);
                 },
                 .Default => |default| {
                     const t = switch (default.value.data) {
@@ -482,12 +492,12 @@ pub const TypeChecker = struct {
                     try env.set(self.scratch(), default.name.data, .fromScheme(scheme));
                     try params.append(self.arena, fresh_var);
                     found_default = true;
-                    try decl_params.append(self.scratch(), .Default);
+                    try param_types.append(self.scratch(), .Default);
                 },
             }
         }
 
-        return .{ .t = try self.function(params.items, try self.infer(env, f.body)), .params = decl_params.items };
+        return .{ .t = try self.function(params.items, try self.infer(env, f.body)), .params = param_types.items };
     }
 
     fn inferCallWithParams(self: *TypeChecker, env: *Env, func_t: *Func, args: []const *const ast.Expression, param_types: Params) !*const Type {
@@ -513,7 +523,7 @@ pub const TypeChecker = struct {
                 const func_t = (try self.infer(env, call.function)).prune();
                 var return_t: *const Type = undefined;
 
-                if (decl.params) |params| {
+                if (decl.param_types) |params| {
                     return_t = try self.inferCallWithParams(env, func_t.Func, args, params);
                 } else {
                     var params: std.ArrayList(*const Type) = .empty;
@@ -548,7 +558,7 @@ pub const TypeChecker = struct {
                     const result = try self.inferFunction(inner_env, &declaration.right.data.Function);
                     try self.type_map.put(self.arena, expr, result.t);
                     const scheme = try self.generalize(env, result.t);
-                    try env.set(self.scratch(), declaration.left.data, .{ .scheme = scheme, .params = result.params });
+                    try env.set(self.scratch(), declaration.left.data, .{ .scheme = scheme, .param_types = result.params });
                 } else {
                     const t = try self.infer(env, declaration.right);
                     const scheme = try self.generalize(env, t);

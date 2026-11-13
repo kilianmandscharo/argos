@@ -472,10 +472,52 @@ test "type checker" {
         },
     };
 
+    const native_test_cases = [_]TypeCheckerTestCase{
+        .{
+            .description = "print",
+            .source =
+            \\@print(1)
+            \\@print("foo")
+            ,
+            .expected = c(.Unit),
+        },
+        .{
+            .description = "len",
+            .source =
+            \\@len([1, 2, 3])
+            \\@len(["a", "b", "c"])
+            ,
+            .expected = c(.Integer),
+        },
+        .{
+            .description = "len on non list",
+            .source =
+            \\@len(1)
+            ,
+            .expect_error = error.CantUnify,
+        },
+        .{
+            .description = "nth",
+            .source =
+            \\@nth([1, 2, 3], 1)
+            \\@nth(["a", "b", "c"], 1)
+            ,
+            .expected = c(.String),
+        },
+        .{
+            .description = "nth on non list",
+            .source =
+            \\@nth(1, 1)
+            ,
+            .expect_error = error.CantUnify,
+        },
+    };
+
     try test_utils.runTests(TypeCheckerTestCase, "evaluate unary checks", &unary_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate binary checks", &binary_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate list checks", &list_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate if checks", &if_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate match checks", &match_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate function checks", &function_test_cases, runTypeCheckerTest);
+    try test_utils.runTests(TypeCheckerTestCase, "evaluate native checks", &native_test_cases, runTypeCheckerTest);
 }
