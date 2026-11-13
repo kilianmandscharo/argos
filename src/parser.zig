@@ -100,7 +100,7 @@ pub const Parser = struct {
                 left_owned.* = left;
                 if (comptime constants.debug_parser) {
                     self.debug_indent -= 1;
-                    self.log("parsed {s}", .{@tagName(left_owned.data)});
+                    self.log("parsed {f}", .{left_owned});
                 }
             }
 
@@ -283,7 +283,7 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
 
     if (try parser.match(.Arrow)) {
         try parser.chopNewlines();
-        const functionName = parser.ctx.current_var_token;
+        const function_name = parser.ctx.current_var_token;
         const body = try parser.parseExpression();
 
         var params: std.ArrayList(ast.FunctionParam) = .empty;
@@ -299,7 +299,7 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
             }
         }
 
-        return .init(.{ .Function = .{ .params = params, .body = body, .name = functionName } }, token);
+        return .init(.{ .Function = .{ .params = params, .body = body, .name = function_name } }, token);
     }
 
     if (expressions.items.len == 1) {
@@ -401,8 +401,9 @@ fn parseDeclaration(parser: *Parser, left: ast.Expression) !ast.Expression {
         return parser.errorAtPrevious("expect identifier on left side of declaration");
     }
 
+    const before = parser.ctx.current_var_token;
     parser.ctx.current_var_token = left.token;
-    defer parser.ctx.current_var_token = null;
+    defer parser.ctx.current_var_token = before;
 
     const right = try parser.parseExpression();
 

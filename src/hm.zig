@@ -83,6 +83,8 @@ pub const Type = union(enum) {
                 }
                 try writer.print(") -> ", .{});
                 try f.to.format(writer);
+                if (f.is_generic) try writer.print(" (generic)", .{});
+                if (f.is_native) try writer.print(" (native)", .{});
             },
         }
     }
@@ -92,6 +94,7 @@ pub const Func = struct {
     from: []const *const Type,
     to: *const Type,
     is_generic: bool = false,
+    is_native: bool = false,
     resolved: std.ArrayList(*const Type) = .empty,
 };
 
@@ -194,7 +197,7 @@ pub const TypeChecker = struct {
     script_context: *vm.ScriptContext,
 
     const VarSet = std.AutoArrayHashMapUnmanaged(*Var, void);
-    const TypeMap = std.AutoArrayHashMapUnmanaged(*const ast.Expression, *const Type);
+    pub const TypeMap = std.AutoArrayHashMapUnmanaged(*const ast.Expression, *const Type);
 
     pub fn init(arena: std.mem.Allocator, script_context: *vm.ScriptContext) @This() {
         return .{
@@ -236,29 +239,34 @@ pub const TypeChecker = struct {
     pub fn checkTypes(self: *TypeChecker, expr: *const ast.Expression) !struct { root: *const Type, type_map: TypeMap } {
         const env = try Env.init(self.scratch(), null);
 
+        try env.set(self.arena, "@clock", .initMono(
+            try self.nativeFunction(&.{}, c(.Integer)),
+            &.{},
+        ));
+
         try env.set(self.arena, "@assert", .initMono(
-            try self.function(&.{c(.Boolean)}, c(.Unit)),
+            try self.nativeFunction(&.{c(.Boolean)}, c(.Unit)),
             &.{.Required},
         ));
 
         const generic_print_param = try self.variable();
         try env.set(self.arena, "@print", .initPoly(
             &.{generic_print_param.Var},
-            try self.function(&.{generic_print_param}, c(.Unit)),
+            try self.nativeFunction(&.{generic_print_param}, c(.Unit)),
             &.{.Required},
         ));
 
         const genric_len_list_param = try self.variable();
         try env.set(self.arena, "@len", .initPoly(
             &.{genric_len_list_param.Var},
-            try self.function(&.{try self.list(genric_len_list_param)}, c(.Integer)),
+            try self.nativeFunction(&.{try self.list(genric_len_list_param)}, c(.Integer)),
             &.{.Required},
         ));
 
         const genric_nth_list_param = try self.variable();
         try env.set(self.arena, "@nth", .initPoly(
             &.{genric_nth_list_param.Var},
-            try self.function(&.{ try self.list(genric_nth_list_param), c(.Integer) }, genric_nth_list_param),
+            try self.nativeFunction(&.{ try self.list(genric_nth_list_param), c(.Integer) }, genric_nth_list_param),
             &.{ .Required, .Required },
         ));
 
@@ -291,6 +299,12 @@ pub const TypeChecker = struct {
         return try self.createType(.{ .Func = func });
     }
 
+    pub fn nativeFunction(self: *TypeChecker, from: []const *const Type, to: *const Type) !*const Type {
+        const func = try self.arena.create(Func);
+        func.* = .{ .from = from, .to = to, .is_native = true };
+        return try self.createType(.{ .Func = func });
+    }
+
     pub fn createType(self: *TypeChecker, t: Type) !*const Type {
         const allocated = try self.arena.create(Type);
         allocated.* = t;
@@ -312,7 +326,9 @@ pub const TypeChecker = struct {
                     try from.append(self.arena, try self.copy(freshVars, param));
                 }
                 const to = try self.copy(freshVars, f.to);
-                return try self.function(from.items, to);
+                const new_f = try self.function(from.items, to);
+                new_f.Func.is_native = f.is_native;
+                return new_f;
             },
             else => resolved,
         };
@@ -550,14 +566,18 @@ pub const TypeChecker = struct {
 
     fn inferType(self: *TypeChecker, env: *Env, expr: *const ast.Expression) !*const Type {
         return switch (expr.data) {
-            .Call => |call| try self.inferCall(env, expr, &call),
+            .Call => |call| return try self.inferCall(env, expr, &call),
             .Declaration => |declaration| {
                 if (declaration.right.data == .Function) {
                     const inner_env = try Env.init(self.scratch(), env);
                     try inner_env.set(self.scratch(), declaration.left.data, .initMonoEmpty(try self.variable())); // for recursive calls
+
                     const result = try self.inferFunction(inner_env, &declaration.right.data.Function);
-                    try self.type_map.put(self.arena, expr, result.t);
+                    try self.type_map.put(self.arena, declaration.right, result.t);
+
                     const scheme = try self.generalize(env, result.t);
+                    if (scheme == .Poly) result.t.Func.is_generic = true;
+
                     try env.set(self.scratch(), declaration.left.data, .{ .scheme = scheme, .param_types = result.params });
                 } else {
                     const t = try self.infer(env, declaration.right);

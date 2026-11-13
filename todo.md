@@ -7,3 +7,4 @@
     - make match exhaustive
 - fix match single line (pipe is detected as part of the expression)
 - optimize: a unit is pushed and popped immediately 
+- make default params work for native functions in compiler

@@ -470,6 +470,22 @@ test "type checker" {
             ,
             .expected = c(.Integer),
         },
+        .{
+            .description = "default param in recursive func",
+            .source =
+            \\fib = (n, a=0, b=1) -> if n <= 0 then a else fib(b, a+b, n-1)
+            \\fib(5)
+            ,
+            .expected = c(.Integer),
+        },
+        .{
+            .description = "default param in recursive func call",
+            .source =
+            \\foo = (n=1) -> if n == 1 then 1 else foo()
+            \\foo(5)
+            ,
+            .expected = c(.Integer),
+        },
     };
 
     const native_test_cases = [_]TypeCheckerTestCase{
@@ -510,6 +526,13 @@ test "type checker" {
             \\@nth(1, 1)
             ,
             .expect_error = error.CantUnify,
+        },
+        .{
+            .description = "clock",
+            .source =
+            \\@clock()
+            ,
+            .expected = c(.Integer),
         },
     };
 

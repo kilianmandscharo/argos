@@ -11,6 +11,29 @@ pub const Expression = struct {
             .token = token,
         };
     }
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        try writer.print("{s}", .{@tagName(self.data)});
+        switch (self.data) {
+            .Declaration => |v| try writer.print(" \"{s}\"", .{v.left.data}),
+            .Identifier => |v| try writer.print(" \"{s}\"", .{v}),
+            .Integer => |v| try writer.print(" {d}", .{v}),
+            .Float => |v| try writer.print(" {d}", .{v}),
+            .String => |v| try writer.print(" \"{s}\"", .{v}),
+            .Boolean => |v| try writer.print(" {}", .{v}),
+            .Call => |call| {
+                switch (call.function.data) {
+                    .Identifier => |name| try writer.print(" of {s}", .{name}),
+                    .Function => try writer.print(" of anonymous function", .{}),
+                    else => {},
+                }
+            },
+            else => {},
+        }
+    }
 };
 
 pub const Pattern = union(enum) {
@@ -191,10 +214,12 @@ fn printExpressionInner(expr: *const Expression, writer: *std.Io.Writer, level: 
             }
             for (e.params.items) |param| {
                 switch (param) {
-                    .Required => |name| {
+                    .Required => |*name| {
                         try writer.print("{s} ", .{name.data});
                     },
-                    .Default => @panic("not implemented"),
+                    .Default => |*default| {
+                        try writer.print("{s}={f} ", .{ default.name.data, default.value });
+                    },
                 }
             }
             try printExpressionInner(e.body, writer, level + 1);

@@ -991,24 +991,31 @@ test "function literal" {
         .{
             .description = "with default args",
             .input =
-            \\(a = 11, b = 12) -> a + b
+            \\foo = (a = 11, b = 12) -> a + b
             ,
             .expected_expression = .{
-                .Function = .{
-                    .params = try test_utils.list(ast.FunctionParam, a, &.{
-                        .{ .Default = .{ .name = s("a"), .value = &e(.{ .Integer = 11 }) } },
-                        .{ .Default = .{ .name = s("b"), .value = &e(.{ .Integer = 12 }) } },
-                    }),
-                    .body = &e(.{
-                        .Binary = .{
-                            .left = &e(.{ .Identifier = "a" }),
-                            .operator = .Plus,
-                            .right = &e(.{ .Identifier = "b" }),
+                .Declaration = .{
+                    .left = s("foo"),
+                    .right = &e(.{
+                        .Function = .{
+                            .name = s("foo"),
+                            .params = try test_utils.list(ast.FunctionParam, a, &.{
+                                .{ .Default = .{ .name = s("a"), .value = &e(.{ .Integer = 11 }) } },
+                                .{ .Default = .{ .name = s("b"), .value = &e(.{ .Integer = 12 }) } },
+                            }),
+                            .body = &e(.{
+                                .Binary = .{
+                                    .left = &e(.{ .Identifier = "a" }),
+                                    .operator = .Plus,
+                                    .right = &e(.{ .Identifier = "b" }),
+                                },
+                            }),
                         },
                     }),
                 },
             },
         },
+
         .{
             .description = "declare function",
             .input =

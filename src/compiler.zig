@@ -32,6 +32,7 @@ pub const Function = struct {
         is_captured: bool,
         name: []const u8,
         depth: u32,
+        params: ?[]const ast.FunctionParam = null,
     };
 
     pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, func_name: ?[]const u8, tail_recursive: bool) !*@This() {
@@ -65,7 +66,7 @@ pub const Function = struct {
         return &self.locals.items[index];
     }
 
-    pub fn addLocal(self: *Function, name: []const u8) !void {
+    pub fn addLocal(self: *Function, name: []const u8, params: ?[]const ast.FunctionParam) !void {
         if (self.locals.items.len == UINT8_COUNT) {
             return error.TooManyVariables;
         }
@@ -73,7 +74,15 @@ pub const Function = struct {
             .is_captured = false,
             .name = name,
             .depth = self.scope_depth,
+            .params = params,
         });
+    }
+
+    pub fn findLocal(self: *Function, name: []const u8) ?Local {
+        const index = self.resolveLocal(name);
+        if (index) |i| return self.locals.items[i];
+        if (self.getParent()) |parent| return parent.findLocal(name);
+        return null;
     }
 
     pub fn resolveLocal(self: *Function, name: []const u8) ?u8 {
@@ -215,6 +224,7 @@ pub const Compiler = struct {
         self: *Compiler,
         name: ?[]const u8,
         tail_recursive: bool,
+        params: []const ast.FunctionParam,
     ) !*Function {
         const index = self.functions.items.len;
         var function = try Function.init(self.vm, self, @intCast(index), name, tail_recursive);
@@ -222,6 +232,7 @@ pub const Compiler = struct {
             .is_captured = false,
             .name = name orelse "",
             .depth = 0,
+            .params = params,
         });
         try self.functions.append(self.arena, function);
         return self.functions.items[index];
@@ -335,7 +346,8 @@ pub const Compiler = struct {
     }
 
     fn compileFunction(self: *Compiler, function: *const ast.Function, tail_recursive: bool) !void {
-        var new_function = try self.addFunction(if (function.name) |name| name.data else null, tail_recursive);
+        const name = if (function.name) |name| name.data else null;
+        var new_function = try self.addFunction(name, tail_recursive, function.params.items);
 
         if (comptime constants.debug_compiler) {
             self.log("added new function, current function stack:", .{});
@@ -353,14 +365,14 @@ pub const Compiler = struct {
                     if (new_function.function.arity > 255) {
                         return self.errorAt(param_name, "can't have more than 255 parameters");
                     }
-                    try new_function.addLocal(param_name.data);
+                    try new_function.addLocal(param_name.data, null);
                 },
                 .Default => |*default_param| {
                     new_function.function.arity += 1;
                     if (new_function.function.arity > 255) {
                         return self.errorAt(&default_param.name, "can't have more than 255 parameters");
                     }
-                    try new_function.addLocal(default_param.name.data);
+                    try new_function.addLocal(default_param.name.data, null);
                 },
             }
         }
@@ -395,77 +407,113 @@ pub const Compiler = struct {
         }
     }
 
-    fn getGenericFunctionName(self: *Compiler, name: []const u8, t: *const hm.Type) ![]const u8 {
-        var buf: std.Io.Writer.Allocating = .init(self.scratch());
-        try buf.writer.print("{s}", .{name});
-        for (t.Func.from) |param| {
-            try buf.writer.print("_{f}", .{param.t()});
+    fn compileArgs(self: *Compiler, params: ?[]const ast.FunctionParam, args: []const *const ast.Expression) !void {
+        for (args) |arg| {
+            try self.compileExpression(arg);
         }
-        return buf.written();
-    }
-
-    fn compileArgs(self: *Compiler, function: *const ast.Function, args: []*const ast.Expression) !void {
-        for (function.params.items, 0..) |param, i| {
-            switch (param) {
-                .Required => try self.compileExpression(args[i]),
-                .Default => |default_param| {
-                    if (i >= args.len) {
-                        try self.compileExpression(default_param.value);
-                    } else {
-                        try self.compileExpression(args[i]);
-                    }
-                },
+        if (params) |p| {
+            for (p[args.len..]) |param| {
+                try self.compileExpression(param.Default.value);
             }
         }
     }
 
+    fn compileCall(self: *Compiler, call: *const ast.Call) !void {
+        var count = call.args.items.len;
+
+        var params: ?[]const ast.FunctionParam = null;
+        switch (call.function.data) {
+            .Function => |f| {
+                params = f.params.items;
+            },
+            .Identifier => |name| {
+                const local = self.getFunction().findLocal(name);
+                if (local) |l| {
+                    params = l.params;
+                }
+            },
+            else => return error.NotCallable,
+        }
+
+        if (params) |p| {
+            count = p.len;
+        }
+
+        if (count == 255) {
+            return self.errorAt(&call.function.token, "can't have more than 255 arguments");
+        }
+
+        const func_t = self.getType(call.function);
+
+        const current_function = self.getFunction();
+        if (isRecursiveCall(current_function, call) and current_function.tail_recursive) {
+            try self.compileArgs(params, call.args.items);
+            try self.emitOpU8(.TailCall, @intCast(count));
+        } else {
+            if (func_t.Func.is_generic and !func_t.Func.is_native) {
+                try self.compileIdentifier(try self.getGenericFunctionName(call.function.data.Identifier, func_t));
+            } else {
+                try self.compileExpression(call.function);
+            }
+            try self.compileArgs(params, call.args.items);
+            try self.emitOpU8(.Call, @intCast(count));
+        }
+    }
+
+    fn getGenericFunctionName(self: *Compiler, name: []const u8, t: *const hm.Type) ![]const u8 {
+        var buf: std.Io.Writer.Allocating = .init(self.scratch());
+        try buf.writer.print("{s}", .{name});
+        for (t.Func.from) |param| {
+            try buf.writer.print("_{f}", .{param});
+        }
+        return buf.written();
+    }
+
+    fn compileDeclaration(self: *Compiler, declaration: *const ast.Declaration) !void {
+        if (declaration.right.data != .Function) {
+            try self.compileExpression(declaration.right);
+            try self.getFunction().addLocal(declaration.left.data, null);
+            try self.emitOp(.Unit);
+            return;
+        }
+
+        const function = declaration.right.data.Function;
+        const t = self.type_map.get(declaration.right).?;
+        const func_t = t.Func;
+        const tail_recursive = isTailRecursive(&function);
+
+        if (!func_t.is_generic) {
+            try self.compileFunction(&function, tail_recursive);
+            try self.getFunction().addLocal(declaration.left.data, function.params.items);
+            try self.emitOp(.Unit);
+            return;
+        }
+
+        for (func_t.resolved.items) |resolved_t| {
+            for (0..func_t.from.len) |i| {
+                if (func_t.from[i].* == .Var) {
+                    try self.var_map.put(self.scratch(), func_t.from[i], resolved_t.Func.from[i]);
+                }
+            }
+
+            try self.compileFunction(&function, tail_recursive);
+            self.var_map.clearRetainingCapacity();
+
+            try self.getFunction().addLocal(try self.getGenericFunctionName(function.name.?.data, resolved_t), function.params.items);
+        }
+
+        try self.emitOp(.Unit);
+    }
+
     fn compileExpression(self: *Compiler, expr: *const ast.Expression) anyerror!void {
         if (comptime constants.debug_compiler) {
-            self.log("compiling {s}", .{@tagName(expr.data)});
+            self.log("compiling {f}", .{expr});
             self.debug_indent += 1;
         }
 
         switch (expr.data) {
-            .Declaration => |declaration| {
-                if (declaration.right.data != .Function) {
-                    try self.compileExpression(declaration.right);
-                    try self.getFunction().addLocal(declaration.left.data);
-                    try self.emitOp(.Unit);
-                    return;
-                }
-
-                const function = declaration.right.data.Function;
-                const func_t = self.type_map.get(declaration.right).?.Func;
-                const tail_recursive = isTailRecursive(&function);
-
-                if (!func_t.is_generic) {
-                    try self.compileFunction(&function, tail_recursive);
-                    try self.getFunction().addLocal(declaration.left.data);
-                    try self.emitOp(.Unit);
-                    return;
-                }
-
-                for (func_t.resolved.items) |resolved_t| {
-                    for (0..func_t.from.len) |i| {
-                        if (func_t.from[i].t().* == .Var) {
-                            switch (resolved_t.Func.from[i]) {
-                                .Required => |t| try self.var_map.put(self.scratch(), func_t.from[i].t(), t),
-                                .Default => try self.var_map.put(
-                                    self.scratch(),
-                                    func_t.from[i].t(),
-                                    self.getType(function.params.items[i].Default.value),
-                                ),
-                            }
-                        }
-                    }
-
-                    try self.compileFunction(&function, tail_recursive);
-                    self.var_map.clearRetainingCapacity();
-
-                    try self.getFunction().addLocal(try self.getGenericFunctionName(function.name.?.data, resolved_t));
-                }
-
-                try self.emitOp(.Unit);
+            .Declaration => |*declaration| {
+                try self.compileDeclaration(declaration);
             },
             .Identifier => {
                 try self.compileIdentifier(expr.token.data);
@@ -599,34 +647,11 @@ pub const Compiler = struct {
                 function.endScope();
                 try function.cleanupLocals();
             },
-            .Function => |function| {
-                try self.compileFunction(&function, false);
+            .Function => |*function| {
+                try self.compileFunction(function, false);
             },
-            .Call => |call| {
-                const count = call.args.items.len;
-                if (count == 255) {
-                    return self.errorAt(&call.function.token, "can't have more than 255 arguments");
-                }
-
-                const func_t = self.getType(call.function);
-
-                const current_function = self.getFunction();
-                if (isRecursiveCall(current_function, &call) and current_function.tail_recursive) {
-                    for (call.args.items) |arg| {
-                        try self.compileExpression(arg);
-                    }
-                    try self.emitOpU8(.TailCall, @intCast(count));
-                } else {
-                    if (func_t.Func.is_generic) {
-                        try self.compileIdentifier(try self.getGenericFunctionName(call.function.data.Identifier, func_t));
-                    } else {
-                        try self.compileExpression(call.function);
-                    }
-                    for (call.args.items) |arg| {
-                        try self.compileExpression(arg);
-                    }
-                    try self.emitOpU8(.Call, @intCast(count));
-                }
+            .Call => |*call| {
+                try self.compileCall(call);
             },
             .List => |list| {
                 for (list.items) |item| {
@@ -687,8 +712,8 @@ pub const Compiler = struct {
 
                         const currentFunction = self.getFunction();
                         currentFunction.beginScope();
-                        try currentFunction.addLocal(cons.left.token.data);
-                        try currentFunction.addLocal(cons.right.token.data);
+                        try currentFunction.addLocal(cons.left.token.data, null);
+                        try currentFunction.addLocal(cons.right.token.data, null);
                         try self.compileExpression(arm.expression);
                         currentFunction.endScope();
                         try currentFunction.cleanupLocals();

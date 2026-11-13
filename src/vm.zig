@@ -279,9 +279,6 @@ pub const VirtualMachine = struct {
     }
 
     fn call(self: *VirtualMachine, function: *object.ObjFunction, argCount: u8, upvalues: ?[]?*object.ObjUpvalue) !void {
-        if (argCount != function.arity) {
-            return self.runtimeError("Expected {d} arguments but got {d}", .{ function.arity, argCount });
-        }
         if (self.frame_count == constants.frames_max) {
             return self.runtimeError("stack overflow", .{});
         }

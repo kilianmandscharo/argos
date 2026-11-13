@@ -629,6 +629,18 @@ test "function tests" {
             \\@assert(result == 3)
             ,
         },
+        .{
+            .description = "mixed params param",
+            .source =
+            \\f = (a, b = 1, c = 2) -> a + b + c
+            \\a = f(10)
+            \\b = f(10, 20)
+            \\c = f(10, 20, 30)
+            \\@assert(a == 13)
+            \\@assert(b == 32)
+            \\@assert(c == 60)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
