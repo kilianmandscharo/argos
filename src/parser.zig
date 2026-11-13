@@ -293,7 +293,7 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
                 const value = expr.data.Declaration.right;
                 try params.append(parser.arena, .{ .Default = .{ .name = paramName, .value = value } });
             } else if (expr.data == .Identifier) {
-                try params.append(parser.arena, .{ .Positional = expr.token });
+                try params.append(parser.arena, .{ .Required = expr.token });
             } else {
                 return parser.errorAtPrevious("invalid function parameter");
             }

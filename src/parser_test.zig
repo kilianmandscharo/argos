@@ -63,8 +63,8 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
                 const first = func.params.items[i];
                 const second = actual.Function.params.items[i];
                 try expectTag(first, second);
-                if (first == .Positional) {
-                    try std.testing.expectEqualStrings(first.Positional.data, second.Positional.data);
+                if (first == .Required) {
+                    try std.testing.expectEqualStrings(first.Required.data, second.Required.data);
                 } else {
                     try std.testing.expectEqualStrings(first.Default.name.data, second.Default.name.data);
                     try expectExpression(first.Default.value.*, second.Default.value.*);
@@ -935,8 +935,8 @@ test "function literal" {
             .expected_expression = .{
                 .Function = .{
                     .params = try test_utils.list(ast.FunctionParam, a, &.{
-                        .{ .Positional = s("a") },
-                        .{ .Positional = s("b") },
+                        .{ .Required = s("a") },
+                        .{ .Required = s("b") },
                     }),
                     .body = &e(.{
                         .Binary = .{
@@ -959,8 +959,8 @@ test "function literal" {
             .expected_expression = .{
                 .Function = .{
                     .params = try test_utils.list(ast.FunctionParam, a, &.{
-                        .{ .Positional = s("a") },
-                        .{ .Positional = s("b") },
+                        .{ .Required = s("a") },
+                        .{ .Required = s("b") },
                     }),
                     .body = &e(.{
                         .Grouping = try test_utils.list(*const ast.Expression, a, &.{
@@ -1314,7 +1314,7 @@ test "grouping" {
 //                             .Function = .{
 //                                 .name = "fib",
 //                                 .params = try test_utils.list(ast.FunctionParam, a, &.{
-//                                     .{ .Positional = s("n") },
+//                                     .{ .Required = s("n") },
 //                                 }),
 //                                 .body = &e(.{
 //                                     .Block = try test_utils.list(ast.Statement, a, &.{
@@ -1393,11 +1393,11 @@ test "grouping" {
 //                             .function = &e(.{ .Identifier = "print" }),
 //                             .args = try test_utils.list(ast.FunctionArg, a, &.{
 //                                 .{
-//                                     .Positional = &e(.{
+//                                     .Required = &e(.{
 //                                         .Call = .{
 //                                             .function = &e(.{ .Identifier = "fib" }),
 //                                             .args = try test_utils.list(ast.FunctionArg, a, &.{
-//                                                 .{ .Positional = &e(.{ .Integer = 30 }) },
+//                                                 .{ .Required = &e(.{ .Integer = 30 }) },
 //                                             }),
 //                                         },
 //                                     }),

@@ -111,7 +111,15 @@ pub const Var = struct {
     classes: std.EnumSet(Class),
 };
 
-const Param = enum { Req, Def };
+fn countRequired(params: []const Param) usize {
+    var count: usize = 0;
+    for (params) |param| {
+        if (param == .Required) count += 1;
+    }
+    return count;
+}
+
+const Param = ast.FunctionParamType;
 const Params = []const Param;
 
 const Declaration = struct {
@@ -128,17 +136,6 @@ const Declaration = struct {
 
     pub fn initMonoEmpty(t: *const Type) Declaration {
         return .{ .scheme = .{ .Mono = t }, .params = null };
-    }
-
-    pub fn required(self: Declaration) usize {
-        if (self.params) |params| {
-            var count: usize = 0;
-            for (params) |param| {
-                if (param == .Req) count += 1;
-            }
-            return count;
-        }
-        return 0;
     }
 
     pub fn getGenericFuncType(self: Declaration) ?*const Type {
@@ -237,22 +234,22 @@ pub const TypeChecker = struct {
 
         try env.set(self.arena, "@assert", .initMono(
             try self.function(&.{c(.Boolean)}, c(.Unit)),
-            &.{.Req},
+            &.{.Required},
         ));
 
         try env.set(self.arena, "@print", .initMono(
             try self.function(&.{try self.variable()}, c(.Unit)),
-            &.{.Req},
+            &.{.Required},
         ));
 
         try env.set(self.arena, "@len", .initMono(
             try self.function(&.{try self.genericList()}, c(.Integer)),
-            &.{.Req},
+            &.{.Required},
         ));
 
         try env.set(self.arena, "@nth", .initMono(
             try self.function(&.{ try self.genericList(), c(.Integer) }, c(.Integer)),
-            &.{.Req},
+            &.{.Required},
         ));
 
         const root = try self.infer(env, expr);
@@ -455,22 +452,22 @@ pub const TypeChecker = struct {
         return error.UnboundVar;
     }
 
-    fn compileFunction(self: *TypeChecker, env: *Env, f: *const ast.Function) !struct { t: *const Type, params: Params } {
+    fn inferFunction(self: *TypeChecker, env: *Env, f: *const ast.Function) !struct { t: *const Type, params: Params } {
         var params: std.ArrayList(*const Type) = .empty;
         var decl_params: std.ArrayList(Param) = .empty;
         var found_default = false;
 
         for (f.params.items) |param| {
             switch (param) {
-                .Positional => |name| {
-                    if (found_default) return error.DefaultBeforePositionalParam;
+                .Required => |name| {
+                    if (found_default) return error.DefaultBeforeRequiredParam;
                     const fresh_var = try self.variable();
                     const scheme: Scheme = .{
                         .Mono = fresh_var,
                     };
                     try env.set(self.scratch(), name.data, .fromScheme(scheme));
                     try params.append(self.arena, fresh_var);
-                    try decl_params.append(self.scratch(), .Req);
+                    try decl_params.append(self.scratch(), .Required);
                 },
                 .Default => |default| {
                     const t = switch (default.value.data) {
@@ -485,7 +482,7 @@ pub const TypeChecker = struct {
                     try env.set(self.scratch(), default.name.data, .fromScheme(scheme));
                     try params.append(self.arena, fresh_var);
                     found_default = true;
-                    try decl_params.append(self.scratch(), .Def);
+                    try decl_params.append(self.scratch(), .Default);
                 },
             }
         }
@@ -493,51 +490,62 @@ pub const TypeChecker = struct {
         return .{ .t = try self.function(params.items, try self.infer(env, f.body)), .params = decl_params.items };
     }
 
-    fn inferType(self: *TypeChecker, env: *Env, expr: *const ast.Expression) !*const Type {
-        return switch (expr.data) {
-            .Call => |call| {
-                const args = call.args.items;
-                const decl: ?Declaration = if (call.function.data == .Identifier)
-                    try self.mustResolveIdentifier(env, expr, call.function.data.Identifier)
-                else
-                    null;
-                const generic_func_type = if (decl) |d| d.getGenericFuncType() else null;
+    fn inferCallWithParams(self: *TypeChecker, env: *Env, func_t: *Func, args: []const *const ast.Expression, param_types: Params) !*const Type {
+        if (args.len < countRequired(param_types) or args.len > param_types.len) return error.ArityMismatch;
+        for (args, 0..) |arg, i| {
+            const arg_type = try self.infer(env, arg);
+            try self.unify(arg_type, func_t.from[i]);
+        }
+        const r = try self.variable();
+        try self.unify(func_t.to, r);
+        return r;
+    }
 
-                // TODO: if call.function is a function take the params from there directly
+    fn inferCall(self: *TypeChecker, env: *Env, expr: *const ast.Expression, call: *const ast.Call) !*const Type {
+        const args = call.args.items;
 
-                const f = (try self.infer(env, call.function)).prune();
+        switch (call.function.data) {
+            .Identifier => |name| {
+                const decl = try self.mustResolveIdentifier(env, expr, name);
+                const generic_func_type = decl.getGenericFuncType();
 
-                if (f.* == .Func) {
-                    if (decl) |d| {
-                        if (d.params) |params| {
-                            if (args.len < d.required() or args.len > params.len) return error.ArityMismatch;
-                            for (args, 0..) |arg, i| {
-                                const arg_type = try self.infer(env, arg);
-                                try self.unify(arg_type, f.Func.from[i]);
-                            }
-                            return f.Func.to;
-                        }
-                    }
+                // either a function or in a recursive call an unknown variable
+                const func_t = (try self.infer(env, call.function)).prune();
+                var return_t: *const Type = undefined;
+
+                if (decl.params) |params| {
+                    return_t = try self.inferCallWithParams(env, func_t.Func, args, params);
+                } else {
+                    var params: std.ArrayList(*const Type) = .empty;
+                    for (args) |arg| try params.append(self.arena, try self.infer(env, arg));
+                    return_t = try self.variable();
+                    try self.unify(func_t, try self.function(params.items, return_t));
                 }
-
-                var params: std.ArrayList(*const Type) = .empty;
-                for (args) |arg| try params.append(self.arena, try self.infer(env, arg));
-
-                const r = try self.variable();
-                try self.unify(f, try self.function(params.items, r));
 
                 if (generic_func_type) |original_f| {
-                    try original_f.Func.resolved.append(self.arena, f);
-                    f.Func.is_generic = true;
+                    try original_f.Func.resolved.append(self.arena, func_t);
+                    func_t.Func.is_generic = true;
                 }
 
-                return r.prune();
+                return return_t.prune();
             },
+            .Function => |f| {
+                const func_t = (try self.infer(env, call.function)).Func;
+                const param_types = try f.getParamTypes(self.scratch());
+                return try self.inferCallWithParams(env, func_t, args, param_types);
+            },
+            else => return error.ExpressionNotCallable,
+        }
+    }
+
+    fn inferType(self: *TypeChecker, env: *Env, expr: *const ast.Expression) !*const Type {
+        return switch (expr.data) {
+            .Call => |call| try self.inferCall(env, expr, &call),
             .Declaration => |declaration| {
                 if (declaration.right.data == .Function) {
                     const inner_env = try Env.init(self.scratch(), env);
                     try inner_env.set(self.scratch(), declaration.left.data, .initMonoEmpty(try self.variable())); // for recursive calls
-                    const result = try self.compileFunction(inner_env, &declaration.right.data.Function);
+                    const result = try self.inferFunction(inner_env, &declaration.right.data.Function);
                     try self.type_map.put(self.arena, expr, result.t);
                     const scheme = try self.generalize(env, result.t);
                     try env.set(self.scratch(), declaration.left.data, .{ .scheme = scheme, .params = result.params });
@@ -682,7 +690,7 @@ pub const TypeChecker = struct {
             },
             .Function => |f| {
                 const inner_env = try Env.init(self.scratch(), env);
-                const result = try self.compileFunction(inner_env, &f);
+                const result = try self.inferFunction(inner_env, &f);
                 try self.type_map.put(self.arena, expr, result.t);
                 return result.t;
             },

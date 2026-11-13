@@ -97,15 +97,14 @@ const runTypeCheckerTest = struct {
         };
 
         const ast = try parser.createAst(arena.allocator(), &script_context);
-        const expression = ast.data.Function.body;
         var checker = hm.TypeChecker.init(arena.allocator(), &script_context);
         defer checker.deinit();
-        const result = checker.checkTypes(expression);
+        const result = checker.checkTypes(ast);
         if (test_case.expect_error) |err| {
             try std.testing.expectError(err, result);
         } else {
             const unwrapped = try result;
-            try expectType(test_case.expected.?, unwrapped.root);
+            try expectType(test_case.expected.?, unwrapped.root.Func.to);
         }
     }
 }.runTest;
@@ -405,7 +404,7 @@ test "type checker" {
             .source =
             \\foo = (a=1, b) -> a + 2
             ,
-            .expect_error = error.DefaultBeforePositionalParam,
+            .expect_error = error.DefaultBeforeRequiredParam,
         },
         .{
             .description = "invalid type in default param",
@@ -447,13 +446,13 @@ test "type checker" {
             ,
             .expected = c(.Integer),
         },
-        // .{
-        //     .description = "lambda with default param",
-        //     .source =
-        //     \\((a=1) -> a + 2)()
-        //     ,
-        //     .expected = c(.Integer),
-        // },
+        .{
+            .description = "lambda with default param",
+            .source =
+            \\((a=1) -> a + 2)()
+            ,
+            .expected = c(.Integer),
+        },
         .{
             .description = "mixed params",
             .source =

@@ -63,10 +63,23 @@ pub const Function = struct {
     params: std.ArrayList(FunctionParam),
     body: *const Expression,
     name: ?scanner.Token = null,
+
+    pub fn getParamTypes(self: Function, arena: std.mem.Allocator) ![]FunctionParamType {
+        const out = try arena.alloc(FunctionParamType, self.params.items.len);
+        for (self.params.items, 0..) |param, i| {
+            out[i] = std.meta.activeTag(param);
+        }
+        return out;
+    }
 };
 
-pub const FunctionParam = union(enum) {
-    Positional: scanner.Token,
+pub const FunctionParamType = enum {
+    Required,
+    Default,
+};
+
+pub const FunctionParam = union(FunctionParamType) {
+    Required: scanner.Token,
     Default: FunctionParamDefault,
 };
 
@@ -178,7 +191,7 @@ fn printExpressionInner(expr: *const Expression, writer: *std.Io.Writer, level: 
             }
             for (e.params.items) |param| {
                 switch (param) {
-                    .Positional => |name| {
+                    .Required => |name| {
                         try writer.print("{s} ", .{name.data});
                     },
                     .Default => @panic("not implemented"),

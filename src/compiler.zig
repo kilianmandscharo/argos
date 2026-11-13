@@ -348,7 +348,7 @@ pub const Compiler = struct {
 
         for (function.params.items) |*param| {
             switch (param.*) {
-                .Positional => |*param_name| {
+                .Required => |*param_name| {
                     new_function.function.arity += 1;
                     if (new_function.function.arity > 255) {
                         return self.errorAt(param_name, "can't have more than 255 parameters");
@@ -407,7 +407,7 @@ pub const Compiler = struct {
     fn compileArgs(self: *Compiler, function: *const ast.Function, args: []*const ast.Expression) !void {
         for (function.params.items, 0..) |param, i| {
             switch (param) {
-                .Positional => try self.compileExpression(args[i]),
+                .Required => try self.compileExpression(args[i]),
                 .Default => |default_param| {
                     if (i >= args.len) {
                         try self.compileExpression(default_param.value);
@@ -449,7 +449,7 @@ pub const Compiler = struct {
                     for (0..func_t.from.len) |i| {
                         if (func_t.from[i].t().* == .Var) {
                             switch (resolved_t.Func.from[i]) {
-                                .Positional => |t| try self.var_map.put(self.scratch(), func_t.from[i].t(), t),
+                                .Required => |t| try self.var_map.put(self.scratch(), func_t.from[i].t(), t),
                                 .Default => try self.var_map.put(
                                     self.scratch(),
                                     func_t.from[i].t(),
