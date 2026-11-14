@@ -57,9 +57,9 @@ pub fn allocateListItem(vm: *virtual_machine.VirtualMachine) !*ObjListItem {
     return list_item;
 }
 
-pub fn allocateUpvalue(vm: *virtual_machine.VirtualMachine, slot: *value.Value) !*ObjUpvalue {
+pub fn allocateUpvalue(vm: *virtual_machine.VirtualMachine, local: *value.Value) !*ObjUpvalue {
     const upvalue = try allocateObject(vm, ObjUpvalue);
-    upvalue.location = slot;
+    upvalue.location = local;
     upvalue.next = null;
     upvalue.closed = null;
     return upvalue;
@@ -82,10 +82,8 @@ pub fn allocateFunction(vm: *virtual_machine.VirtualMachine) !*ObjFunction {
 
 pub fn allocateClosure(vm: *virtual_machine.VirtualMachine, function: *ObjFunction) !*ObjClosure {
     const closure = try allocateObject(vm, ObjClosure);
-    const upvalues = try vm.gpa.alloc(?*ObjUpvalue, function.upvalue_count);
-    @memset(upvalues, null);
     closure.function = function;
-    closure.upvalues = upvalues;
+    closure.upvalues = undefined;
     return closure;
 }
 
@@ -248,7 +246,7 @@ pub const ObjFunction = struct {
     }
 };
 
-pub const NativeFn = *const fn (vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) anyerror!value.Value;
+pub const NativeFn = *const fn (vm: *virtual_machine.VirtualMachine, args: []value.Value) anyerror!value.Value;
 
 pub const ObjNative = struct {
     pub const KIND = ObjType.NativeFn;
@@ -270,7 +268,7 @@ pub const ObjClosure = struct {
 
     obj: Obj = undefined,
     function: *ObjFunction,
-    upvalues: []?*ObjUpvalue,
+    upvalues: []*ObjUpvalue,
 
     pub fn format(
         self: @This(),

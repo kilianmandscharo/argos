@@ -31,8 +31,7 @@ pub const natives: []const Native = &.{
     },
 };
 
-fn clockNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
-    _ = arg_count;
+fn clockNative(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
     _ = args;
     const now = std.Io.Timestamp.now(vm.io, .real);
     const time: f64 = @floatFromInt(std.Io.Timestamp.toMilliseconds(now));
@@ -40,45 +39,28 @@ fn clockNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []va
     return value.wrapFloat(@divExact(time, ms_per_s));
 }
 
-fn printNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
-    if (arg_count != 1) {
-        return vm.runtimeError("expected 1 arg, got {d}", .{arg_count});
-    }
+fn printNative(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+    _ = vm;
     const val = args[0];
     std.debug.print("{f}\n", .{val});
     return value.valueUnit();
 }
 
-fn assertNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
-    _ = arg_count;
+fn assertNative(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
     const val = args[0];
     if (!val.Bool) return vm.runtimeError("Assertion failed", .{});
     return value.valueUnit();
 }
 
-fn lenNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
-    if (arg_count != 1) {
-        return vm.runtimeError("expected 1 arg, got {d}", .{arg_count});
-    }
+fn lenNative(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+    _ = vm;
     const val = args[0];
-    if (!val.isObjType(.List)) {
-        return vm.runtimeError("expected value of type List, got {s}", .{val.getType()});
-    }
     return value.wrapInt(@intCast(val.asObj().asList().len()));
 }
 
-fn nthNative(vm: *virtual_machine.VirtualMachine, arg_count: usize, args: []value.Value) !value.Value {
-    if (arg_count != 2) {
-        return vm.runtimeError("expected 2 args, got {d}", .{arg_count});
-    }
+fn nthNative(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
     const val = args[0];
-    if (!val.isObjType(.List)) {
-        return vm.runtimeError("expected value of type List, got {s}", .{val.getType()});
-    }
     const index = args[1];
-    if (index != .Int) {
-        return vm.runtimeError("expected value of type Int, got {s}", .{index.getType()});
-    }
     var i = index.Int;
     if (i < 0) {
         return vm.runtimeError("expected list index >= 0, got {d}", .{i});

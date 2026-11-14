@@ -92,9 +92,7 @@ fn blackenObj(vm: *virtual_machine.VirtualMachine, obj: *object.Obj) !void {
             const closure = obj.asClosure();
             try markObject(vm, &closure.function.obj);
             for (closure.upvalues) |upvalue| {
-                if (upvalue) |upval| {
-                    try markObject(vm, &upval.obj);
-                }
+                try markObject(vm, &upvalue.obj);
             }
         },
         .List => {

@@ -30,7 +30,7 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
 
 const CallFrame = struct {
     function: *object.ObjFunction,
-    upvalues: ?[]?*object.ObjUpvalue,
+    upvalues: ?[]*object.ObjUpvalue,
     ip: usize,
     stack_offset: usize,
 };
@@ -220,15 +220,11 @@ pub const VirtualMachine = struct {
                 std.debug.print("script\n", .{});
             }
         }
-
         self.resetStack();
         return error.RuntimeError;
     }
 
     fn callValue(self: *VirtualMachine, callee: value.Value, argCount: u8) !void {
-        if (callee != .Obj) {
-            return self.runtimeError("Can't call value of type '{s}'", .{callee.getType()});
-        }
         const obj = callee.Obj;
         switch (obj.type) {
             .Closure => {
@@ -239,7 +235,7 @@ pub const VirtualMachine = struct {
             .NativeFn => {
                 const native_fn = obj.asNative();
                 const start = self.stack_top - argCount;
-                const result = try native_fn.function(self, argCount, self.stack[start..self.stack_top]);
+                const result = try native_fn.function(self, self.stack[start..self.stack_top]);
                 self.stack_top -= argCount + 1;
                 self.push(result);
             },
@@ -248,37 +244,28 @@ pub const VirtualMachine = struct {
     }
 
     fn captureUpvalue(self: *VirtualMachine, local: *value.Value) !*object.ObjUpvalue {
-        var prev_upvalue: ?*object.ObjUpvalue = null;
-        var upvalue = self.open_upvalues;
-        while (upvalue != null and @intFromPtr(upvalue.?.location) > @intFromPtr(local)) {
-            prev_upvalue = upvalue;
-            upvalue = upvalue.?.next;
+        var link: *?*object.ObjUpvalue = &self.open_upvalues;
+        while (link.*) |u| {
+            if (u.location == local) return u;
+            if (@intFromPtr(u.location) < @intFromPtr(local)) break;
+            link = &u.next;
         }
-
-        if (upvalue != null and upvalue.?.location == local) return upvalue.?;
-
-        const created_upvalue = try object.allocateUpvalue(self, local);
-        created_upvalue.next = upvalue;
-
-        if (prev_upvalue) |prev| {
-            prev.next = created_upvalue;
-        } else {
-            self.open_upvalues = created_upvalue;
-        }
-
-        return created_upvalue;
+        const created = try object.allocateUpvalue(self, local);
+        created.next = link.*;
+        link.* = created;
+        return created;
     }
 
     fn closeUpvalues(self: *VirtualMachine, last: *value.Value) void {
-        while (self.open_upvalues != null and @intFromPtr(self.open_upvalues.?.location) >= @intFromPtr(last)) {
-            const upvalue = self.open_upvalues.?;
-            upvalue.closed = upvalue.location.*;
-            upvalue.location = &upvalue.closed.?;
-            self.open_upvalues = upvalue.next;
+        while (self.open_upvalues) |u| {
+            if (@intFromPtr(u.location) < @intFromPtr(last)) return;
+            u.closed = u.location.*;
+            u.location = &u.closed.?;
+            self.open_upvalues = u.next;
         }
     }
 
-    fn call(self: *VirtualMachine, function: *object.ObjFunction, argCount: u8, upvalues: ?[]?*object.ObjUpvalue) !void {
+    fn call(self: *VirtualMachine, function: *object.ObjFunction, argCount: u8, upvalues: ?[]*object.ObjUpvalue) !void {
         if (self.frame_count == constants.frames_max) {
             return self.runtimeError("stack overflow", .{});
         }
@@ -288,15 +275,6 @@ pub const VirtualMachine = struct {
         frame.upvalues = upvalues;
         frame.ip = 0;
         frame.stack_offset = self.stack_top - argCount - 1;
-    }
-
-    fn resolveListIndex(self: *VirtualMachine, len: usize, index: i64) !usize {
-        const signed_len = @as(i64, @intCast(len));
-        const resolved = if (index < 0) signed_len + index else index;
-        if (resolved < 0 or resolved >= signed_len) {
-            return self.runtimeError("Index {d} out of bounds", .{index});
-        }
-        return @intCast(resolved);
     }
 
     pub inline fn readU16(ip: *usize, frame: *const CallFrame) usize {
@@ -528,28 +506,29 @@ pub const VirtualMachine = struct {
                     ip = 0;
                 },
                 .Closure => {
-                    const fn_idx = readU16(&ip, frame);
-                    const function = frame.function.chunk.constants.items[fn_idx].asObj().asFunction();
-                    const closure = try object.allocateClosure(self, function);
-                    self.push(value.wrapObj(&closure.obj));
+                    const function_index = readU16(&ip, frame);
+                    const function = frame.function.chunk.constants.items[function_index].asObj().asFunction();
 
-                    for (0..closure.upvalues.len) |i| {
+                    // allocate the list first, so when the gc runs during the building of the list it does
+                    // not try to mark a half finished list
+                    const upvalues = try self.gpa.alloc(*object.ObjUpvalue, function.upvalue_count);
+                    for (0..function.upvalue_count) |i| {
                         const is_local = readByte(&ip, frame) == 1;
                         const index = readByte(&ip, frame);
                         if (is_local) {
-                            closure.upvalues[i] = try self.captureUpvalue(&self.stack[frame.stack_offset + index]);
+                            upvalues[i] = try self.captureUpvalue(&self.stack[frame.stack_offset + index]);
                         } else {
-                            closure.upvalues[i] = frame.upvalues.?[index];
+                            upvalues[i] = frame.upvalues.?[index];
                         }
                     }
+
+                    const closure = try object.allocateClosure(self, function);
+                    closure.upvalues = upvalues;
+                    self.push(value.wrapObj(&closure.obj));
                 },
                 .GetUpvalue => {
-                    const slot = readByte(&ip, frame);
-                    self.push(frame.upvalues.?[slot].?.location.*);
-                },
-                .CloseUpvalue => {
-                    self.closeUpvalues(&self.stack[self.stack_top - 1]);
-                    _ = self.pop();
+                    const index = readByte(&ip, frame);
+                    self.push(frame.upvalues.?[index].location.*);
                 },
                 .SwapCloseUpvalue => {
                     const val = self.pop();
