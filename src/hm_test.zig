@@ -536,6 +536,46 @@ test "type checker" {
         },
     };
 
+    const declaration_test_cases = [_]TypeCheckerTestCase{
+        .{
+            .description = "unbound var",
+            .source =
+            \\@print(foo)
+            ,
+            .expect_error = error.UnboundVar,
+        },
+        .{
+            .description = "declaration in function does not leak",
+            .source =
+            \\foo = () -> bar = 1
+            \\@print(bar)
+            ,
+            .expect_error = error.UnboundVar,
+        },
+        .{
+            .description = "declaration in function grouping does not leak",
+            .source =
+            \\foo = () -> (
+            \\    a = 1
+            \\    bar = 1
+            \\)
+            \\@print(bar)
+            ,
+            .expect_error = error.UnboundVar,
+        },
+        .{
+            .description = "declaration in grouping does not leak",
+            .source =
+            \\(
+            \\    foo = 1
+            \\    bar = 1
+            \\)
+            \\@print(bar)
+            ,
+            .expect_error = error.UnboundVar,
+        },
+    };
+
     try test_utils.runTests(TypeCheckerTestCase, "evaluate unary checks", &unary_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate binary checks", &binary_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate list checks", &list_test_cases, runTypeCheckerTest);
@@ -543,4 +583,5 @@ test "type checker" {
     try test_utils.runTests(TypeCheckerTestCase, "evaluate match checks", &match_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate function checks", &function_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate native checks", &native_test_cases, runTypeCheckerTest);
+    try test_utils.runTests(TypeCheckerTestCase, "evaluate declaration checks", &declaration_test_cases, runTypeCheckerTest);
 }

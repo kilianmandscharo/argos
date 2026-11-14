@@ -463,7 +463,7 @@ pub const TypeChecker = struct {
 
     fn infer(self: *TypeChecker, env: *Env, expr: *const ast.Expression) anyerror!*const Type {
         if (comptime constants.debug_type_checker) {
-            logging.log("infer {s}", .{@tagName(expr.data)}, .{ .module = "TypeChecker" });
+            logging.log("infer {f}", .{expr}, .{ .module = "TypeChecker" });
         }
         const t = try self.inferType(env, expr);
         try self.type_map.put(self.arena, expr, t);

@@ -1,5 +1,4 @@
 - match patterns
-- tail recursion
 - patterns in var declaration
 - list concatenation
 - type checker
@@ -8,3 +7,6 @@
 - fix match single line (pipe is detected as part of the expression)
 - optimize: a unit is pushed and popped immediately 
 - make default params work for native functions in compiler
+- write custom allocator to keep track of ALL runtime allocations
+- clearly separate the different arenas
+- rework error messages
