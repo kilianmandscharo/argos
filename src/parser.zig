@@ -6,9 +6,9 @@ const ast = @import("ast.zig");
 const constants = @import("constants.zig");
 const vm = @import("vm.zig");
 
-pub fn createAst(arena: std.mem.Allocator, script_context: *vm.ScriptContext) !*const ast.Expression {
-    var s = try scanner.Scanner.init(arena, script_context);
-    var p = try Parser.init(arena, &s, script_context);
+pub fn createAst(ast_arena: std.mem.Allocator, script_context: *vm.ScriptContext) !*const ast.Expression {
+    var s = try scanner.Scanner.init(script_context);
+    var p = try Parser.init(ast_arena, &s, script_context);
     return try p.parseProgram();
 }
 
@@ -16,14 +16,14 @@ pub const Parser = struct {
     current: scanner.Token,
     previous: ?scanner.Token,
     scanner: *scanner.Scanner,
-    arena: std.mem.Allocator,
+    ast_arena: std.mem.Allocator,
     debug_indent: usize = 0,
     script_context: *vm.ScriptContext,
     ctx: struct {
         current_var_token: ?scanner.Token,
     },
 
-    pub fn init(arena: std.mem.Allocator, s: *scanner.Scanner, script_context: *vm.ScriptContext) !Parser {
+    pub fn init(ast_arena: std.mem.Allocator, s: *scanner.Scanner, script_context: *vm.ScriptContext) !Parser {
         const current = try s.next();
         if (current.type == .Eof) {
             return error.NoTokens;
@@ -33,7 +33,7 @@ pub const Parser = struct {
             .scanner = s,
             .current = current,
             .previous = null,
-            .arena = arena,
+            .ast_arena = ast_arena,
             .ctx = .{
                 .current_var_token = null,
             },
@@ -53,15 +53,27 @@ pub const Parser = struct {
         });
     }
 
-    pub fn parseProgram(self: *Parser) !*const ast.Expression {
-        const grouping = try self.arena.create(ast.Expression);
-        grouping.* = .{
-            .data = .{ .Grouping = .empty },
-            .token = scanner.Token.dummy(),
-        };
+    fn createExpression(self: *Parser, expr: ast.Expression) !*const ast.Expression {
+        const p = try self.ast_arena.create(ast.Expression);
+        p.* = expr;
+        return p;
+    }
 
-        const program = try self.arena.create(ast.Expression);
-        program.* = .{
+    pub fn parseProgram(self: *Parser) !*const ast.Expression {
+        var expressions: std.ArrayList(*const ast.Expression) = .empty;
+
+        while (self.current.type != .Eof) {
+            try self.chopNewlines();
+            if (self.current.type == .Eof) break;
+            try expressions.append(self.ast_arena, try self.parseExpression());
+        }
+
+        const grouping = try self.createExpression(.{
+            .data = .{ .Grouping = expressions },
+            .token = scanner.Token.dummy(),
+        });
+
+        const program = try self.createExpression(.{
             .data = .{
                 .Function = .{
                     .params = .empty,
@@ -69,13 +81,7 @@ pub const Parser = struct {
                 },
             },
             .token = scanner.Token.dummy(),
-        };
-
-        while (self.current.type != .Eof) {
-            try self.chopNewlines();
-            if (self.current.type == .Eof) break;
-            try grouping.data.Grouping.append(self.arena, try self.parseExpression());
-        }
+        });
 
         return program;
     }
@@ -94,7 +100,7 @@ pub const Parser = struct {
 
         if (getRule(self.getPrevious().type).prefix) |prefixFn| {
             var left = try prefixFn(self);
-            const left_owned = try self.arena.create(ast.Expression);
+            const left_owned = try self.ast_arena.create(ast.Expression);
 
             defer {
                 left_owned.* = left;
@@ -135,7 +141,7 @@ pub const Parser = struct {
 
             if (expect_line_end_separator) return self.errorAtPrevious("expected line end separator");
 
-            try items.append(self.arena, try parseFn(self));
+            try items.append(self.ast_arena, try parseFn(self));
 
             if (line_end_separator == null) {
                 if (self.check(.Comma)) line_end_separator = .Comma;
@@ -291,9 +297,9 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
             if (expr.data == .Declaration) {
                 const paramName = expr.data.Declaration.left;
                 const value = expr.data.Declaration.right;
-                try params.append(parser.arena, .{ .Default = .{ .name = paramName, .value = value } });
+                try params.append(parser.ast_arena, .{ .Default = .{ .name = paramName, .value = value } });
             } else if (expr.data == .Identifier) {
-                try params.append(parser.arena, .{ .Required = expr.token });
+                try params.append(parser.ast_arena, .{ .Required = expr.token });
             } else {
                 return parser.errorAtPrevious("invalid function parameter");
             }
@@ -326,7 +332,7 @@ fn parseMatch(parser: *Parser) !ast.Expression {
         try parser.consume(.Arrow, "expect '->' after match pattern");
         const expression = try parser.parseExpression();
 
-        try arms.append(parser.arena, .{ .pattern = pattern, .expression = expression });
+        try arms.append(parser.ast_arena, .{ .pattern = pattern, .expression = expression });
     }
 
     return .init(.{ .Match = .{ .target = target, .arms = arms } }, token);
@@ -344,7 +350,7 @@ fn parseIf(parser: *Parser) !ast.Expression {
             const condition = try parser.parseExpression();
             try parser.consume(.Then, "expect 'then' after if target expression");
             try parser.chopNewlines();
-            try data.If.arms.append(parser.arena, .{ .condition = condition, .then = try parser.parseExpression() });
+            try data.If.arms.append(parser.ast_arena, .{ .condition = condition, .then = try parser.parseExpression() });
             continue;
         }
 
@@ -352,7 +358,7 @@ fn parseIf(parser: *Parser) !ast.Expression {
             const condition = try parser.parseExpression();
             try parser.consume(.Then, "expect 'then' after elif target expression");
             try parser.chopNewlines();
-            try data.If.arms.append(parser.arena, .{ .condition = condition, .then = try parser.parseExpression() });
+            try data.If.arms.append(parser.ast_arena, .{ .condition = condition, .then = try parser.parseExpression() });
             continue;
         }
 
@@ -372,8 +378,7 @@ fn parseBinary(parser: *Parser, left: ast.Expression) !ast.Expression {
     const operator = parser.getPrevious().type;
     const right = try parser.parsePrecedence(getRulePrecedence(operator));
 
-    const left_owned = try parser.arena.create(ast.Expression);
-    left_owned.* = left;
+    const left_owned = try parser.createExpression(left);
 
     return .init(.{ .Binary = .{ .operator = operator, .left = left_owned, .right = right } }, left.token);
 }
@@ -390,8 +395,7 @@ fn parseCall(parser: *Parser, left: ast.Expression) !ast.Expression {
         .Comma,
     );
 
-    const left_owned = try parser.arena.create(ast.Expression);
-    left_owned.* = left;
+    const left_owned = try parser.createExpression(left);
 
     return .init(.{ .Call = .{ .function = left_owned, .args = args } }, left.token);
 }

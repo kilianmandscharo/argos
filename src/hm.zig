@@ -4,6 +4,12 @@ const ast = @import("ast.zig");
 const constants = @import("constants.zig");
 const logging = @import("logging.zig");
 
+fn logDebug(comptime fmt: []const u8, args: anytype) void {
+    logging.log(fmt, args, .{
+        .module = "TypeChecker",
+    });
+}
+
 pub const Type = union(enum) {
     Var: *Var,
     Const: Const,
@@ -190,7 +196,7 @@ const Env = struct {
 };
 
 pub const TypeChecker = struct {
-    arena: std.mem.Allocator,
+    compiler_arena: std.mem.Allocator,
     scratch_arena: std.heap.ArenaAllocator,
     current_var_id: u32 = 0,
     type_map: TypeMap,
@@ -199,9 +205,9 @@ pub const TypeChecker = struct {
     const VarSet = std.AutoArrayHashMapUnmanaged(*Var, void);
     pub const TypeMap = std.AutoArrayHashMapUnmanaged(*const ast.Expression, *const Type);
 
-    pub fn init(arena: std.mem.Allocator, script_context: *vm.ScriptContext) @This() {
+    pub fn init(compiler_arena: std.mem.Allocator, script_context: *vm.ScriptContext) @This() {
         return .{
-            .arena = arena,
+            .compiler_arena = compiler_arena,
             .scratch_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
             .type_map = .empty,
             .script_context = script_context,
@@ -227,7 +233,7 @@ pub const TypeChecker = struct {
     }
 
     fn newVar(self: *TypeChecker) !*Var {
-        const new_var = try self.arena.create(Var);
+        const new_var = try self.compiler_arena.create(Var);
         new_var.* = .{
             .id = self.current_var_id,
             .classes = .empty,
@@ -239,32 +245,32 @@ pub const TypeChecker = struct {
     pub fn checkTypes(self: *TypeChecker, expr: *const ast.Expression) !struct { root: *const Type, type_map: TypeMap } {
         const env = try Env.init(self.scratch(), null);
 
-        try env.set(self.arena, "@clock", .initMono(
+        try env.set(self.compiler_arena, "@clock", .initMono(
             try self.nativeFunction(&.{}, c(.Integer)),
             &.{},
         ));
 
-        try env.set(self.arena, "@assert", .initMono(
+        try env.set(self.compiler_arena, "@assert", .initMono(
             try self.nativeFunction(&.{c(.Boolean)}, c(.Unit)),
             &.{.Required},
         ));
 
         const generic_print_param = try self.variable();
-        try env.set(self.arena, "@print", .initPoly(
+        try env.set(self.compiler_arena, "@print", .initPoly(
             &.{generic_print_param.Var},
             try self.nativeFunction(&.{generic_print_param}, c(.Unit)),
             &.{.Required},
         ));
 
         const genric_len_list_param = try self.variable();
-        try env.set(self.arena, "@len", .initPoly(
+        try env.set(self.compiler_arena, "@len", .initPoly(
             &.{genric_len_list_param.Var},
             try self.nativeFunction(&.{try self.list(genric_len_list_param)}, c(.Integer)),
             &.{.Required},
         ));
 
         const genric_nth_list_param = try self.variable();
-        try env.set(self.arena, "@nth", .initPoly(
+        try env.set(self.compiler_arena, "@nth", .initPoly(
             &.{genric_nth_list_param.Var},
             try self.nativeFunction(&.{ try self.list(genric_nth_list_param), c(.Integer) }, genric_nth_list_param),
             &.{ .Required, .Required },
@@ -294,19 +300,19 @@ pub const TypeChecker = struct {
     }
 
     pub fn function(self: *TypeChecker, from: []const *const Type, to: *const Type) !*const Type {
-        const func = try self.arena.create(Func);
+        const func = try self.compiler_arena.create(Func);
         func.* = .{ .from = from, .to = to };
         return try self.createType(.{ .Func = func });
     }
 
     pub fn nativeFunction(self: *TypeChecker, from: []const *const Type, to: *const Type) !*const Type {
-        const func = try self.arena.create(Func);
+        const func = try self.compiler_arena.create(Func);
         func.* = .{ .from = from, .to = to, .is_native = true };
         return try self.createType(.{ .Func = func });
     }
 
     pub fn createType(self: *TypeChecker, t: Type) !*const Type {
-        const allocated = try self.arena.create(Type);
+        const allocated = try self.compiler_arena.create(Type);
         allocated.* = t;
         return allocated;
     }
@@ -323,7 +329,7 @@ pub const TypeChecker = struct {
             .Func => |f| {
                 var from: std.ArrayList(*const Type) = .empty;
                 for (f.from) |param| {
-                    try from.append(self.arena, try self.copy(freshVars, param));
+                    try from.append(self.compiler_arena, try self.copy(freshVars, param));
                 }
                 const to = try self.copy(freshVars, f.to);
                 const new_f = try self.function(from.items, to);
@@ -430,7 +436,7 @@ pub const TypeChecker = struct {
         const b = type_b.prune();
 
         if (comptime constants.debug_type_checker) {
-            logging.log("Unify {f} with {f}", .{ a, b }, .{ .module = "TypeChecker" });
+            logDebug("Unify {f} with {f}", .{ a, b });
         }
 
         if (a.* == .Var and b.* == .Var and a.Var == b.Var) return;
@@ -463,10 +469,10 @@ pub const TypeChecker = struct {
 
     fn infer(self: *TypeChecker, env: *Env, expr: *const ast.Expression) anyerror!*const Type {
         if (comptime constants.debug_type_checker) {
-            logging.log("infer {f}", .{expr}, .{ .module = "TypeChecker" });
+            logDebug("infer {f}", .{expr});
         }
         const t = try self.inferType(env, expr);
-        try self.type_map.put(self.arena, expr, t);
+        try self.type_map.put(self.compiler_arena, expr, t);
         return t;
     }
 
@@ -492,7 +498,7 @@ pub const TypeChecker = struct {
                         .Mono = fresh_var,
                     };
                     try env.set(self.scratch(), name.data, .fromScheme(scheme));
-                    try params.append(self.arena, fresh_var);
+                    try params.append(self.compiler_arena, fresh_var);
                     try param_types.append(self.scratch(), .Required);
                 },
                 .Default => |default| {
@@ -506,7 +512,7 @@ pub const TypeChecker = struct {
                         .Mono = fresh_var,
                     };
                     try env.set(self.scratch(), default.name.data, .fromScheme(scheme));
-                    try params.append(self.arena, fresh_var);
+                    try params.append(self.compiler_arena, fresh_var);
                     found_default = true;
                     try param_types.append(self.scratch(), .Default);
                 },
@@ -543,13 +549,13 @@ pub const TypeChecker = struct {
                     return_t = try self.inferCallWithParams(env, func_t.Func, args, params);
                 } else {
                     var params: std.ArrayList(*const Type) = .empty;
-                    for (args) |arg| try params.append(self.arena, try self.infer(env, arg));
+                    for (args) |arg| try params.append(self.compiler_arena, try self.infer(env, arg));
                     return_t = try self.variable();
                     try self.unify(func_t, try self.function(params.items, return_t));
                 }
 
                 if (generic_func_type) |original_f| {
-                    try original_f.Func.resolved.append(self.arena, func_t);
+                    try original_f.Func.resolved.append(self.compiler_arena, func_t);
                     func_t.Func.is_generic = true;
                 }
 
@@ -573,7 +579,7 @@ pub const TypeChecker = struct {
                     try inner_env.set(self.scratch(), declaration.left.data, .initMonoEmpty(try self.variable())); // for recursive calls
 
                     const result = try self.inferFunction(inner_env, &declaration.right.data.Function);
-                    try self.type_map.put(self.arena, declaration.right, result.t);
+                    try self.type_map.put(self.compiler_arena, declaration.right, result.t);
 
                     const scheme = try self.generalize(env, result.t);
                     if (scheme == .Poly) result.t.Func.is_generic = true;
@@ -721,7 +727,7 @@ pub const TypeChecker = struct {
             .Function => |f| {
                 const inner_env = try Env.init(self.scratch(), env);
                 const result = try self.inferFunction(inner_env, &f);
-                try self.type_map.put(self.arena, expr, result.t);
+                try self.type_map.put(self.compiler_arena, expr, result.t);
                 return result.t;
             },
             .String => c(.String),

@@ -35,13 +35,13 @@ pub const Function = struct {
         params: ?[]const ast.FunctionParam = null,
     };
 
-    pub fn init(vm: *virtual_machine.VirtualMachine, compiler: *Compiler, index: u8, func_name: ?[]const u8, tail_recursive: bool) !*@This() {
-        const function = try object.allocateFunction(vm);
+    pub fn init(compiler: *Compiler, index: u8, func_name: ?[]const u8, tail_recursive: bool) !*@This() {
+        const function = try compiler.runtime_allocator.allocateFunction();
         if (func_name) |name| {
-            const obj = try object.copyString(vm, name);
+            const obj = try compiler.runtime_allocator.copyString(name);
             function.name = obj.asString();
         }
-        const owned = try compiler.arena.create(Function);
+        const owned = try compiler.scratch().create(Function);
         owned.* = .{
             .locals = .empty,
             .upvalues = .empty,
@@ -70,7 +70,7 @@ pub const Function = struct {
         if (self.locals.items.len == UINT8_COUNT) {
             return error.TooManyVariables;
         }
-        try self.locals.append(self.compiler.arena, .{
+        try self.locals.append(self.compiler.scratch(), .{
             .is_captured = false,
             .name = name,
             .depth = self.scope_depth,
@@ -110,7 +110,7 @@ pub const Function = struct {
         if (self.upvalues.items.len == UINT8_COUNT) {
             return error.TooManyUpvalues;
         }
-        try self.upvalues.append(self.compiler.arena, .{
+        try self.upvalues.append(self.compiler.scratch(), .{
             .is_local = is_local,
             .index = index,
         });
@@ -168,30 +168,27 @@ pub const Function = struct {
 };
 
 pub const Compiler = struct {
-    vm: *virtual_machine.VirtualMachine,
-    gpa: std.mem.Allocator,
-    arena: std.mem.Allocator,
+    script_context: *virtual_machine.ScriptContext,
     functions: std.ArrayList(*Function),
     globals: std.StringHashMapUnmanaged(*object.Obj),
     debug_indent: usize = 0,
     type_map: hm.TypeChecker.TypeMap,
     var_map: std.AutoHashMapUnmanaged(*const hm.Type, *const hm.Type),
     scratch_arena: std.heap.ArenaAllocator,
+    runtime_allocator: *memory.RuntimeAllocator,
 
     pub fn init(
-        vm: *virtual_machine.VirtualMachine,
-        gpa: std.mem.Allocator,
-        arena: std.mem.Allocator,
+        script_context: *virtual_machine.ScriptContext,
+        runtime_allocator: *memory.RuntimeAllocator,
     ) !Compiler {
         var compiler: Compiler = .{
-            .vm = vm,
-            .gpa = gpa,
-            .arena = arena,
+            .script_context = script_context,
             .functions = .empty,
             .globals = .empty,
             .type_map = .empty,
             .var_map = .empty,
             .scratch_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+            .runtime_allocator = runtime_allocator,
         };
         try compiler.initNativeFunctions();
         return compiler;
@@ -216,7 +213,7 @@ pub const Compiler = struct {
 
     pub fn initNativeFunctions(self: *Compiler) !void {
         for (native.natives) |item| {
-            try self.globals.put(self.arena, item.name, try object.allocateNative(self.vm, item.function));
+            try self.globals.put(self.scratch(), item.name, try self.runtime_allocator.allocateNative(item.function));
         }
     }
 
@@ -227,14 +224,14 @@ pub const Compiler = struct {
         params: []const ast.FunctionParam,
     ) !*Function {
         const index = self.functions.items.len;
-        var function = try Function.init(self.vm, self, @intCast(index), name, tail_recursive);
-        try function.locals.append(self.arena, .{
+        var function = try Function.init(self, @intCast(index), name, tail_recursive);
+        try function.locals.append(self.scratch(), .{
             .is_captured = false,
             .name = name orelse "",
             .depth = 0,
             .params = params,
         });
-        try self.functions.append(self.arena, function);
+        try self.functions.append(self.scratch(), function);
         return self.functions.items[index];
     }
 
@@ -243,7 +240,7 @@ pub const Compiler = struct {
     }
 
     pub fn compile(self: *Compiler, program: *const ast.Expression) !*object.ObjFunction {
-        var type_checker = hm.TypeChecker.init(self.arena, &self.vm.script_context);
+        var type_checker = hm.TypeChecker.init(self.scratch(), self.script_context);
         defer type_checker.deinit();
 
         const result = try type_checker.checkTypes(program);
@@ -265,7 +262,7 @@ pub const Compiler = struct {
     }
 
     fn identifierConstant(self: *Compiler, name: []const u8) !u16 {
-        const obj = try object.copyString(self.vm, name);
+        const obj = try self.runtime_allocator.copyString(name);
         return try self.makeConstant(value.wrapObj(obj));
     }
 
@@ -288,11 +285,11 @@ pub const Compiler = struct {
     }
 
     fn emitConstant(self: *Compiler, val: value.Value) !void {
-        try self.currentChunk().writeConstant(self.gpa, val, 0);
+        try self.currentChunk().writeConstant(self.runtime_allocator.allocator(), val, 0);
     }
 
     fn makeConstant(self: *Compiler, val: value.Value) !u16 {
-        return try self.currentChunk().addConstant(self.gpa, val);
+        return try self.currentChunk().addConstant(self.runtime_allocator.allocator(), val);
     }
 
     fn currentChunk(self: *Compiler) *chunk.Chunk {
@@ -310,7 +307,7 @@ pub const Compiler = struct {
     }
 
     fn emitByte(self: *Compiler, byte: u8) !void {
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Byte = byte }, 0);
+        try self.currentChunk().write(self.runtime_allocator.allocator(), chunk.OpByte{ .Byte = byte }, 0);
     }
 
     fn emitU16(self: *Compiler, index: usize) !void {
@@ -320,16 +317,16 @@ pub const Compiler = struct {
     }
 
     fn emitOp(self: *Compiler, op: chunk.OpCode) !void {
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = op }, 0);
+        try self.currentChunk().write(self.runtime_allocator.allocator(), chunk.OpByte{ .Op = op }, 0);
     }
 
     fn emitOpCodes(self: *Compiler, a: chunk.OpCode, b: chunk.OpCode) !void {
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = a }, 0);
-        try self.currentChunk().write(self.gpa, chunk.OpByte{ .Op = b }, 0);
+        try self.currentChunk().write(self.runtime_allocator.allocator(), chunk.OpByte{ .Op = a }, 0);
+        try self.currentChunk().write(self.runtime_allocator.allocator(), chunk.OpByte{ .Op = b }, 0);
     }
 
     fn errorAt(self: *Compiler, token: *const scanner.Token, message: []const u8) anyerror {
-        token.printError(message, &self.vm.script_context, "Compile");
+        token.printError(message, self.script_context, "Compile");
         return error.CompileError;
     }
 
@@ -519,7 +516,7 @@ pub const Compiler = struct {
                 try self.compileIdentifier(expr.token.data);
             },
             .String => |string| {
-                try self.emitConstant(value.wrapObj(try object.copyString(self.vm, string)));
+                try self.emitConstant(value.wrapObj(try self.runtime_allocator.copyString(string)));
             },
             .Integer => |integer| {
                 try self.emitConstant(value.wrapInt(integer));
@@ -657,7 +654,7 @@ pub const Compiler = struct {
                 for (list.items) |item| {
                     try self.compileExpression(item);
                 }
-                const new_list = try object.allocateList(self.vm);
+                const new_list = try self.runtime_allocator.allocateList();
                 try self.emitConstant(value.wrapObj(&new_list.obj));
                 try self.emitOpU16(.ListInit, @intCast(list.items.len));
             },
@@ -665,8 +662,6 @@ pub const Compiler = struct {
                 try self.compileExpression(match.target);
 
                 var end_jumps: std.ArrayList(usize) = .empty;
-                errdefer end_jumps.deinit(self.gpa);
-
                 var found_else = false;
 
                 for (match.arms.items) |arm| {
@@ -686,7 +681,7 @@ pub const Compiler = struct {
 
                         try self.compileExpression(arm.expression);
 
-                        try end_jumps.append(self.gpa, try self.emitJump(.Jump));
+                        try end_jumps.append(self.scratch(), try self.emitJump(.Jump));
 
                         try self.patchJump(jump);
                         try self.emitOp(.Pop);
@@ -718,7 +713,7 @@ pub const Compiler = struct {
                         currentFunction.endScope();
                         try currentFunction.cleanupLocals();
 
-                        try end_jumps.append(self.gpa, try self.emitJump(.Jump));
+                        try end_jumps.append(self.scratch(), try self.emitJump(.Jump));
 
                         try self.patchJump(jump);
                         try self.emitOp(.Pop);
@@ -735,7 +730,7 @@ pub const Compiler = struct {
 
                     try self.compileExpression(arm.expression);
 
-                    try end_jumps.append(self.gpa, try self.emitJump(.Jump));
+                    try end_jumps.append(self.scratch(), try self.emitJump(.Jump));
 
                     try self.patchJump(then_jump);
                     try self.emitOp(.Pop);
@@ -749,12 +744,9 @@ pub const Compiler = struct {
                 for (end_jumps.items) |jump| {
                     try self.patchJump(jump);
                 }
-
-                end_jumps.deinit(self.gpa);
             },
             .If => |ifExpr| {
                 var end_jumps: std.ArrayList(usize) = .empty;
-                errdefer end_jumps.deinit(self.gpa);
 
                 for (ifExpr.arms.items) |arm| {
                     try self.compileExpression(arm.condition);
@@ -764,7 +756,7 @@ pub const Compiler = struct {
                     try self.emitOp(.Pop);
                     try self.compileExpression(arm.then);
 
-                    try end_jumps.append(self.gpa, try self.emitJump(.Jump));
+                    try end_jumps.append(self.scratch(), try self.emitJump(.Jump));
 
                     try self.patchJump(then_jump);
                     try self.emitOp(.Pop);
@@ -779,8 +771,6 @@ pub const Compiler = struct {
                 for (end_jumps.items) |jump| {
                     try self.patchJump(jump);
                 }
-
-                end_jumps.deinit(self.gpa);
             },
         }
 

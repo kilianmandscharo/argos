@@ -12,96 +12,6 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
     });
 }
 
-pub fn allocateObject(vm: *virtual_machine.VirtualMachine, T: type) !*T {
-    if (!@hasField(T, "obj")) {
-        @compileError("Object type must have field 'obj'");
-    }
-
-    vm.bytes_allocated += @sizeOf(T);
-
-    if (comptime constants.debug_stress_gc) {
-        try memory.collectGarbage(vm);
-    }
-
-    if (vm.bytes_allocated > vm.next_gc) {
-        try memory.collectGarbage(vm);
-    }
-
-    const object = try vm.gpa.create(T);
-
-    object.obj = .{
-        .type = T.KIND,
-        .is_marked = false,
-        .next = vm.objects,
-    };
-
-    vm.objects = &object.obj;
-
-    if (comptime constants.debug_log_gc) {
-        logDebug("0x{x} allocate {d} for {s}", .{ @intFromPtr(object), @sizeOf(T), @typeName(T) });
-    }
-
-    return object;
-}
-
-pub fn allocateList(vm: *virtual_machine.VirtualMachine) !*ObjList {
-    const list = try allocateObject(vm, ObjList);
-    list.data = .{};
-    return list;
-}
-
-pub fn allocateListItem(vm: *virtual_machine.VirtualMachine) !*ObjListItem {
-    const list_item = try allocateObject(vm, ObjListItem);
-    list_item.value = undefined;
-    list_item.node = .{};
-    return list_item;
-}
-
-pub fn allocateUpvalue(vm: *virtual_machine.VirtualMachine, local: *value.Value) !*ObjUpvalue {
-    const upvalue = try allocateObject(vm, ObjUpvalue);
-    upvalue.location = local;
-    upvalue.next = null;
-    upvalue.closed = null;
-    return upvalue;
-}
-
-pub fn allocateNative(vm: *virtual_machine.VirtualMachine, function: NativeFn) !*Obj {
-    const native = try allocateObject(vm, ObjNative);
-    native.function = function;
-    return &native.obj;
-}
-
-pub fn allocateFunction(vm: *virtual_machine.VirtualMachine) !*ObjFunction {
-    const function = try allocateObject(vm, ObjFunction);
-    function.arity = 0;
-    function.name = null;
-    function.chunk = .init();
-    function.upvalue_count = 0;
-    return function;
-}
-
-pub fn allocateClosure(vm: *virtual_machine.VirtualMachine, function: *ObjFunction) !*ObjClosure {
-    const closure = try allocateObject(vm, ObjClosure);
-    closure.function = function;
-    closure.upvalues = undefined;
-    return closure;
-}
-
-pub fn allocateString(vm: *virtual_machine.VirtualMachine, chars: []const u8, hash: u64) !*Obj {
-    const string = try allocateObject(vm, ObjString);
-    string.chars = chars;
-    string.hash = hash;
-    try vm.strings.put(vm.gpa, string, undefined);
-    return &string.obj;
-}
-
-pub fn copyString(vm: *virtual_machine.VirtualMachine, chars: []const u8) !*Obj {
-    const hash = std.hash.Wyhash.hash(0, chars);
-    const interned = vm.findString(chars, hash);
-    const obj = interned orelse try allocateString(vm, try vm.gpa.dupe(u8, chars), hash);
-    return obj;
-}
-
 pub const ObjType = enum {
     String,
     Function,
@@ -136,51 +46,42 @@ pub const Obj = struct {
         }
     }
 
-    pub fn deinit(self: *@This(), vm: *virtual_machine.VirtualMachine) void {
+    pub fn deinit(self: *@This(), gc_alloc: std.mem.Allocator) void {
         if (comptime constants.debug_log_gc) {
             logDebug("0x{x} free type {s}", .{ @intFromPtr(self), self.getType() });
         }
 
-        const gpa = vm.gpa;
-
         switch (self.type) {
             .String => {
                 const string_obj = self.asString();
-                gpa.free(string_obj.chars);
-                gpa.destroy(string_obj);
-                vm.bytes_allocated -= @sizeOf(ObjString);
+                gc_alloc.free(string_obj.chars);
+                gc_alloc.destroy(string_obj);
             },
             .Function => {
                 const function_obj = self.asFunction();
-                function_obj.chunk.deinit(gpa);
-                gpa.destroy(function_obj);
-                vm.bytes_allocated -= @sizeOf(ObjFunction);
+                function_obj.chunk.deinit(gc_alloc);
+                gc_alloc.destroy(function_obj);
             },
             .NativeFn => {
                 const native_obj = self.asNative();
-                gpa.destroy(native_obj);
-                vm.bytes_allocated -= @sizeOf(ObjNative);
+                gc_alloc.destroy(native_obj);
             },
             .Closure => {
                 const closure_obj = self.asClosure();
-                gpa.free(closure_obj.upvalues);
-                gpa.destroy(closure_obj);
-                vm.bytes_allocated -= @sizeOf(ObjClosure);
+                gc_alloc.free(closure_obj.upvalues);
+                gc_alloc.destroy(closure_obj);
             },
             .Upvalue => {
                 const upvalue_obj = self.asUpvalue();
-                gpa.destroy(upvalue_obj);
-                vm.bytes_allocated -= @sizeOf(ObjUpvalue);
+                gc_alloc.destroy(upvalue_obj);
             },
             .List => {
                 const list_obj = self.asList();
-                gpa.destroy(list_obj);
-                vm.bytes_allocated -= @sizeOf(ObjList);
+                gc_alloc.destroy(list_obj);
             },
             .ListItem => {
                 const list_item_obj = self.asListItem();
-                gpa.destroy(list_item_obj);
-                vm.bytes_allocated -= @sizeOf(ObjListItem);
+                gc_alloc.destroy(list_item_obj);
             },
         }
     }
@@ -309,29 +210,29 @@ pub const ObjList = struct {
         return @alignCast(@constCast(@fieldParentPtr("node", node)));
     }
 
-    pub inline fn clone(self: *ObjList, vm: *virtual_machine.VirtualMachine) !*ObjList {
-        const new_list = try allocateList(vm);
+    pub inline fn clone(self: *ObjList, runtime_allocator: *memory.RuntimeAllocator) !*ObjList {
+        const new_list = try runtime_allocator.allocateList();
         new_list.data.first = self.data.first;
         return new_list;
     }
 
-    pub fn cloneAndPrepend(self: *ObjList, vm: *virtual_machine.VirtualMachine, val: value.Value) !*Obj {
-        const new_list = try self.clone(vm);
-        try new_list.prepend(vm, val);
+    pub fn cloneAndPrepend(self: *ObjList, runtime_allocator: *memory.RuntimeAllocator, val: value.Value) !*Obj {
+        const new_list = try self.clone(runtime_allocator);
+        try new_list.prepend(runtime_allocator, val);
         return &new_list.obj;
     }
 
-    pub fn prepend(self: *ObjList, vm: *virtual_machine.VirtualMachine, val: value.Value) !void {
-        const item = try allocateListItem(vm);
+    pub fn prepend(self: *ObjList, runtime_allocator: *memory.RuntimeAllocator, val: value.Value) !void {
+        const item = try runtime_allocator.allocateListItem();
         item.value = val;
         self.data.prepend(&item.node);
     }
 
-    pub fn cloneAndPopFirst(self: *ObjList, vm: *virtual_machine.VirtualMachine) !struct { value: ?value.Value, new_list: *ObjList } {
+    pub fn cloneAndPopFirst(self: *ObjList, runtime_allocator: *memory.RuntimeAllocator) !struct { value: ?value.Value, new_list: *ObjList } {
         if (self.data.first == null) {
             return .{ .value = null, .new_list = self };
         }
-        const new_list = try self.clone(vm);
+        const new_list = try self.clone(runtime_allocator);
         return .{ .value = new_list.popFirst().?, .new_list = new_list };
     }
 

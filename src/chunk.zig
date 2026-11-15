@@ -88,34 +88,34 @@ pub const Chunk = struct {
         };
     }
 
-    pub fn deinit(self: *Chunk, gpa: std.mem.Allocator) void {
-        self.code.deinit(gpa);
-        self.constants.deinit(gpa);
-        self.lines.deinit(gpa);
+    pub fn deinit(self: *Chunk, gc_alloc: std.mem.Allocator) void {
+        self.code.deinit(gc_alloc);
+        self.constants.deinit(gc_alloc);
+        self.lines.deinit(gc_alloc);
     }
 
-    pub fn write(self: *Chunk, gpa: std.mem.Allocator, op_byte: OpByte, line: usize) !void {
+    pub fn write(self: *Chunk, gc_alloc: std.mem.Allocator, op_byte: OpByte, line: usize) !void {
         switch (op_byte) {
             .Byte => |byte| {
-                try self.code.append(gpa, byte);
+                try self.code.append(gc_alloc, byte);
             },
             .Op => |op| {
-                try self.code.append(gpa, @backingInt(op));
+                try self.code.append(gc_alloc, @backingInt(op));
             },
         }
-        try self.lines.append(gpa, line);
+        try self.lines.append(gc_alloc, line);
     }
 
-    pub fn writeConstant(self: *Chunk, gpa: std.mem.Allocator, val: value.Value, line: usize) !void {
-        const constant = try self.addConstant(gpa, val);
+    pub fn writeConstant(self: *Chunk, gc_alloc: std.mem.Allocator, val: value.Value, line: usize) !void {
+        const constant = try self.addConstant(gc_alloc, val);
         const bytes = indexToU16(constant);
-        try self.write(gpa, OpByte{ .Op = .Constant }, line);
-        try self.write(gpa, OpByte{ .Byte = bytes[0] }, line);
-        try self.write(gpa, OpByte{ .Byte = bytes[1] }, line);
+        try self.write(gc_alloc, OpByte{ .Op = .Constant }, line);
+        try self.write(gc_alloc, OpByte{ .Byte = bytes[0] }, line);
+        try self.write(gc_alloc, OpByte{ .Byte = bytes[1] }, line);
     }
 
-    pub fn addConstant(self: *Chunk, gpa: std.mem.Allocator, val: value.Value) !u16 {
-        try self.constants.append(gpa, val);
+    pub fn addConstant(self: *Chunk, gc_alloc: std.mem.Allocator, val: value.Value) !u16 {
+        try self.constants.append(gc_alloc, val);
         return @intCast(self.constants.items.len - 1);
     }
 

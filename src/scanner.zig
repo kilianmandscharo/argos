@@ -147,14 +147,11 @@ pub const Scanner = struct {
     start: usize,
     current: usize,
     column: u32,
-    arena: std.mem.Allocator,
     script_context: *vm.ScriptContext,
 
-    pub fn init(arena: std.mem.Allocator, script_context: *vm.ScriptContext) !Scanner {
-        try script_context.lines.append(arena, .init(0, 0));
-
+    pub fn init(script_context: *vm.ScriptContext) !Scanner {
+        try script_context.appendLine(.init(0, 0));
         return .{
-            .arena = arena,
             .start = 0,
             .current = 0,
             .column = 0,
@@ -265,7 +262,7 @@ pub const Scanner = struct {
             '\n' => {
                 const token = self.makeToken(.NewLine);
                 const next_line_no = self.endLine();
-                try self.script_context.lines.append(self.arena, .init(@intCast(self.current), next_line_no));
+                try self.script_context.appendLine(.init(@intCast(self.current), next_line_no));
                 self.column = 0;
                 return token;
             },

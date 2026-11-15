@@ -20,6 +20,7 @@ test "tail recursion" {
                 .file_name = "",
                 .source = test_case.source,
                 .lines = .empty,
+                .static_arena = arena.allocator(),
             };
 
             const ast = try parser.createAst(arena.allocator(), &script_context);

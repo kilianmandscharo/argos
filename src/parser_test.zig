@@ -125,14 +125,14 @@ const ExpressionTestCase = struct {
 };
 
 fn runExpressionTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) anyerror!void {
-    const ctx = try arena.create(vm.ScriptContext);
-    ctx.* = .{
+    var ctx: vm.ScriptContext = .{
         .file_name = "scanner_test",
         .source = test_case.input,
         .lines = .empty,
+        .static_arena = arena,
     };
 
-    const result = parser.createAst(arena, ctx);
+    const result = parser.createAst(arena, &ctx);
 
     if (test_case.expect_error) {
         try std.testing.expectError(error.ParserError, result);
@@ -649,7 +649,7 @@ test "binary expression" {
 test "list literal" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const a = arena.allocator();
+    const alloc = arena.allocator();
 
     const test_cases = [_]ExpressionTestCase{
         .{
@@ -674,7 +674,7 @@ test "list literal" {
             \\[1, 2]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, a, &.{
+                .List = try test_utils.list(*const ast.Expression, alloc, &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
                 }),
@@ -686,7 +686,7 @@ test "list literal" {
             \\[1, 2,]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, a, &.{
+                .List = try test_utils.list(*const ast.Expression, alloc, &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
                 }),
@@ -701,7 +701,7 @@ test "list literal" {
             \\]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, a, &.{
+                .List = try test_utils.list(*const ast.Expression, alloc, &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
                 }),
@@ -716,7 +716,7 @@ test "list literal" {
             \\]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, a, &.{
+                .List = try test_utils.list(*const ast.Expression, alloc, &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
                 }),
@@ -734,7 +734,7 @@ test "list literal" {
             \\]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, a, &.{
+                .List = try test_utils.list(*const ast.Expression, alloc, &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
                 }),
@@ -752,7 +752,7 @@ test "list literal" {
             \\]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, a, &.{
+                .List = try test_utils.list(*const ast.Expression, alloc, &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
                 }),
@@ -791,15 +791,15 @@ test "list literal" {
             \\]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, a, &.{
+                .List = try test_utils.list(*const ast.Expression, alloc, &.{
                     &e(.{
-                        .List = try test_utils.list(*const ast.Expression, a, &.{
+                        .List = try test_utils.list(*const ast.Expression, alloc, &.{
                             &e(.{ .Integer = 1 }),
                             &e(.{ .Integer = 2 }),
                         }),
                     }),
                     &e(.{
-                        .List = try test_utils.list(*const ast.Expression, a, &.{
+                        .List = try test_utils.list(*const ast.Expression, alloc, &.{
                             &e(.{ .Integer = 3 }),
                             &e(.{ .Integer = 4 }),
                         }),

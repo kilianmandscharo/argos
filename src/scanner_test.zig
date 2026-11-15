@@ -19,19 +19,17 @@ test "scanner" {
 
     const run = struct {
         fn runTest(test_case: TestCase) anyerror!void {
-            const allocator = std.testing.allocator;
+            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer arena.deinit();
 
-            const ctx = try allocator.create(vm.ScriptContext);
-            ctx.* = .{
+            var ctx: vm.ScriptContext = .{
                 .file_name = "scanner_test",
                 .source = test_case.input,
                 .lines = .empty,
+                .static_arena = arena.allocator(),
             };
 
-            defer allocator.destroy(ctx);
-            defer ctx.lines.deinit(allocator);
-
-            var s = try scanner.Scanner.init(std.testing.allocator, ctx);
+            var s = try scanner.Scanner.init(&ctx);
 
             try assertTokenEquals(.Identifier, "a", try s.next());
             try assertTokenEquals(.Assign, "=", try s.next());

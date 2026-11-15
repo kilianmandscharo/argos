@@ -56,13 +56,4 @@ pub fn main(init: std.process.Init) !void {
         try ast.printExpression(program, stdout_writer);
         try stdout_writer.flush();
     }
-
-    // if (std.mem.eql(u8, args[2], "--bytecode")) {
-    //     var virtual_machine = try vm.VirtualMachine.init(gpa.allocator(), arena.allocator());
-    //     defer virtual_machine.deinit();
-    //
-    //     const function = try virtual_machine.compile(file_path, source);
-    //
-    //     return;
-    // }
 }

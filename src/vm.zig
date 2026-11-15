@@ -8,6 +8,7 @@ const native = @import("native.zig");
 const logging = @import("logging.zig");
 const constants = @import("constants.zig");
 const parser = @import("parser.zig");
+const memory = @import("memory.zig");
 
 const InterpretResult = enum {
     Ok,
@@ -19,6 +20,11 @@ pub const ScriptContext = struct {
     lines: std.ArrayList(scanner.Line),
     source: []const u8,
     file_name: []const u8,
+    static_arena: std.mem.Allocator,
+
+    pub fn appendLine(self: *ScriptContext, l: scanner.Line) !void {
+        try self.lines.append(self.static_arena, l);
+    }
 };
 
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
@@ -50,67 +56,46 @@ pub const TableGlobals = std.HashMapUnmanaged(*object.ObjString, value.Value, St
 pub const VirtualMachine = struct {
     io: std.Io,
     gpa: std.mem.Allocator,
-    arena: std.mem.Allocator,
+    static_arena: std.mem.Allocator,
     stack: [constants.stack_max]value.Value,
     stack_top: usize,
     frames: [constants.frames_max]CallFrame,
     frame_count: usize,
     strings: std.HashMapUnmanaged(*object.ObjString, void, StringContext, 80),
-    objects: ?*object.Obj,
     open_upvalues: ?*object.ObjUpvalue,
-    gray_stack: std.ArrayList(*object.Obj),
-    bytes_allocated: usize,
-    next_gc: usize,
     script_context: ScriptContext,
+    runtime_allocator: memory.RuntimeAllocator,
 
-    pub fn init(io: std.Io, gpa: std.mem.Allocator, arena: std.mem.Allocator) !VirtualMachine {
-        if (comptime constants.debug_trace_execution) {
-            logDebug("Init vm...", .{});
-        }
-
-        const vm = VirtualMachine{
+    pub fn init(io: std.Io, gpa: std.mem.Allocator, static_arena: std.mem.Allocator) !*VirtualMachine {
+        const vm = try static_arena.create(VirtualMachine);
+        vm.* = .{
             .io = io,
             .gpa = gpa,
-            .arena = arena,
+            .static_arena = static_arena,
             .stack = undefined,
             .stack_top = 0,
             .frames = undefined,
             .frame_count = 0,
             .strings = .empty,
-            .objects = null,
             .open_upvalues = null,
-            .gray_stack = .empty,
-            .bytes_allocated = 0,
-            .next_gc = 1024 * 1024,
             .script_context = undefined,
+            .runtime_allocator = memory.RuntimeAllocator.init(gpa, vm),
         };
-
-        if (comptime constants.debug_trace_execution) {
-            logDebug("Vm initialized.", .{});
-        }
-
         return vm;
     }
 
     pub fn deinit(self: *VirtualMachine) void {
-        var head = self.objects;
-        while (head) |obj| {
-            const next = obj.next;
-            obj.deinit(self);
-            head = next;
-        }
         self.strings.deinit(self.gpa);
-        self.gray_stack.deinit(self.gpa);
+        self.runtime_allocator.deinit();
+    }
+
+    pub fn putString(self: *VirtualMachine, s: *object.ObjString) !void {
+        try self.strings.put(self.gpa, s, {});
     }
 
     pub fn findString(self: *VirtualMachine, chars: []const u8, hash: u64) ?*object.Obj {
-        var tmp = object.ObjString{
-            .chars = chars,
-            .hash = hash,
-        };
-        if (self.strings.getKey(&tmp)) |string_object| {
-            return &string_object.obj;
-        }
+        var tmp = object.ObjString{ .chars = chars, .hash = hash };
+        if (self.strings.getKey(&tmp)) |string_object| return &string_object.obj;
         return null;
     }
 
@@ -154,26 +139,23 @@ pub const VirtualMachine = struct {
             .file_name = file_name,
             .source = source,
             .lines = .empty,
+            .static_arena = self.static_arena,
         };
 
-        const ast = try parser.createAst(self.arena, &self.script_context);
+        var ast_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer ast_arena.deinit();
+        const ast = try parser.createAst(ast_arena.allocator(), &self.script_context);
 
-        if (comptime constants.debug_trace_execution) {
-            logDebug("Pre-compilation finished.", .{});
-        }
+        if (comptime constants.debug_trace_execution) logDebug("Pre-compilation finished.", .{});
 
-        var c = try compiler.Compiler.init(self, self.gpa, self.arena);
+        var c = try compiler.Compiler.init(&self.script_context, &self.runtime_allocator);
+        defer c.deinit();
 
-        if (comptime constants.debug_trace_execution) {
-            logDebug("Compiling...", .{});
-        }
+        if (comptime constants.debug_trace_execution) logDebug("Compiling...", .{});
 
         const function = try c.compile(ast);
-        c.deinit();
 
-        if (comptime constants.debug_trace_execution) {
-            logDebug("Compilation finished.", .{});
-        }
+        if (comptime constants.debug_trace_execution) logDebug("Compilation finished.", .{});
 
         return function;
     }
@@ -250,7 +232,7 @@ pub const VirtualMachine = struct {
             if (@intFromPtr(u.location) < @intFromPtr(local)) break;
             link = &u.next;
         }
-        const created = try object.allocateUpvalue(self, local);
+        const created = try self.runtime_allocator.allocateUpvalue(local);
         created.next = link.*;
         link.* = created;
         return created;
@@ -323,7 +305,7 @@ pub const VirtualMachine = struct {
                     if (!b.isObjType(.List)) {
                         return self.runtimeError("invalid right side in cons operation: {s}", .{b.getType()});
                     }
-                    const new_list = value.wrapObj(try b.asObj().asList().cloneAndPrepend(self, a));
+                    const new_list = value.wrapObj(try b.asObj().asList().cloneAndPrepend(&self.runtime_allocator, a));
                     self.swapTop(new_list);
                 },
                 .AddInt => {
@@ -511,7 +493,7 @@ pub const VirtualMachine = struct {
 
                     // allocate the list first, so when the gc runs during the building of the list it does
                     // not try to mark a half finished list
-                    const upvalues = try self.gpa.alloc(*object.ObjUpvalue, function.upvalue_count);
+                    const upvalues = try self.runtime_allocator.allocator().alloc(*object.ObjUpvalue, function.upvalue_count);
                     for (0..function.upvalue_count) |i| {
                         const is_local = readByte(&ip, frame) == 1;
                         const index = readByte(&ip, frame);
@@ -522,7 +504,7 @@ pub const VirtualMachine = struct {
                         }
                     }
 
-                    const closure = try object.allocateClosure(self, function);
+                    const closure = try self.runtime_allocator.allocateClosure(function);
                     closure.upvalues = upvalues;
                     self.push(value.wrapObj(&closure.obj));
                 },
@@ -541,7 +523,7 @@ pub const VirtualMachine = struct {
                     const list = val.asObj().asList();
                     const count = readU16(&ip, frame);
                     for (0..count) |_| {
-                        try list.prepend(self, self.pop());
+                        try list.prepend(&self.runtime_allocator, self.pop());
                     }
                     self.push(val);
                 },
@@ -560,7 +542,7 @@ pub const VirtualMachine = struct {
                 },
                 .CloneAndPopFirst => {
                     const list = self.pop().asObj().asList();
-                    const result = try list.cloneAndPopFirst(self);
+                    const result = try list.cloneAndPopFirst(&self.runtime_allocator);
                     self.push(result.value.?);
                     self.push(value.wrapObj(&result.new_list.obj));
                 },
@@ -584,18 +566,19 @@ pub const VirtualMachine = struct {
         const right = self.peekTop().asObj().asString().chars;
 
         const data: [2][]const u8 = .{ left, right };
-        const chars = try std.mem.concat(self.gpa, u8, &data);
-        errdefer self.gpa.free(chars);
+        const gc_alloc = self.runtime_allocator.allocator();
+        const chars = try std.mem.concat(gc_alloc, u8, &data);
+        errdefer gc_alloc.free(chars);
 
         const hash = std.hash.Wyhash.hash(0, chars);
         const interned = self.findString(chars, hash);
 
         var result: value.Value = undefined;
         if (interned) |string_object| {
-            self.gpa.free(chars);
+            gc_alloc.free(chars);
             result = value.wrapObj(string_object);
         } else {
-            result = value.wrapObj(try object.allocateString(self, chars, hash));
+            result = value.wrapObj(try self.runtime_allocator.allocateString(chars, hash));
         }
 
         return result;
