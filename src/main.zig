@@ -26,15 +26,9 @@ pub fn main(init: std.process.Init) !void {
     const source = try file_reader.interface.allocRemaining(arena.allocator(), .unlimited);
 
     if (args.len == 2) {
-        var virtual_machine = try vm.VirtualMachine.init(io, gpa, arena.allocator());
-        defer virtual_machine.deinit();
-
-        _ = virtual_machine.interpret(file_path, source) catch |err| {
-            if (constants.stack_trace_on_error) {
-                return err;
-            }
+        _ = vm.run(io, gpa, arena.allocator(), file_path, source) catch |err| {
+            if (constants.stack_trace_on_error) return err;
         };
-
         return;
     }
 
@@ -43,6 +37,7 @@ pub fn main(init: std.process.Init) !void {
             .file_name = file_path,
             .source = source,
             .lines = .empty,
+            .static_arena = arena.allocator(),
         };
 
         const program = parser.createAst(arena.allocator(), &script_context) catch |err| {

@@ -176,10 +176,12 @@ pub const Compiler = struct {
     var_map: std.AutoHashMapUnmanaged(*const hm.Type, *const hm.Type),
     scratch_arena: std.heap.ArenaAllocator,
     runtime_allocator: *memory.RuntimeAllocator,
+    gc_alloc: std.mem.Allocator,
 
     pub fn init(
         script_context: *virtual_machine.ScriptContext,
         runtime_allocator: *memory.RuntimeAllocator,
+        gc_alloc: std.mem.Allocator,
     ) !Compiler {
         var compiler: Compiler = .{
             .script_context = script_context,
@@ -189,6 +191,7 @@ pub const Compiler = struct {
             .var_map = .empty,
             .scratch_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
             .runtime_allocator = runtime_allocator,
+            .gc_alloc = gc_alloc,
         };
         try compiler.initNativeFunctions();
         return compiler;
@@ -285,11 +288,11 @@ pub const Compiler = struct {
     }
 
     fn emitConstant(self: *Compiler, val: value.Value) !void {
-        try self.currentChunk().writeConstant(self.runtime_allocator.allocator(), val, 0);
+        try self.currentChunk().writeConstant(self.gc_alloc, val, 0);
     }
 
     fn makeConstant(self: *Compiler, val: value.Value) !u16 {
-        return try self.currentChunk().addConstant(self.runtime_allocator.allocator(), val);
+        return try self.currentChunk().addConstant(self.gc_alloc, val);
     }
 
     fn currentChunk(self: *Compiler) *chunk.Chunk {
@@ -307,7 +310,7 @@ pub const Compiler = struct {
     }
 
     fn emitByte(self: *Compiler, byte: u8) !void {
-        try self.currentChunk().write(self.runtime_allocator.allocator(), chunk.OpByte{ .Byte = byte }, 0);
+        try self.currentChunk().write(self.gc_alloc, chunk.OpByte{ .Byte = byte }, 0);
     }
 
     fn emitU16(self: *Compiler, index: usize) !void {
@@ -317,12 +320,12 @@ pub const Compiler = struct {
     }
 
     fn emitOp(self: *Compiler, op: chunk.OpCode) !void {
-        try self.currentChunk().write(self.runtime_allocator.allocator(), chunk.OpByte{ .Op = op }, 0);
+        try self.currentChunk().write(self.gc_alloc, chunk.OpByte{ .Op = op }, 0);
     }
 
     fn emitOpCodes(self: *Compiler, a: chunk.OpCode, b: chunk.OpCode) !void {
-        try self.currentChunk().write(self.runtime_allocator.allocator(), chunk.OpByte{ .Op = a }, 0);
-        try self.currentChunk().write(self.runtime_allocator.allocator(), chunk.OpByte{ .Op = b }, 0);
+        try self.currentChunk().write(self.gc_alloc, chunk.OpByte{ .Op = a }, 0);
+        try self.currentChunk().write(self.gc_alloc, chunk.OpByte{ .Op = b }, 0);
     }
 
     fn errorAt(self: *Compiler, token: *const scanner.Token, message: []const u8) anyerror {

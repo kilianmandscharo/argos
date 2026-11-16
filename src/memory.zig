@@ -12,26 +12,26 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
     });
 }
 
-// TODO: actually enable gc, but only after compilation
-
 pub const RuntimeAllocator = struct {
     backing: std.mem.Allocator,
     bytes_allocated: usize,
     next_gc: usize,
+    should_collect: bool,
     gray_stack: std.ArrayList(*object.Obj),
     objects: ?*object.Obj,
     vm: *virtual_machine.VirtualMachine,
-    should_collect: bool,
+    compiler: *compiler.Compiler,
 
-    pub fn init(gpa: std.mem.Allocator, vm: *virtual_machine.VirtualMachine) RuntimeAllocator {
+    pub fn init(gpa: std.mem.Allocator, vm: *virtual_machine.VirtualMachine, cm: *compiler.Compiler) RuntimeAllocator {
         return .{
             .backing = gpa,
             .bytes_allocated = 0,
             .next_gc = 1024 * 1024,
             .gray_stack = .empty,
             .objects = null,
-            .vm = vm,
             .should_collect = false,
+            .vm = vm,
+            .compiler = cm,
         };
     }
 
@@ -273,6 +273,10 @@ pub const RuntimeAllocator = struct {
             try self.markObject(&val.obj);
             current = val.next;
         }
+
+        for (self.compiler.functions.items) |f| try self.markObject(&f.function.obj);
+        var it = self.compiler.globals.valueIterator();
+        while (it.next()) |obj| try self.markObject(obj.*);
     }
 
     fn markValue(self: *RuntimeAllocator, val: value.Value) !void {

@@ -23,7 +23,7 @@ pub const LogOptions = struct {
 };
 
 pub fn log(comptime fmt: []const u8, args: anytype, options: LogOptions) void {
-    if (@intFromEnum(options.messageLevel) < @intFromEnum(options.currentLevel)) {
+    if (@backingInt(options.messageLevel) < @backingInt(options.currentLevel)) {
         return;
     }
     switch (options.color) {

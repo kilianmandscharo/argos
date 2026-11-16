@@ -15,19 +15,8 @@ const run = struct {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
 
-        var vm = try virtual_machine.VirtualMachine.init(std.testing.io, std.testing.allocator, arena.allocator());
-        defer vm.deinit();
-
-        const result = try vm.interpret("test", test_case.source);
+        const result = try virtual_machine.run(std.testing.io, std.testing.allocator, arena.allocator(), "test", test_case.source);
         try std.testing.expect(result == .Ok);
-
-        if (vm.stack_top != 0) {
-            std.debug.print("Stack not empty at end of program! {d} values remaining\n", .{vm.stack_top});
-            for (0..vm.stack_top) |i| {
-                std.debug.print("  [{d}] {f}\n", .{ i, vm.stack[i] });
-            }
-            return error.StackNotEmpty;
-        }
     }
 }.runTest;
 
