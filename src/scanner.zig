@@ -8,6 +8,8 @@ pub const TokenType = enum {
     RParen,
     LBracket,
     RBracket,
+    LBrace,
+    RBrace,
     Assign,
     Comma,
 
@@ -241,6 +243,8 @@ pub const Scanner = struct {
             ')' => return self.makeToken(.RParen),
             '[' => return self.makeToken(.LBracket),
             ']' => return self.makeToken(.RBracket),
+            '{' => return self.makeToken(.LBrace),
+            '}' => return self.makeToken(.RBrace),
             ',' => return self.makeToken(.Comma),
             '+' => return self.makeToken(.Plus),
             '-' => {

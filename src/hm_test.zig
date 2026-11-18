@@ -29,6 +29,13 @@ fn expectType(expected_t: *const hm.Type, actual_t: *const hm.Type) !void {
             }
             try expectType(f.to, actual.Func.to);
         },
+        .Record => |r| {
+            try std.testing.expectEqual(r.len, actual.Record.len);
+            for (0..r.len) |i| {
+                try std.testing.expectEqualStrings(r[i].key, actual.Record[i].key);
+                try expectType(r[i].value, actual.Record[i].value);
+            }
+        },
         .List => |l| {
             try expectType(l, actual.List);
         },
@@ -60,6 +67,12 @@ fn funcType(arena: std.mem.Allocator, params: []const *const hm.Type, ret: *cons
 fn listType(arena: std.mem.Allocator, l_type: *const hm.Type) !*const hm.Type {
     const t = try arena.create(hm.Type);
     t.* = .{ .List = l_type };
+    return t;
+}
+
+fn recordType(arena: std.mem.Allocator, entries: []const hm.RecordEntry) !*const hm.Type {
+    const t = try arena.create(hm.Type);
+    t.* = .{ .Record = entries };
     return t;
 }
 
@@ -332,6 +345,14 @@ test "type checker" {
             .expected = try funcType(alloc, &.{try varType(alloc, .empty)}, try varType(alloc, .empty)),
         },
         .{
+            .description = "identity resolved",
+            .source =
+            \\foo = (x) -> x
+            \\foo(1)
+            ,
+            .expected = c(.Integer),
+        },
+        .{
             .description = "lambda with binary return",
             .source =
             \\() -> 1 + 2
@@ -577,6 +598,24 @@ test "type checker" {
         },
     };
 
+    const record_test_cases = [_]TypeCheckerTestCase{
+        .{
+            .description = "record",
+            .source =
+            \\{ foo = 1, bar = 2 }
+            ,
+            .expected = try recordType(alloc, &.{ .{ .key = "foo", .value = c(.Integer) }, .{ .key = "bar", .value = c(.Integer) } }),
+        },
+        .{
+            .description = "record with var as value",
+            .source =
+            \\foo = (a) -> { first = a }
+            \\foo(1)
+            ,
+            .expected = try recordType(alloc, &.{.{ .key = "first", .value = c(.Integer) }}),
+        },
+    };
+
     try test_utils.runTests(TypeCheckerTestCase, "evaluate unary checks", &unary_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate binary checks", &binary_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate list checks", &list_test_cases, runTypeCheckerTest);
@@ -585,4 +624,5 @@ test "type checker" {
     try test_utils.runTests(TypeCheckerTestCase, "evaluate function checks", &function_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate native checks", &native_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate declaration checks", &declaration_test_cases, runTypeCheckerTest);
+    try test_utils.runTests(TypeCheckerTestCase, "evaluate record checks", &record_test_cases, runTypeCheckerTest);
 }

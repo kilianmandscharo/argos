@@ -87,6 +87,13 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
                 try expectExpression(item.*, actual.List.items[i].*);
             }
         },
+        .Record => |expr| {
+            try std.testing.expectEqual(expr.len, actual.Record.len);
+            for (expr, 0..) |entry, i| {
+                try std.testing.expectEqualStrings(entry.key.data, actual.Record[i].key.data);
+                try expectExpression(entry.value.*, actual.Record[i].value.*);
+            }
+        },
         .Match => |expr| {
             try expectExpression(expr.target.*, actual.Match.target.*);
             try std.testing.expectEqual(expr.arms.items.len, actual.Match.arms.items.len);
@@ -812,6 +819,163 @@ test "list literal" {
     try test_utils.runTestsWithArena(
         ExpressionTestCase,
         "parse list literal",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "record literal" {
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "empty",
+            .input =
+            \\{}
+            ,
+            .expected_expression = .{ .Record = &.{} },
+        },
+        .{
+            .description = "empty with new line",
+            .input =
+            \\{
+            \\
+            \\}
+            ,
+            .expected_expression = .{ .Record = &.{} },
+        },
+        .{
+            .description = "one line",
+            .input =
+            \\{ foo = 1, bar = 2 }
+            ,
+            .expected_expression = .{
+                .Record = &.{
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                },
+            },
+        },
+        .{
+            .description = "one line trailing comma",
+            .input =
+            \\{ foo = 1, bar = 2, }
+            ,
+            .expected_expression = .{
+                .Record = &.{
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                },
+            },
+        },
+        .{
+            .description = "multiple lines",
+            .input =
+            \\{
+            \\    foo = 1,
+            \\    bar = 2
+            \\}
+            ,
+            .expected_expression = .{
+                .Record = &.{
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                },
+            },
+        },
+        .{
+            .description = "multiple lines trailing comma",
+            .input =
+            \\{
+            \\    foo = 1,
+            \\    bar = 2,
+            \\}
+            ,
+            .expected_expression = .{
+                .Record = &.{
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                },
+            },
+        },
+        .{
+            .description = "multiple lines with whitespace",
+            .input =
+            \\{
+            \\
+            \\    foo = 1,
+            \\
+            \\    bar = 2
+            \\
+            \\}
+            ,
+            .expected_expression = .{
+                .Record = &.{
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                },
+            },
+        },
+        .{
+            .description = "multiple lines with whitespace trailing comma",
+            .input =
+            \\{
+            \\
+            \\    foo = 1,
+            \\
+            \\    bar = 2,
+            \\
+            \\}
+            ,
+            .expected_expression = .{
+                .Record = &.{
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                },
+            },
+        },
+        .{
+            .description = "eof",
+            .input =
+            \\{ foo = 1, bar = 2,
+            ,
+            .expect_error = true,
+        },
+        .{
+            .description = "expect comma",
+            .input =
+            \\{ foo = 1 bar = 2 }
+            ,
+            .expect_error = true,
+        },
+        .{
+            .description = "expect comma multiple lines",
+            .input =
+            \\{
+            \\    foo = 1
+            \\    bar = 2
+            \\}
+            ,
+            .expect_error = true,
+        },
+        .{
+            .description = "record of records",
+            .input =
+            \\{
+            \\    foo = { a = 1 },
+            \\    bar = { a = 2 },
+            \\}
+            ,
+            .expected_expression = .{
+                .Record = &.{
+                    .{ .key = s("foo"), .value = &e(.{ .Record = &.{.{ .key = s("a"), .value = &e(.{ .Integer = 1 }) }} }) },
+                    .{ .key = s("bar"), .value = &e(.{ .Record = &.{.{ .key = s("a"), .value = &e(.{ .Integer = 2 }) }} }) },
+                },
+            },
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse record literal",
         &test_cases,
         runExpressionTest,
     );

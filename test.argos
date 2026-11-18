@@ -1,8 +1,2 @@
-foo = () -> (
-    a = (
-        b = 5
-        () -> 1 + b
-    )
-    a()
-)
-@print(foo())
+foo = (n, acc = 0) -> if n == 0 then acc else foo(n-1, acc+1)
+@print(foo(100000000))

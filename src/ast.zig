@@ -36,15 +36,6 @@ pub const Expression = struct {
     }
 };
 
-pub const Pattern = union(enum) {
-    // value -> checks against value
-    // identifier -> binds new variable
-    // head :: tail
-    // []
-    // [a, b]
-    // _
-};
-
 pub const ExpressionData = union(enum) {
     Declaration: Declaration,
     Grouping: Grouping,
@@ -58,9 +49,15 @@ pub const ExpressionData = union(enum) {
     Function: Function,
     Call: Call,
     List: std.ArrayList(*const Expression),
+    Record: []const RecordItem,
     Match: Match,
     If: If,
     Unit,
+};
+
+pub const RecordItem = struct {
+    key: scanner.Token,
+    value: *const Expression,
 };
 
 pub const Declaration = struct {

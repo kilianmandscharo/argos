@@ -263,6 +263,25 @@ fn parseList(parser: *Parser) !ast.Expression {
     return .init(.{ .List = items }, token);
 }
 
+fn parseRecord(parser: *Parser) !ast.Expression {
+    const token = parser.getPrevious();
+    const entries = try parser.parseSeparated(
+        ast.RecordItem,
+        struct {
+            fn parse(p: *Parser) !ast.RecordItem {
+                const expr = try p.parseExpression();
+                if (expr.data != .Declaration) {
+                    return p.errorAt(expr.token, "expected declaration in record");
+                }
+                return .{ .key = expr.data.Declaration.left, .value = expr.data.Declaration.right };
+            }
+        }.parse,
+        .RBrace,
+        .Comma,
+    );
+    return .init(.{ .Record = entries.items }, token);
+}
+
 fn parseGrouping(parser: *Parser) !ast.Expression {
     const token = parser.getPrevious();
 
@@ -443,6 +462,8 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .RParen => .{ .prefix = null, .infix = null, .precedence = null },
         .LBracket => .{ .prefix = parseList, .infix = null, .precedence = null },
         .RBracket => .{ .prefix = null, .infix = null, .precedence = null },
+        .LBrace => .{ .prefix = parseRecord, .infix = null, .precedence = null },
+        .RBrace => .{ .prefix = null, .infix = null, .precedence = null },
         .Assign => .{ .prefix = null, .infix = parseDeclaration, .precedence = .Assign },
         .Comma => .{ .prefix = null, .infix = null, .precedence = null },
         .String => .{ .prefix = parseString, .infix = null, .precedence = null },

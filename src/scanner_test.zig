@@ -143,6 +143,9 @@ test "scanner" {
             try assertTokenEquals(.Else, "else", try s.next());
             try assertTokenEquals(.NewLine, "<newline>", try s.next());
             try assertTokenEquals(.Cons, "::", try s.next());
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+            try assertTokenEquals(.LBrace, "{", try s.next());
+            try assertTokenEquals(.RBrace, "}", try s.next());
 
             try assertTokenEquals(.Eof, "EOF", try s.next());
         }
@@ -177,6 +180,7 @@ test "scanner" {
             \\elif
             \\else
             \\::
+            \\{}
             ,
         },
     };

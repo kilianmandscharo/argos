@@ -10,11 +10,17 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
     });
 }
 
+pub const RecordEntry = struct {
+    key: []const u8,
+    value: *const Type,
+};
+
 pub const Type = union(enum) {
     Var: *Var,
     Const: Const,
     Func: *Func,
     List: *const Type,
+    Record: []const RecordEntry,
 
     pub fn prune(self: *const Type) *const Type {
         switch (self.*) {
@@ -36,10 +42,6 @@ pub const Type = union(enum) {
             },
             .Num => switch (self.*) {
                 .Const => |c| c == .Integer or c == .Float,
-                else => false,
-            },
-            .Show => switch (self.*) {
-                .Const => true,
                 else => false,
             },
             .Eq => switch (self.*) {
@@ -79,6 +81,11 @@ pub const Type = union(enum) {
                 try l.format(writer);
                 try writer.print("]", .{});
             },
+            .Record => |r| {
+                try writer.print("{{", .{});
+                for (r) |e| try writer.print("{s} = {f},", .{ e.key, e.value });
+                try writer.print("}}", .{});
+            },
             .Func => |f| {
                 try writer.print("(", .{});
                 for (f.from, 0..) |param, i| {
@@ -112,7 +119,7 @@ const Const = enum {
     Boolean,
 };
 
-pub const Class = enum { Plus, Num, Show, Eq, Ord };
+pub const Class = enum { Plus, Num, Eq, Ord };
 
 pub const Var = struct {
     id: u32,
@@ -291,6 +298,10 @@ pub const TypeChecker = struct {
         return try self.createType(.{ .Var = v });
     }
 
+    pub fn record(self: *TypeChecker, entries: []const RecordEntry) !*const Type {
+        return try self.createType(.{ .Record = entries });
+    }
+
     pub fn list(self: *TypeChecker, t: *const Type) !*const Type {
         return try self.createType(.{ .List = t });
     }
@@ -336,7 +347,12 @@ pub const TypeChecker = struct {
                 new_f.Func.is_native = f.is_native;
                 return new_f;
             },
-            else => resolved,
+            .Record => |r| {
+                const entries = try self.scratch().alloc(RecordEntry, r.len);
+                for (r, 0..) |e, i| entries[i] = .{ .key = e.key, .value = try self.copy(freshVars, e.value) };
+                return try self.record(entries);
+            },
+            .Const => resolved,
         };
     }
 
@@ -369,6 +385,9 @@ pub const TypeChecker = struct {
                 try self.freeVars(out, f.to);
             },
             .List => |l| try self.freeVars(out, l),
+            .Record => |r| {
+                for (r) |entry| try self.freeVars(out, entry.value);
+            },
             .Const => {},
         }
     }
@@ -462,6 +481,12 @@ pub const TypeChecker = struct {
             try self.unify(a.Func.to, b.Func.to);
         } else if (a.* == .List and b.* == .List) {
             try self.unify(a.List, b.List);
+        } else if (a.* == .Record and b.* == .Record) {
+            if (a.Record.len != b.Record.len) return error.LengthMismatch;
+            for (a.Record, 0..) |entry, i| {
+                if (!std.mem.eql(u8, entry.key, b.Record[i].key)) return error.KeyMismatch;
+                try self.unify(entry.value, b.Record[i].value);
+            }
         } else {
             return error.CantUnify;
         }
@@ -666,6 +691,11 @@ pub const TypeChecker = struct {
                     try self.unify(t, try self.infer(env, e));
                 }
                 return try self.list(t);
+            },
+            .Record => |r| {
+                const entries = try self.scratch().alloc(RecordEntry, r.len);
+                for (r, 0..) |e, i| entries[i] = .{ .key = e.key.data, .value = try self.infer(env, e.value) };
+                return try self.record(entries);
             },
             .Match => |match| {
                 const target_t = try self.infer(env, match.target);
