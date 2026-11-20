@@ -604,7 +604,7 @@ test "type checker" {
             .source =
             \\{ foo = 1, bar = 2 }
             ,
-            .expected = try recordType(alloc, &.{ .{ .key = "foo", .value = c(.Integer) }, .{ .key = "bar", .value = c(.Integer) } }),
+            .expected = try recordType(alloc, &.{ .{ .key = "bar", .value = c(.Integer) }, .{ .key = "foo", .value = c(.Integer) } }),
         },
         .{
             .description = "record with var as value",
@@ -613,6 +613,29 @@ test "type checker" {
             \\foo(1)
             ,
             .expected = try recordType(alloc, &.{.{ .key = "first", .value = c(.Integer) }}),
+        },
+        .{
+            .description = "access on record",
+            .source =
+            \\{ a = 1 }.a
+            ,
+            .expected = c(.Integer),
+        },
+        .{
+            .description = "access on record through var",
+            .source =
+            \\foo = { a = 1 }
+            \\foo.a
+            ,
+            .expected = c(.Integer),
+        },
+        .{
+            .description = "access in generic function",
+            .source =
+            \\foo = (r) -> r.a
+            \\foo({ a = 1 })
+            ,
+            .expected = c(.Integer),
         },
     };
 

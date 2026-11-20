@@ -75,6 +75,13 @@ pub const Type = union(enum) {
                     }
                     try writer.print("}}", .{});
                 }
+                if (v.fields.items.len > 0) {
+                    try writer.print(" {{ ", .{});
+                    for (v.fields.items) |field| {
+                        try writer.print("{s}:{f} ", .{ field.key, field.value });
+                    }
+                    try writer.print("}}", .{});
+                }
             },
             .List => |l| {
                 try writer.print("[", .{});
@@ -82,8 +89,8 @@ pub const Type = union(enum) {
                 try writer.print("]", .{});
             },
             .Record => |r| {
-                try writer.print("{{", .{});
-                for (r) |e| try writer.print("{s} = {f},", .{ e.key, e.value });
+                try writer.print("{{ ", .{});
+                for (r) |e| try writer.print("{s}: {f} ", .{ e.key, e.value });
                 try writer.print("}}", .{});
             },
             .Func => |f| {
@@ -96,7 +103,6 @@ pub const Type = union(enum) {
                 }
                 try writer.print(") -> ", .{});
                 try f.to.format(writer);
-                if (f.is_generic) try writer.print(" (generic)", .{});
                 if (f.is_native) try writer.print(" (native)", .{});
             },
         }
@@ -124,7 +130,8 @@ pub const Class = enum { Plus, Num, Eq, Ord };
 pub const Var = struct {
     id: u32,
     link: ?*const Type = null,
-    classes: std.EnumSet(Class),
+    classes: std.EnumSet(Class) = .empty,
+    fields: std.ArrayList(RecordEntry) = .empty,
 };
 
 fn countRequired(params: []const Param) usize {
@@ -155,7 +162,7 @@ const Declaration = struct {
     }
 
     pub fn initMonoEmpty(t: *const Type) Declaration {
-        return .{ .scheme = .{ .Mono = t }, .param_types = null };
+        return .{ .scheme = .{ .Mono = t } };
     }
 
     pub fn getGenericFuncType(self: Declaration) ?*const Type {
@@ -163,6 +170,23 @@ const Declaration = struct {
             return self.scheme.Poly.t;
         }
         return null;
+    }
+
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        switch (self.scheme) {
+            .Mono => |t| try writer.print("{f}", .{t}),
+            .Poly => |p| {
+                try writer.print("forall ", .{});
+                for (p.vars, 0..) |v, i| {
+                    try writer.print("t{d}", .{v.id});
+                    if (i < p.vars.len - 1) try writer.print(" ", .{});
+                }
+                try writer.print(" => {f}", .{p.t});
+            },
+        }
     }
 };
 
@@ -188,12 +212,8 @@ const Env = struct {
     }
 
     pub fn get(self: *Env, key: []const u8) ?Declaration {
-        if (self.store.get(key)) |val| {
-            return val;
-        }
-        if (self.outer) |outer| {
-            return outer.get(key);
-        }
+        if (self.store.get(key)) |val| return val;
+        if (self.outer) |outer| return outer.get(key);
         return null;
     }
 
@@ -243,7 +263,6 @@ pub const TypeChecker = struct {
         const new_var = try self.compiler_arena.create(Var);
         new_var.* = .{
             .id = self.current_var_id,
-            .classes = .empty,
         };
         self.current_var_id += 1;
         return new_var;
@@ -328,6 +347,13 @@ pub const TypeChecker = struct {
         return allocated;
     }
 
+    fn findField(r: []const RecordEntry, name: []const u8) ?RecordEntry {
+        for (r) |e| {
+            if (std.mem.eql(u8, name, e.key)) return e;
+        }
+        return null;
+    }
+
     fn copy(self: *TypeChecker, freshVars: std.AutoHashMapUnmanaged(*Var, *const Type), t: *const Type) !*const Type {
         const resolved = t.prune();
         return switch (resolved.*) {
@@ -366,8 +392,18 @@ pub const TypeChecker = struct {
                 for (s.vars) |v| {
                     const fresh_var = try self.variable();
                     fresh_var.Var.classes = v.classes;
-                    try fresh_vars.put(self.scratch(), v, fresh_var);
+
+                    fresh_var.Var.fields = .empty;
+                    for (v.fields.items) |f| {
+                        const fresh_field_var = try self.variable();
+                        try fresh_var.Var.fields.append(self.compiler_arena, .{ .key = f.key, .value = fresh_field_var });
+                        try fresh_vars.put(self.scratch(), f.value.Var, fresh_field_var);
+                    }
+
+                    // if v already exists it means it is contained in v.fields
+                    if (!fresh_vars.contains(v)) try fresh_vars.put(self.scratch(), v, fresh_var);
                 }
+
                 return try self.copy(fresh_vars, s.t.prune());
             },
         };
@@ -464,6 +500,13 @@ pub const TypeChecker = struct {
             if (occurs(a.Var, b)) return error.InfiniteType;
             switch (b.*) {
                 .Var => |other| other.classes.setUnion(a.Var.classes),
+                .Record => |r| {
+                    for (a.Var.fields.items) |f| {
+                        if (findField(r, f.key)) |b_field| {
+                            try self.unify(f.value, b_field.value);
+                        } else return error.FieldNotFound;
+                    }
+                },
                 else => {
                     var it = a.Var.classes.iterator();
                     while (it.next()) |class| if (!b.hasInstance(class)) return error.MissingInstance;
@@ -564,10 +607,13 @@ pub const TypeChecker = struct {
         switch (call.function.data) {
             .Identifier => |name| {
                 const decl = try self.mustResolveIdentifier(env, expr, name);
+                logDebug("called decl = {f}", .{decl});
+
                 const generic_func_type = decl.getGenericFuncType();
 
                 // either a function or in a recursive call an unknown variable
                 const func_t = (try self.infer(env, call.function)).prune();
+                logDebug("called func = {f}", .{func_t});
                 var return_t: *const Type = undefined;
 
                 if (decl.param_types) |params| {
@@ -695,7 +741,33 @@ pub const TypeChecker = struct {
             .Record => |r| {
                 const entries = try self.scratch().alloc(RecordEntry, r.len);
                 for (r, 0..) |e, i| entries[i] = .{ .key = e.key.data, .value = try self.infer(env, e.value) };
+                std.mem.sort(RecordEntry, entries, {}, struct {
+                    pub fn lessThan(ctx: void, a: RecordEntry, b: RecordEntry) bool {
+                        _ = ctx;
+                        return std.mem.lessThan(u8, a.key, b.key);
+                    }
+                }.lessThan);
                 return try self.record(entries);
+            },
+            .Access => |a| {
+                const lt = try self.infer(env, a.left);
+                switch (lt.*) {
+                    .Record => |r| {
+                        if (findField(r, a.right.data)) |entry| {
+                            return entry.value;
+                        }
+                        return error.FieldNotFound;
+                    },
+                    .Var => |v| {
+                        if (findField(v.fields.items, a.right.data)) |f| {
+                            return f.value;
+                        }
+                        const new_var = try self.variable();
+                        try v.fields.append(self.compiler_arena, .{ .key = a.right.data, .value = new_var });
+                        return new_var;
+                    },
+                    else => return error.InvalidLeftSideInAccess,
+                }
             },
             .Match => |match| {
                 const target_t = try self.infer(env, match.target);

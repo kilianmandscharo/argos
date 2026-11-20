@@ -10,3 +10,5 @@
 - write custom allocator to keep track of ALL runtime allocations
 - clearly separate the different arenas
 - rework error messages
+- implement bytes
+- extend string functions
