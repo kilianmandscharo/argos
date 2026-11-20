@@ -81,6 +81,10 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
                 try expectExpression(first.*, second.*);
             }
         },
+        .Access => |expr| {
+            try expectExpression(expr.left.*, actual.Access.left.*);
+            try std.testing.expectEqualStrings(expr.right.data, actual.Access.right.data);
+        },
         .List => |expr| {
             try std.testing.expectEqual(expr.items.len, actual.List.items.len);
             for (expr.items, 0..) |item, i| {
@@ -1427,6 +1431,50 @@ test "grouping" {
     try test_utils.runTestsWithArena(
         ExpressionTestCase,
         "parse grouping",
+        &test_cases,
+        runExpressionTest,
+    );
+}
+
+test "access" {
+    const test_cases = [_]ExpressionTestCase{
+        .{
+            .description = "identifier on left side",
+            .input =
+            \\a.foo
+            ,
+            .expected_expression = .{
+                .Access = .{ .left = &e(.{ .Identifier = "a" }), .right = s("foo") },
+            },
+        },
+        .{
+            .description = "record on left side",
+            .input =
+            \\{ a = 1 }.a
+            ,
+            .expected_expression = .{
+                .Access = .{ .left = &e(.{ .Record = &.{.{ .key = s("a"), .value = &e(.{ .Integer = 1 }) }} }), .right = s("a") },
+            },
+        },
+        .{
+            .description = "invalid left side",
+            .input =
+            \\"foo".a
+            ,
+            .expect_error = true,
+        },
+        .{
+            .description = "invalid right side",
+            .input =
+            \\a."foo"
+            ,
+            .expect_error = true,
+        },
+    };
+
+    try test_utils.runTestsWithArena(
+        ExpressionTestCase,
+        "parse access",
         &test_cases,
         runExpressionTest,
     );

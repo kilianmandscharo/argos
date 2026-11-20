@@ -147,6 +147,11 @@ test "scanner" {
             try assertTokenEquals(.LBrace, "{", try s.next());
             try assertTokenEquals(.RBrace, "}", try s.next());
 
+            try assertTokenEquals(.NewLine, "<newline>", try s.next());
+            try assertTokenEquals(.Identifier, "foo", try s.next());
+            try assertTokenEquals(.Dot, ".", try s.next());
+            try assertTokenEquals(.Identifier, "bar", try s.next());
+
             try assertTokenEquals(.Eof, "EOF", try s.next());
         }
     }.runTest;
@@ -181,6 +186,7 @@ test "scanner" {
             \\else
             \\::
             \\{}
+            \\foo.bar
             ,
         },
     };

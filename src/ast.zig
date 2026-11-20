@@ -52,7 +52,13 @@ pub const ExpressionData = union(enum) {
     Record: []const RecordItem,
     Match: Match,
     If: If,
+    Access: Access,
     Unit,
+};
+
+pub const Access = struct {
+    left: *const Expression,
+    right: scanner.Token,
 };
 
 pub const RecordItem = struct {

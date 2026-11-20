@@ -402,6 +402,22 @@ fn parseBinary(parser: *Parser, left: ast.Expression) !ast.Expression {
     return .init(.{ .Binary = .{ .operator = operator, .left = left_owned, .right = right } }, left.token);
 }
 
+fn parseDot(parser: *Parser, left: ast.Expression) !ast.Expression {
+    switch (left.data) {
+        .Identifier, .Record => {
+            const right = try parser.parseExpression();
+            switch (right.data) {
+                .Identifier => {
+                    const left_owned = try parser.createExpression(left);
+                    return .init(.{ .Access = .{ .left = left_owned, .right = right.token } }, left.token);
+                },
+                else => return parser.errorAtPrevious("expect identifier on right side of access"),
+            }
+        },
+        else => return parser.errorAtPrevious("expect identifier or record on left side of access"),
+    }
+}
+
 fn parseCall(parser: *Parser, left: ast.Expression) !ast.Expression {
     const args = try parser.parseSeparated(
         *const ast.Expression,
@@ -448,6 +464,7 @@ const Precedence = enum(u8) {
     Product,
     Prefix,
     Call,
+    Access,
 };
 
 const ParseRule = struct {
@@ -502,6 +519,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .NewLine => .{ .prefix = null, .infix = null, .precedence = null },
         .Eof => .{ .prefix = null, .infix = null, .precedence = null },
         .Cons => .{ .prefix = null, .infix = parseBinary, .precedence = .Product },
+        .Dot => .{ .prefix = null, .infix = parseDot, .precedence = .Access },
     };
 }
 

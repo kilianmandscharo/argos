@@ -12,6 +12,7 @@ pub const TokenType = enum {
     RBrace,
     Assign,
     Comma,
+    Dot,
 
     String,
     Float,
@@ -114,7 +115,7 @@ pub const Token = struct {
             line.no + 1,
             self.column + 1,
             message,
-            script_context.source[line.start .. end - 1],
+            script_context.source[line.start .. end],
         });
 
         for (0..self.column) |_| {
@@ -246,6 +247,7 @@ pub const Scanner = struct {
             '{' => return self.makeToken(.LBrace),
             '}' => return self.makeToken(.RBrace),
             ',' => return self.makeToken(.Comma),
+            '.' => return self.makeToken(.Dot),
             '+' => return self.makeToken(.Plus),
             '-' => {
                 if (self.match('>')) return self.makeToken(.Arrow);
