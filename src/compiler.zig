@@ -249,12 +249,21 @@ pub const Compiler = struct {
         const result = try type_checker.checkTypes(program);
         self.type_map = result.type_map;
 
+        if (comptime constants.debug_compiler) {
+            var it = result.type_map.iterator();
+            self.log("Type Map:", .{});
+            while (it.next()) |entry| {
+                self.log("    {f} (0x{d}) = {f}", .{ entry.key_ptr.*, @intFromPtr(entry.key_ptr.*), entry.value_ptr.* });
+            }
+        }
+
         try self.compileExpression(program);
         const function = self.functions.pop().?;
         return function.function;
     }
 
     fn getType(self: *Compiler, expr: *const ast.Expression) *const hm.Type {
+        if (comptime constants.debug_compiler) self.log("get type for {f} (0x{d})", .{ expr, @intFromPtr(expr) });
         if (self.type_map.get(expr)) |t| {
             return switch (t.*) {
                 .Var => self.var_map.get(t).?.prune(),
@@ -491,9 +500,24 @@ pub const Compiler = struct {
 
         for (func_t.resolved.items) |resolved_t| {
             for (0..func_t.from.len) |i| {
-                if (func_t.from[i].* == .Var) {
-                    try self.var_map.put(self.scratch(), func_t.from[i], resolved_t.Func.from[i]);
+                const generic_param = func_t.from[i].prune();
+                const resolved_param = resolved_t.Func.from[i].prune();
+
+                if (generic_param.* == .Var) {
+                    try self.var_map.put(self.scratch(), generic_param, resolved_param);
+                    for (generic_param.Var.fields.items, 0..) |field, y| {
+                        switch (resolved_param.*) {
+                            .Record => |r| try self.var_map.put(self.scratch(), field.value, r[y].value),
+                            else => return error.ExpectedRecordType,
+                        }
+                    }
                 }
+            }
+
+            if (comptime constants.debug_compiler) {
+                self.log("Var map for function '{s}':", .{declaration.left.data});
+                var it = self.var_map.iterator();
+                while (it.next()) |entry| self.log("    {f} = {f}", .{ entry.key_ptr.*, entry.value_ptr.* });
             }
 
             try self.compileFunction(&function, tail_recursive);
@@ -775,6 +799,25 @@ pub const Compiler = struct {
                     try self.patchJump(jump);
                 }
             },
+            .Record => |record| {
+                for (record) |field| try self.compileExpression(field.value);
+                const fields = try self.gc_alloc.alloc(value.Value, record.len);
+                const obj = try self.runtime_allocator.allocateRecord(fields);
+                try self.emitConstant(value.wrapObj(obj));
+                try self.emitOpU16(.RecordInit, @intCast(fields.len));
+            },
+            .Access => |access| {
+                const t = self.getType(access.left);
+                var index: usize = 0;
+                for (t.Record, 0..) |field, i| {
+                    if (std.mem.eql(u8, access.right.data, field.key)) {
+                        index = i;
+                        break;
+                    }
+                }
+                try self.compileExpression(access.left);
+                try self.emitOpU16(.Access, @intCast(index));
+            },
         }
 
         if (comptime constants.debug_compiler) {
@@ -854,6 +897,11 @@ pub const Compiler = struct {
             .Function => |function| {
                 return checkTail(function_name, function.body, false);
             },
+            .Record => |record| {
+                for (record) |field| if (!checkTail(function_name, field.value, in_tail)) return false;
+                return true;
+            },
+            .Access => false,
             .Identifier,
             .String,
             .Integer,

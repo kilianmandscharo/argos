@@ -526,6 +526,21 @@ pub const VirtualMachine = struct {
                     }
                     self.push(val);
                 },
+                .RecordInit => {
+                    const val = self.pop();
+                    const record = val.asObj().asRecord();
+                    var count = readU16(&ip, frame);
+                    while (count > 0) {
+                        count -= 1;
+                        record.fields[count] = self.pop();
+                    }
+                    self.push(val);
+                },
+                .Access => {
+                    const record = self.pop().asObj().asRecord();
+                    const index = readU16(&ip, frame);
+                    self.push(record.fields[index]);
+                },
                 .Return => {
                     const result = self.pop();
                     self.closeUpvalues(&self.stack[frame.stack_offset]);

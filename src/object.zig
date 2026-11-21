@@ -12,15 +12,7 @@ fn logDebug(comptime fmt: []const u8, args: anytype) void {
     });
 }
 
-pub const ObjType = enum {
-    String,
-    Function,
-    NativeFn,
-    Closure,
-    Upvalue,
-    List,
-    ListItem,
-};
+pub const ObjType = enum { String, Function, NativeFn, Closure, Upvalue, List, ListItem, Record };
 
 pub const Obj = struct {
     type: ObjType,
@@ -43,6 +35,7 @@ pub const Obj = struct {
             .Upvalue => try self.asUpvalue().format(writer),
             .List => try self.asList().format(writer),
             .ListItem => try self.asList().format(writer),
+            .Record => try self.asRecord().format(writer),
         }
     }
 
@@ -83,6 +76,11 @@ pub const Obj = struct {
                 const list_item_obj = self.asListItem();
                 gc_alloc.destroy(list_item_obj);
             },
+            .Record => {
+                const record_obj = self.asRecord();
+                gc_alloc.free(record_obj.fields);
+                gc_alloc.destroy(record_obj);
+            },
         }
     }
 
@@ -113,6 +111,10 @@ pub const Obj = struct {
     pub inline fn asListItem(self: *@This()) *ObjListItem {
         return @alignCast(@fieldParentPtr("obj", self));
     }
+
+    pub inline fn asRecord(self: *@This()) *ObjRecord {
+        return @alignCast(@fieldParentPtr("obj", self));
+    }
 };
 
 pub const ObjString = struct {
@@ -122,10 +124,7 @@ pub const ObjString = struct {
     chars: []const u8,
     hash: u64,
 
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("\"{s}\"", .{self.chars});
     }
 };
@@ -139,10 +138,7 @@ pub const ObjFunction = struct {
     name: ?*ObjString,
     upvalue_count: u8,
 
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("fn {s}", .{if (self.name) |name| name.chars else "<anonymous>"});
     }
 };
@@ -155,10 +151,7 @@ pub const ObjNative = struct {
     obj: Obj = undefined,
     function: NativeFn,
 
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         _ = self;
         try writer.print("<native fn>", .{});
     }
@@ -171,10 +164,7 @@ pub const ObjClosure = struct {
     function: *ObjFunction,
     upvalues: []*ObjUpvalue,
 
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try self.function.format(writer);
     }
 };
@@ -187,10 +177,7 @@ pub const ObjUpvalue = struct {
     closed: ?value.Value,
     next: ?*ObjUpvalue,
 
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         _ = self;
         try writer.print("upvalue", .{});
     }
@@ -251,10 +238,7 @@ pub const ObjList = struct {
         return self.data.first == null;
     }
 
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         _ = self;
         try writer.print("<List>", .{});
     }
@@ -283,10 +267,19 @@ pub const ObjListItem = struct {
     node: std.SinglyLinkedList.Node,
     value: value.Value,
 
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        _ = self;
+        try writer.print("<ListItem>", .{});
+    }
+};
+
+pub const ObjRecord = struct {
+    pub const KIND = ObjType.Record;
+
+    obj: Obj = undefined,
+    fields: []value.Value,
+
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         _ = self;
         try writer.print("<ListItem>", .{});
     }

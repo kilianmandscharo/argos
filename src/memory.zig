@@ -121,6 +121,12 @@ pub const RuntimeAllocator = struct {
         return list_item;
     }
 
+    pub fn allocateRecord(self: *RuntimeAllocator, fields: []value.Value) !*object.Obj {
+        const record = try self.allocateObject(object.ObjRecord);
+        record.fields = fields;
+        return &record.obj;
+    }
+
     pub fn allocateUpvalue(self: *RuntimeAllocator, local: *value.Value) !*object.ObjUpvalue {
         const upvalue = try self.allocateObject(object.ObjUpvalue);
         upvalue.location = local;

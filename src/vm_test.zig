@@ -634,3 +634,57 @@ test "function tests" {
 
     try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);
 }
+
+test "record tests" {
+    const test_cases = [_]TestCase{
+        .{
+            .description = "literal access",
+            .source =
+            \\foo = { a = 1 }.a
+            \\@assert(foo == 1)
+            ,
+        },
+        .{
+            .description = "var access",
+            .source =
+            \\foo = { a = 1 }
+            \\bar = foo.a
+            \\@assert(bar == 1)
+            ,
+        },
+        .{
+            .description = "record with var as value",
+            .source =
+            \\foo = (a) -> { first = a }
+            \\result = foo(1)
+            \\@assert(result.first == 1)
+            ,
+        },
+        .{
+            .description = "access in generic function",
+            .source =
+            \\foo = (r) -> r.a
+            \\result = foo({ a = 1 })
+            \\@assert(result == 1)
+            ,
+        },
+        .{
+            .description = "access in expression in generic function",
+            .source =
+            \\foo = (r) -> r.a + r.b
+            \\result = foo({ a = 1, b = 2 })
+            \\@assert(result == 3)
+            ,
+        },
+        .{
+            .description = "multiple calls with different records",
+            .source =
+            \\foo = (r) -> r.b
+            \\result = foo({ a = 1, b = 2 }) + foo({ b = 3, c = 4 })
+            \\@assert(result == 5)
+            ,
+        },
+    };
+
+    try test_utils.runTests(TestCase, "evaluate record tests", &test_cases, run);
+}

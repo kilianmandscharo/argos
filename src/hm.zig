@@ -492,9 +492,7 @@ pub const TypeChecker = struct {
         const a = type_a.prune();
         const b = type_b.prune();
 
-        if (comptime constants.debug_type_checker) {
-            logDebug("Unify {f} with {f}", .{ a, b });
-        }
+        if (comptime constants.debug_type_checker) logDebug("Unify {f} with {f}", .{ a, b });
 
         if (a.* == .Var and b.* == .Var and a.Var == b.Var) return;
 
@@ -538,9 +536,7 @@ pub const TypeChecker = struct {
     }
 
     fn infer(self: *TypeChecker, env: *Env, expr: *const ast.Expression) anyerror!*const Type {
-        if (comptime constants.debug_type_checker) {
-            logDebug("infer {f}", .{expr});
-        }
+        if (comptime constants.debug_type_checker) logDebug("infer {f}", .{expr});
         const t = try self.inferType(env, expr);
         try self.type_map.put(self.compiler_arena, expr, t);
         return t;
@@ -609,13 +605,13 @@ pub const TypeChecker = struct {
         switch (call.function.data) {
             .Identifier => |name| {
                 const decl = try self.mustResolveIdentifier(env, expr, name);
-                logDebug("called decl = {f}", .{decl});
+                if (comptime constants.debug_type_checker) logDebug("called decl = {f}", .{decl});
 
                 const generic_func_type = decl.getGenericFuncType();
 
                 // either a function or in a recursive call an unknown variable
                 const func_t = (try self.infer(env, call.function)).prune();
-                logDebug("called func = {f}", .{func_t});
+                if (comptime constants.debug_type_checker) logDebug("called func = {f}", .{func_t});
                 var return_t: *const Type = undefined;
 
                 if (decl.param_types) |params| {
@@ -743,12 +739,6 @@ pub const TypeChecker = struct {
             .Record => |r| {
                 const entries = try self.scratch().alloc(RecordEntry, r.len);
                 for (r, 0..) |e, i| entries[i] = .{ .key = e.key.data, .value = try self.infer(env, e.value) };
-                std.mem.sort(RecordEntry, entries, {}, struct {
-                    pub fn lessThan(ctx: void, a: RecordEntry, b: RecordEntry) bool {
-                        _ = ctx;
-                        return std.mem.lessThan(u8, a.key, b.key);
-                    }
-                }.lessThan);
                 return try self.record(entries);
             },
             .Access => |a| {

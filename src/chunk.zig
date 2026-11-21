@@ -59,7 +59,6 @@ pub const OpCode = enum(u8) {
     Closure,
     GetUpvalue,
     SwapCloseUpvalue,
-    ListInit,
     BitwiseAnd,
     BitwiseOr,
     BitwiseXor,
@@ -68,6 +67,9 @@ pub const OpCode = enum(u8) {
     LeftShift,
     RightShift,
     CloneAndPopFirst,
+    ListInit,
+    RecordInit,
+    Access,
 };
 
 pub const OpByte = union(enum) {
@@ -170,9 +172,11 @@ pub const Chunk = struct {
             .Call => return byteInstruction(self, "OP_CALL", offset),
             .TailCall => return byteInstruction(self, "OP_TAIL_CALL", offset),
             .GetUpvalue => return byteInstruction(self, "OP_GET_UPVALUE", offset),
+            .Access => return byteInstruction(self, "OP_ACCESS", offset),
             .SwapCloseUpvalue => return simpleInstruction("OP_SWAP_CLOSE_UPVALUE", offset),
             .CloneAndPopFirst => return simpleInstruction("OP_CLONE_AND_POP_FIRST", offset),
             .ListInit => return twoByteInstruction(self, "OP_LIST_INIT", offset),
+            .RecordInit => return twoByteInstruction(self, "OP_RECORD_INIT", offset),
             .BitwiseAnd => return simpleInstruction("OP_BITWISE_AND", offset),
             .BitwiseOr => return simpleInstruction("OP_BITWISE_OR", offset),
             .BitwiseXor => return simpleInstruction("OP_BITWISE_XOR", offset),

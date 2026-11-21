@@ -279,6 +279,12 @@ fn parseRecord(parser: *Parser) !ast.Expression {
         .RBrace,
         .Comma,
     );
+    std.mem.sort(ast.RecordItem, entries.items, {}, struct {
+        fn lessThan(ctx: void, a: ast.RecordItem, b: ast.RecordItem) bool {
+            _ = ctx;
+            return std.mem.lessThan(u8, a.key.data, b.key.data);
+        }
+    }.lessThan);
     return .init(.{ .Record = entries.items }, token);
 }
 

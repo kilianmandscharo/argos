@@ -31,6 +31,7 @@ pub const Expression = struct {
                     else => {},
                 }
             },
+            .Access => |access| try writer.print(" of field {s}", .{access.right.data}),
             else => {},
         }
     }
@@ -244,6 +245,6 @@ fn printExpressionInner(expr: *const Expression, writer: *std.Io.Writer, level: 
                 try printExpressionInner(arg, writer, level + 1);
             }
         },
-        else => @panic("not implemented"),
+        .Record, .Access, .If, .List, .Match => {},
     }
 }

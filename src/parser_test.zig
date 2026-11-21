@@ -853,8 +853,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                     .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -865,8 +865,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                     .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -880,8 +880,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                     .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -895,8 +895,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                     .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -913,8 +913,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                     .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -931,8 +931,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                     .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -970,8 +970,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("foo"), .value = &e(.{ .Record = &.{.{ .key = s("a"), .value = &e(.{ .Integer = 1 }) }} }) },
                     .{ .key = s("bar"), .value = &e(.{ .Record = &.{.{ .key = s("a"), .value = &e(.{ .Integer = 2 }) }} }) },
+                    .{ .key = s("foo"), .value = &e(.{ .Record = &.{.{ .key = s("a"), .value = &e(.{ .Integer = 1 }) }} }) },
                 },
             },
         },
