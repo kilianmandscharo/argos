@@ -78,7 +78,7 @@ pub const Type = union(enum) {
                 if (v.fields.items.len > 0) {
                     try writer.print(" {{ ", .{});
                     for (v.fields.items) |field| {
-                        try writer.print("{s}:{f} ", .{ field.key, field.value });
+                        try writer.print("{s}: {f} ", .{ field.key, field.value });
                     }
                     try writer.print("}}", .{});
                 }
@@ -392,15 +392,17 @@ pub const TypeChecker = struct {
                 for (s.vars) |v| {
                     const fresh_var = try self.variable();
                     fresh_var.Var.classes = v.classes;
-
                     fresh_var.Var.fields = .empty;
+
                     for (v.fields.items) |f| {
-                        const fresh_field_var = try self.variable();
+                        var field_var = f.value.Var;
+                        while (field_var.link) |link| field_var = link.Var;
+
+                        const fresh_field_var = fresh_vars.get(field_var) orelse try self.variable();
                         try fresh_var.Var.fields.append(self.compiler_arena, .{ .key = f.key, .value = fresh_field_var });
-                        try fresh_vars.put(self.scratch(), f.value.Var, fresh_field_var);
+                        try fresh_vars.put(self.scratch(), field_var, fresh_field_var);
                     }
 
-                    // if v already exists it means it is contained in v.fields
                     if (!fresh_vars.contains(v)) try fresh_vars.put(self.scratch(), v, fresh_var);
                 }
 
@@ -750,20 +752,17 @@ pub const TypeChecker = struct {
                 return try self.record(entries);
             },
             .Access => |a| {
+                const key = a.right.data;
                 const lt = try self.infer(env, a.left);
                 switch (lt.*) {
                     .Record => |r| {
-                        if (findField(r, a.right.data)) |entry| {
-                            return entry.value;
-                        }
+                        if (findField(r, key)) |entry| return entry.value;
                         return error.FieldNotFound;
                     },
                     .Var => |v| {
-                        if (findField(v.fields.items, a.right.data)) |f| {
-                            return f.value;
-                        }
+                        if (findField(v.fields.items, key)) |f| return f.value;
                         const new_var = try self.variable();
-                        try v.fields.append(self.compiler_arena, .{ .key = a.right.data, .value = new_var });
+                        try v.fields.append(self.compiler_arena, .{ .key = key, .value = new_var });
                         return new_var;
                     },
                     else => return error.InvalidLeftSideInAccess,

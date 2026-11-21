@@ -405,7 +405,7 @@ fn parseBinary(parser: *Parser, left: ast.Expression) !ast.Expression {
 fn parseDot(parser: *Parser, left: ast.Expression) !ast.Expression {
     switch (left.data) {
         .Identifier, .Record => {
-            const right = try parser.parseExpression();
+            const right = try parser.parsePrecedence(.Access);
             switch (right.data) {
                 .Identifier => {
                     const left_owned = try parser.createExpression(left);

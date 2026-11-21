@@ -1069,6 +1069,29 @@ test "function call" {
                 },
             },
         },
+        .{
+            .description = "in binary expression",
+            .input =
+            \\test() + test()
+            ,
+            .expected_expression = .{
+                .Binary = .{
+                    .operator = .Plus,
+                    .left = &e(.{
+                        .Call = .{
+                            .function = &e(.{ .Identifier = "test" }),
+                            .args = .empty,
+                        },
+                    }),
+                    .right = &e(.{
+                        .Call = .{
+                            .function = &e(.{ .Identifier = "test" }),
+                            .args = .empty,
+                        },
+                    }),
+                },
+            },
+        },
     };
 
     try test_utils.runTestsWithArena(
@@ -1454,6 +1477,19 @@ test "access" {
             ,
             .expected_expression = .{
                 .Access = .{ .left = &e(.{ .Record = &.{.{ .key = s("a"), .value = &e(.{ .Integer = 1 }) }} }), .right = s("a") },
+            },
+        },
+        .{
+            .description = "in binary expression",
+            .input =
+            \\a.foo + a.bar
+            ,
+            .expected_expression = .{
+                .Binary = .{
+                    .operator = .Plus,
+                    .left = &e(.{ .Access = .{ .left = &e(.{ .Identifier = "a" }), .right = s("foo") } }),
+                    .right = &e(.{ .Access = .{ .left = &e(.{ .Identifier = "a" }), .right = s("bar") } }),
+                },
             },
         },
         .{

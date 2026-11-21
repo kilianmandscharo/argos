@@ -637,6 +637,40 @@ test "type checker" {
             ,
             .expected = c(.Integer),
         },
+        .{
+            .description = "access in expression in generic function",
+            .source =
+            \\foo = (r) -> r.a + r.b
+            \\foo({ a = 1, b = 2 })
+            ,
+            .expected = c(.Integer),
+        },
+        .{
+            .description = "field type mismatch in binary expression",
+            .source =
+            \\foo = (r) -> r.a + r.b
+            \\foo({ a = 1, b = 2.0 })
+            ,
+            .expect_error = error.CantUnify,
+        },
+        .{
+            .description = "missing field",
+            .source =
+            \\foo = (r) -> r.a + r.b
+            \\foo({ a = 1 })
+            ,
+            .expect_error = error.FieldNotFound,
+        },
+        .{
+            .description = "multiple calls with different records",
+            .source =
+            \\foo = (r) -> r.a
+            \\foo({ a = 1 })
+            \\foo({ a = 1, b = 2 })
+            \\foo({ a = 1, b = 2, c = 3 })
+            ,
+            .expected = c(.Integer),
+        },
     };
 
     try test_utils.runTests(TypeCheckerTestCase, "evaluate unary checks", &unary_test_cases, runTypeCheckerTest);
