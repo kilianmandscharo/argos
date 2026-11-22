@@ -14,16 +14,16 @@ const c = hm.TypeChecker.c;
 
 pub const natives: []const Native = &.{
     .{
-        .name = "@clock",
+        .name = "clock",
         .function = struct {
-            fn clock(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
                 _ = args;
                 const now = std.Io.Timestamp.now(vm.io, .real);
                 const time: f64 = @floatFromInt(std.Io.Timestamp.toMilliseconds(now));
                 const ms_per_s: f64 = @floatFromInt(std.time.ms_per_s);
                 return value.wrapFloat(@divExact(time, ms_per_s));
             }
-        }.clock,
+        }.native,
         .getDecl = struct {
             fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
                 return .initMono(
@@ -34,15 +34,15 @@ pub const natives: []const Native = &.{
         }.getDecl,
     },
     .{
-        .name = "@print",
+        .name = "print",
         .function = struct {
-            fn print(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
                 _ = vm;
                 const val = args[0];
                 std.debug.print("{f}\n", .{val});
                 return value.valueUnit();
             }
-        }.print,
+        }.native,
         .getDecl = struct {
             fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
                 const generic_var = try type_checker.variable();
@@ -56,14 +56,14 @@ pub const natives: []const Native = &.{
         }.getDecl,
     },
     .{
-        .name = "@assert",
+        .name = "assert",
         .function = struct {
-            fn assert(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
                 const val = args[0];
                 if (!val.Bool) return vm.runtimeError("Assertion failed", .{});
                 return value.valueUnit();
             }
-        }.assert,
+        }.native,
         .getDecl = struct {
             fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
                 return .initMono(
@@ -74,14 +74,14 @@ pub const natives: []const Native = &.{
         }.getDecl,
     },
     .{
-        .name = "@len",
+        .name = "list_len",
         .function = struct {
-            fn len(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
                 _ = vm;
                 const val = args[0];
                 return value.wrapInt(@intCast(val.asObj().asList().len()));
             }
-        }.len,
+        }.native,
         .getDecl = struct {
             fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
                 const generic_var = try type_checker.variable();
@@ -95,9 +95,9 @@ pub const natives: []const Native = &.{
         }.getDecl,
     },
     .{
-        .name = "@nth",
+        .name = "list_get",
         .function = struct {
-            fn nth(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
                 const val = args[0];
                 const index = args[1];
                 var i = index.Int;
@@ -111,7 +111,7 @@ pub const natives: []const Native = &.{
                 }
                 return vm.runtimeError("list index {d} exceeds list length", .{index.Int});
             }
-        }.nth,
+        }.native,
         .getDecl = struct {
             fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
                 const generic_var = try type_checker.variable();
@@ -125,20 +125,85 @@ pub const natives: []const Native = &.{
         }.getDecl,
     },
     .{
+        .name = "list_reverse",
+        .function = struct {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+                const list = args[0].asObj().asList();
+
+                const new_list = try vm.runtime_allocator.allocateList();
+                vm.push(value.wrapObj(&new_list.obj));
+
+                var it = list.iterator();
+                while (it.next()) |item| try new_list.prepend(vm.runtime_allocator, item.value);
+
+                return vm.pop();
+            }
+        }.native,
+        .getDecl = struct {
+            fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
+                const generic_var = try type_checker.variable();
+                const vars = try type_checker.compiler_arena.dupe(*hm.Var, &.{generic_var.Var});
+                return .initPoly(
+                    vars,
+                    try type_checker.nativeFunction(&.{try type_checker.list(generic_var)}, try type_checker.list(generic_var)),
+                    &.{.Required},
+                );
+            }
+        }.getDecl,
+    },
+    .{
+        .name = "str_slice",
+        .function = struct {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+                const s = args[0].asObj().asString();
+                const start = args[1].Int;
+                const end = args[2].Int;
+                const new_s = try vm.runtime_allocator.copyString(s.chars[@intCast(start)..@intCast(end)]);
+                return value.wrapObj(new_s);
+            }
+        }.native,
+        .getDecl = struct {
+            fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
+                return .initMono(
+                    try type_checker.nativeFunction(&.{ c(.String), c(.Integer), c(.Integer) }, c(.String)),
+                    &.{ .Required, .Required, .Required },
+                );
+            }
+        }.getDecl,
+    },
+    .{
+        .name = "str_len",
+        .function = struct {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+                _ = vm;
+                const s = args[0].asObj().asString();
+                return value.wrapInt(@intCast(s.chars.len));
+            }
+        }.native,
+        .getDecl = struct {
+            fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
+                return .initMono(
+                    try type_checker.nativeFunction(&.{c(.String)}, c(.Integer)),
+                    &.{.Required},
+                );
+            }
+        }.getDecl,
+    },
+    .{
         .name = "str_starts_with",
         .function = struct {
-            fn strStartsWith(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
                 _ = vm;
                 const s = args[0].asObj().asString();
                 const target = args[1].asObj().asString();
                 return value.wrapBool(std.mem.startsWith(u8, s.chars, target.chars));
             }
-        }.strStartsWith,
+        }.native,
         .getDecl = struct {
             fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
                 return .initMono(
-                    try type_checker.nativeFunction(&.{c(.String)}, c(.Boolean)),
-                    &.{.Required},
+                    try type_checker.nativeFunction(&.{ c(.String), c(.String) }, c(.Boolean)),
+                    &.{ .Required, .Required },
                 );
             }
         }.getDecl,
@@ -156,8 +221,8 @@ pub const natives: []const Native = &.{
         .getDecl = struct {
             fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
                 return .initMono(
-                    try type_checker.nativeFunction(&.{c(.String)}, c(.Boolean)),
-                    &.{.Required},
+                    try type_checker.nativeFunction(&.{ c(.String), c(.String) }, c(.Boolean)),
+                    &.{ .Required, .Required },
                 );
             }
         }.getDecl,
@@ -175,8 +240,8 @@ pub const natives: []const Native = &.{
         .getDecl = struct {
             fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
                 return .initMono(
-                    try type_checker.nativeFunction(&.{c(.String)}, c(.Boolean)),
-                    &.{.Required},
+                    try type_checker.nativeFunction(&.{ c(.String), c(.String) }, c(.Boolean)),
+                    &.{ .Required, .Required },
                 );
             }
         }.getDecl,

@@ -1,9 +1,9 @@
 const std = @import("std");
 
 pub const debug_parser = false;
-pub const debug_compiler = true;
+pub const debug_compiler = false;
 pub const debug_disassemble = false;
-pub const debug_type_checker = true;
+pub const debug_type_checker = false;
 
 pub const debug_trace_execution = false;
 pub const frames_max = 64;
@@ -13,5 +13,5 @@ pub const debug_stress_gc = false;
 pub const debug_log_gc = false;
 pub const gc_heap_grow_factor = 2;
 
-pub const stack_trace_on_error = false;
+pub const stack_trace_on_error = true;
 pub const vm_test_mode = true;

@@ -1493,13 +1493,6 @@ test "access" {
             },
         },
         .{
-            .description = "invalid left side",
-            .input =
-            \\"foo".a
-            ,
-            .expect_error = true,
-        },
-        .{
             .description = "invalid right side",
             .input =
             \\a."foo"

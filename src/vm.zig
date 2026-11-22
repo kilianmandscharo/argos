@@ -160,12 +160,12 @@ pub const VirtualMachine = struct {
         self.frame_count = 0;
     }
 
-    inline fn push(self: *VirtualMachine, val: value.Value) void {
+    pub inline fn push(self: *VirtualMachine, val: value.Value) void {
         self.stack[self.stack_top] = val;
         self.stack_top += 1;
     }
 
-    inline fn pop(self: *VirtualMachine) value.Value {
+    pub inline fn pop(self: *VirtualMachine) value.Value {
         self.stack_top -= 1;
         return self.stack[self.stack_top];
     }
@@ -380,7 +380,9 @@ pub const VirtualMachine = struct {
                     self.swapTop(value.wrapBool(a.Float > b.Float));
                 },
                 .GreaterString => {
-                    @panic("not implemented");
+                    const b = self.pop().asObj().asString();
+                    const a = self.peekTop().asObj().asString();
+                    self.swapTop(value.wrapBool(std.mem.lessThan(u8, b.chars, a.chars)));
                 },
                 .LessInt => {
                     const b = self.pop();
@@ -393,7 +395,9 @@ pub const VirtualMachine = struct {
                     self.swapTop(value.wrapBool(a.Float < b.Float));
                 },
                 .LessString => {
-                    @panic("not implemented");
+                    const b = self.pop().asObj().asString();
+                    const a = self.peekTop().asObj().asString();
+                    self.swapTop(value.wrapBool(std.mem.lessThan(u8, a.chars, b.chars)));
                 },
                 .BitwiseAnd => {
                     const b = self.pop();

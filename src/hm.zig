@@ -50,7 +50,7 @@ pub const Type = union(enum) {
                 else => false,
             },
             .Ord => switch (self.*) {
-                .Const => |c| c == .Integer or c == .Float,
+                .Const => |c| c == .Integer or c == .Float or c == .String,
                 else => false,
             },
         };
@@ -102,6 +102,7 @@ pub const Type = union(enum) {
                 try writer.print(") -> ", .{});
                 try f.to.format(writer);
                 if (f.is_native) try writer.print(" (native)", .{});
+                if (f.is_generic) try writer.print(" (generic)", .{});
             },
         }
     }
@@ -275,7 +276,7 @@ pub const TypeChecker = struct {
 
         for (native.natives) |n| {
             const decl = try n.getDecl(self);
-            std.debug.print("name = {s}, decl = {f}\n", .{ n.name, decl });
+            if (comptime constants.debug_type_checker) std.debug.print("name = {s}, decl = {f}\n", .{ n.name, decl });
             try env.set(self.compiler_arena, n.name, decl);
         }
 
@@ -566,10 +567,30 @@ pub const TypeChecker = struct {
 
     fn inferCallWithParams(self: *TypeChecker, env: *Env, func_t: *Func, args: []const *const ast.Expression, param_types: Params) !*const Type {
         if (args.len < countRequired(param_types) or args.len > param_types.len) return error.ArityMismatch;
+
         for (args, 0..) |arg, i| {
-            const arg_type = try self.infer(env, arg);
-            try self.unify(arg_type, func_t.from[i]);
+            switch (arg.data) {
+                .Identifier => |name| {
+                    var decl = try self.mustResolveIdentifier(env, arg, name);
+                    const generic_func_type = decl.getGenericFuncType();
+
+                    const arg_type = try self.infer(env, arg);
+                    try self.unify(arg_type, func_t.from[i]);
+
+                    if (arg_type.* == .Func) {
+                        if (generic_func_type) |original_f| {
+                            try original_f.Func.resolved.append(self.compiler_arena, arg_type);
+                            arg_type.Func.is_generic = true;
+                        }
+                    }
+                },
+                else => {
+                    const arg_type = try self.infer(env, arg);
+                    try self.unify(arg_type, func_t.from[i]);
+                },
+            }
         }
+
         const r = try self.variable();
         try self.unify(func_t.to, r);
         return r;

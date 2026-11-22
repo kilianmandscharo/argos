@@ -510,59 +510,11 @@ test "type checker" {
         },
     };
 
-    const native_test_cases = [_]TypeCheckerTestCase{
-        .{
-            .description = "print",
-            .source =
-            \\@print(1)
-            \\@print("foo")
-            ,
-            .expected = c(.Unit),
-        },
-        .{
-            .description = "len",
-            .source =
-            \\@len([1, 2, 3])
-            \\@len(["a", "b", "c"])
-            ,
-            .expected = c(.Integer),
-        },
-        .{
-            .description = "len on non list",
-            .source =
-            \\@len(1)
-            ,
-            .expect_error = error.CantUnify,
-        },
-        .{
-            .description = "nth",
-            .source =
-            \\@nth([1, 2, 3], 1)
-            \\@nth(["a", "b", "c"], 1)
-            ,
-            .expected = c(.String),
-        },
-        .{
-            .description = "nth on non list",
-            .source =
-            \\@nth(1, 1)
-            ,
-            .expect_error = error.CantUnify,
-        },
-        .{
-            .description = "clock",
-            .source =
-            \\@clock()
-            ,
-            .expected = c(.Integer),
-        },
-    };
-
     const declaration_test_cases = [_]TypeCheckerTestCase{
         .{
             .description = "unbound var",
             .source =
-            \\@print(foo)
+            \\print(foo)
             ,
             .expect_error = error.UnboundVar,
         },
@@ -570,7 +522,7 @@ test "type checker" {
             .description = "declaration in function does not leak",
             .source =
             \\foo = () -> bar = 1
-            \\@print(bar)
+            \\print(bar)
             ,
             .expect_error = error.UnboundVar,
         },
@@ -581,7 +533,7 @@ test "type checker" {
             \\    a = 1
             \\    bar = 1
             \\)
-            \\@print(bar)
+            \\print(bar)
             ,
             .expect_error = error.UnboundVar,
         },
@@ -592,7 +544,7 @@ test "type checker" {
             \\    foo = 1
             \\    bar = 1
             \\)
-            \\@print(bar)
+            \\print(bar)
             ,
             .expect_error = error.UnboundVar,
         },
@@ -679,7 +631,6 @@ test "type checker" {
     try test_utils.runTests(TypeCheckerTestCase, "evaluate if checks", &if_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate match checks", &match_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate function checks", &function_test_cases, runTypeCheckerTest);
-    try test_utils.runTests(TypeCheckerTestCase, "evaluate native checks", &native_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate declaration checks", &declaration_test_cases, runTypeCheckerTest);
     try test_utils.runTests(TypeCheckerTestCase, "evaluate record checks", &record_test_cases, runTypeCheckerTest);
 }

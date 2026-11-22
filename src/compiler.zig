@@ -55,7 +55,7 @@ pub const Function = struct {
     }
 
     fn getDisplayName(self: *const Function) []const u8 {
-        return self.getName() orelse "lambda";
+        return self.getName() orelse "<lambda>";
     }
 
     fn getName(self: *const Function) ?[]const u8 {
@@ -455,6 +455,8 @@ pub const Compiler = struct {
         const func_t = self.getType(call.function);
 
         const current_function = self.getFunction();
+        if (constants.debug_compiler) self.log("function {s} is tail_recursive: {}", .{ current_function.getDisplayName(), current_function.tail_recursive });
+
         if (isRecursiveCall(current_function, call) and current_function.tail_recursive) {
             try self.compileArgs(params, call.args.items);
             try self.emitOpU8(.TailCall, @intCast(count));
@@ -490,6 +492,8 @@ pub const Compiler = struct {
         const t = self.type_map.get(declaration.right).?;
         const func_t = t.Func;
         const tail_recursive = isTailRecursive(&function);
+
+        if (constants.debug_compiler) self.log("function is_generic: {}", .{func_t.is_generic});
 
         if (!func_t.is_generic) {
             try self.compileFunction(&function, tail_recursive);
@@ -539,8 +543,15 @@ pub const Compiler = struct {
             .Declaration => |*declaration| {
                 try self.compileDeclaration(declaration);
             },
-            .Identifier => {
-                try self.compileIdentifier(expr.token.data);
+            .Identifier => |name| {
+                if (self.type_map.get(expr)) |t| {
+                    if (t.* == .Func and t.Func.is_generic and !t.Func.is_native) {
+                        const generic_name = try self.getGenericFunctionName(name, t);
+                        try self.compileIdentifier(generic_name);
+                        return;
+                    }
+                }
+                try self.compileIdentifier(name);
             },
             .String => |string| {
                 try self.emitConstant(value.wrapObj(try self.runtime_allocator.copyString(string)));
@@ -616,21 +627,25 @@ pub const Compiler = struct {
                         .Gt => switch (self.getType(binary.left).Const) {
                             .Integer => try self.emitOp(.GreaterInt),
                             .Float => try self.emitOp(.GreaterFloat),
+                            .String => try self.emitOp(.GreaterString),
                             else => return error.InvalidTypeForGreater,
                         },
                         .GtOrEq => switch (self.getType(binary.left).Const) {
                             .Integer => try self.emitOpCodes(.LessInt, .Not),
                             .Float => try self.emitOpCodes(.LessFloat, .Not),
+                            .String => try self.emitOpCodes(.LessString, .Not),
                             else => return error.InvalidTypeForGreaterOrEqual,
                         },
                         .Lt => switch (self.getType(binary.left).Const) {
                             .Integer => try self.emitOp(.LessInt),
                             .Float => try self.emitOp(.LessFloat),
+                            .String => try self.emitOp(.LessString),
                             else => return error.InvalidTypeForLess,
                         },
                         .LtOrEq => switch (self.getType(binary.left).Const) {
                             .Integer => try self.emitOpCodes(.GreaterInt, .Not),
                             .Float => try self.emitOpCodes(.GreaterFloat, .Not),
+                            .String => try self.emitOpCodes(.GreaterString, .Not),
                             else => return error.InvalidTypeForLessOrEqual,
                         },
                         .Ampersand => try self.emitOp(.BitwiseAnd),

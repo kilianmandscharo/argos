@@ -409,18 +409,13 @@ fn parseBinary(parser: *Parser, left: ast.Expression) !ast.Expression {
 }
 
 fn parseDot(parser: *Parser, left: ast.Expression) !ast.Expression {
-    switch (left.data) {
-        .Identifier, .Record => {
-            const right = try parser.parsePrecedence(.Access);
-            switch (right.data) {
-                .Identifier => {
-                    const left_owned = try parser.createExpression(left);
-                    return .init(.{ .Access = .{ .left = left_owned, .right = right.token } }, left.token);
-                },
-                else => return parser.errorAtPrevious("expect identifier on right side of access"),
-            }
+    const right = try parser.parsePrecedence(.Access);
+    switch (right.data) {
+        .Identifier => {
+            const left_owned = try parser.createExpression(left);
+            return .init(.{ .Access = .{ .left = left_owned, .right = right.token } }, left.token);
         },
-        else => return parser.errorAtPrevious("expect identifier or record on left side of access"),
+        else => return parser.errorAtPrevious("expect identifier on right side of access"),
     }
 }
 
