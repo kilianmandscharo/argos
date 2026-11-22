@@ -3,6 +3,7 @@ const value = @import("value.zig");
 const object = @import("object.zig");
 const virtual_machine = @import("vm.zig");
 const hm = @import("hm.zig");
+const ast = @import("ast.zig");
 
 const Native = struct {
     name: []const u8,
@@ -10,7 +11,63 @@ const Native = struct {
     getDecl: *const fn (type_checker: *hm.TypeChecker) anyerror!hm.Declaration,
 };
 
+const NativeRaw = struct {
+    name: []const u8,
+    function: []const u8,
+    getDecl: *const fn (type_checker: *hm.TypeChecker) anyerror!hm.Declaration,
+};
+
 const c = hm.TypeChecker.c;
+
+pub const raw_natives: []const NativeRaw = &.{
+    .{
+        .name = "list_map",
+        .function =
+        \\list_map = (list, fn, acc = []) -> 
+        \\    match list with
+        \\    | [] -> list_reverse(acc)
+        \\    | h :: t -> list_map(t, fn, fn(h) :: acc)
+        ,
+        .getDecl = struct {
+            fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
+                const generic_in = try type_checker.variable();
+                const generic_out = try type_checker.variable();
+                const vars = try type_checker.compiler_arena.dupe(*hm.Var, &.{ generic_in.Var, generic_out.Var });
+                return .initPoly(
+                    vars,
+                    try type_checker.nativeFunction(
+                        &.{ try type_checker.list(generic_in), try type_checker.function(&.{generic_in}, generic_out) },
+                        try type_checker.list(generic_out),
+                    ),
+                    &.{ .Required, .Required, .Default },
+                );
+            }
+        }.getDecl,
+    },
+    .{
+        .name = "list_filter",
+        .function =
+        \\list_filter = (list, fn, acc = []) -> 
+        \\    match list with
+        \\    | [] -> list_reverse(acc)
+        \\    | h :: t -> list_filter(t, fn, if fn(h) then h :: acc else acc)
+        ,
+        .getDecl = struct {
+            fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
+                const generic_in = try type_checker.variable();
+                const vars = try type_checker.compiler_arena.dupe(*hm.Var, &.{generic_in.Var});
+                return .initPoly(
+                    vars,
+                    try type_checker.nativeFunction(
+                        &.{ try type_checker.list(generic_in), try type_checker.function(&.{generic_in}, c(.Boolean)) },
+                        try type_checker.list(generic_in),
+                    ),
+                    &.{ .Required, .Required, .Default },
+                );
+            }
+        }.getDecl,
+    },
+};
 
 pub const natives: []const Native = &.{
     .{

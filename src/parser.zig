@@ -86,7 +86,7 @@ pub const Parser = struct {
         return program;
     }
 
-    fn parseExpression(self: *Parser) !*const ast.Expression {
+    pub fn parseExpression(self: *Parser) !*const ast.Expression {
         return self.parsePrecedence(.Lowest);
     }
 

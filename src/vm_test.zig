@@ -848,6 +848,42 @@ test "list tests" {
             \\assert(list_get(new, 0).a == 2)
             ,
         },
+        .{
+            .description = "map",
+            .source =
+            \\new = list_map([1, 2, 3], (n) -> n * 2, [])
+            \\assert(list_len(new) == 3)
+            \\assert(list_get(new, 0) == 2)
+            \\assert(list_get(new, 1) == 4)
+            \\assert(list_get(new, 2) == 6)
+            ,
+        },
+        .{
+            .description = "map with default arg",
+            .source =
+            \\new = list_map([1, 2, 3], (n) -> n * 2)
+            \\assert(list_len(new) == 3)
+            \\assert(list_get(new, 0) == 2)
+            \\assert(list_get(new, 1) == 4)
+            \\assert(list_get(new, 2) == 6)
+            ,
+        },
+        .{
+            .description = "filter",
+            .source =
+            \\new = list_filter([1, 2, 3], (n) -> n % 2 == 0, [])
+            \\assert(list_len(new) == 1)
+            \\assert(list_get(new, 0) == 2)
+            ,
+        },
+        .{
+            .description = "filter with default arg",
+            .source =
+            \\new = list_filter([1, 2, 3], (n) -> n % 2 == 0)
+            \\assert(list_len(new) == 1)
+            \\assert(list_get(new, 0) == 2)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate function tests", &test_cases, run);

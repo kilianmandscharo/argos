@@ -274,6 +274,12 @@ pub const TypeChecker = struct {
     pub fn checkTypes(self: *TypeChecker, expr: *const ast.Expression) !struct { root: *const Type, type_map: TypeMap } {
         const env = try Env.init(self.scratch(), null);
 
+        for (native.raw_natives) |n| {
+            const decl = try n.getDecl(self);
+            if (comptime constants.debug_type_checker) std.debug.print("name = {s}, decl = {f}\n", .{ n.name, decl });
+            try env.set(self.compiler_arena, n.name, decl);
+        }
+
         for (native.natives) |n| {
             const decl = try n.getDecl(self);
             if (comptime constants.debug_type_checker) std.debug.print("name = {s}, decl = {f}\n", .{ n.name, decl });
@@ -308,8 +314,9 @@ pub const TypeChecker = struct {
     }
 
     pub fn function(self: *TypeChecker, from: []const *const Type, to: *const Type) !*const Type {
+        const owned_from = try self.compiler_arena.dupe(*const Type, from);
         const func = try self.compiler_arena.create(Func);
-        func.* = .{ .from = from, .to = to };
+        func.* = .{ .from = owned_from, .to = to };
         return try self.createType(.{ .Func = func });
     }
 

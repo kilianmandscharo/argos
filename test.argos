@@ -1,8 +1,2 @@
-map = (list, fn, acc) -> 
-    match list with
-    | [] -> acc
-    | h :: t -> map(t, fn, fn(h) :: acc)
-
-new = map([1, 2, 3], (n) -> n * n, [])
-
-print(list_get(new, 0))
+new = list_map([1, 2, 3], (n) -> n * 2)
+assert(list_len(new) == 3)

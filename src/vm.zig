@@ -56,9 +56,13 @@ pub const TableGlobals = std.HashMapUnmanaged(*object.ObjString, value.Value, St
 pub fn run(io: std.Io, gpa: std.mem.Allocator, static_arena: std.mem.Allocator, file_name: []const u8, source: []const u8) !InterpretResult {
     if (comptime constants.debug_trace_execution) logDebug("Starting pre-compilation...", .{});
 
+    var buf: std.Io.Writer.Allocating = .init(static_arena);
+    for (native.raw_natives) |n| try buf.writer.print("{s}\n", .{n.function});
+    try buf.writer.print("{s}", .{source});
+
     var script_context = ScriptContext{
         .file_name = file_name,
-        .source = source,
+        .source = buf.written(),
         .lines = .empty,
         .static_arena = static_arena,
     };

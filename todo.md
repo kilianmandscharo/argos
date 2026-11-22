@@ -12,3 +12,5 @@
 - rework error messages
 - implement bytes
 - extend string functions
+- new = list_map([1, 2, 3], (n) -> n * 2) -> the lambda falsly gets the name "new" here
+- check how native generics are handled

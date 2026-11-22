@@ -436,7 +436,8 @@ pub const Compiler = struct {
                 params = f.params.items;
             },
             .Identifier => |name| {
-                const local = self.getFunction().findLocal(name);
+                const search_name = try self.getGenericIdentifierName(call.function, name) orelse name;
+                const local = self.getFunction().findLocal(search_name);
                 if (local) |l| {
                     params = l.params;
                 }
@@ -478,6 +479,16 @@ pub const Compiler = struct {
             try buf.writer.print("_{f}", .{param});
         }
         return buf.written();
+    }
+
+    fn getGenericIdentifierName(self: *Compiler, expr: *const ast.Expression, name: []const u8) !?[]const u8 {
+        if (self.type_map.get(expr)) |t| {
+            if (t.* == .Func and t.Func.is_generic and !t.Func.is_native) {
+                const generic_name = try self.getGenericFunctionName(name, t);
+                return generic_name;
+            }
+        }
+        return null;
     }
 
     fn compileDeclaration(self: *Compiler, declaration: *const ast.Declaration) !void {
@@ -544,12 +555,9 @@ pub const Compiler = struct {
                 try self.compileDeclaration(declaration);
             },
             .Identifier => |name| {
-                if (self.type_map.get(expr)) |t| {
-                    if (t.* == .Func and t.Func.is_generic and !t.Func.is_native) {
-                        const generic_name = try self.getGenericFunctionName(name, t);
-                        try self.compileIdentifier(generic_name);
-                        return;
-                    }
+                if (try self.getGenericIdentifierName(expr, name)) |generic_name| {
+                    try self.compileIdentifier(generic_name);
+                    return;
                 }
                 try self.compileIdentifier(name);
             },
