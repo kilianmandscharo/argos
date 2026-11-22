@@ -1,9 +1,9 @@
 const std = @import("std");
 
 pub const debug_parser = false;
-pub const debug_compiler = false;
+pub const debug_compiler = true;
 pub const debug_disassemble = false;
-pub const debug_type_checker = false;
+pub const debug_type_checker = true;
 
 pub const debug_trace_execution = false;
 pub const frames_max = 64;

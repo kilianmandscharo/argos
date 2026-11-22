@@ -441,7 +441,7 @@ pub const Compiler = struct {
                     params = l.params;
                 }
             },
-            else => return error.NotCallable,
+            else => {},
         }
 
         if (params) |p| {

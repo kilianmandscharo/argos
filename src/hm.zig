@@ -3,6 +3,7 @@ const vm = @import("vm.zig");
 const ast = @import("ast.zig");
 const constants = @import("constants.zig");
 const logging = @import("logging.zig");
+const native = @import("native.zig");
 
 fn logDebug(comptime fmt: []const u8, args: anytype) void {
     logging.log(fmt, args, .{
@@ -55,10 +56,7 @@ pub const Type = union(enum) {
         };
     }
 
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const resolved = self.prune();
         switch (resolved.*) {
             .Const => |c| try writer.print("{s}", .{@tagName(c)}),
@@ -145,7 +143,7 @@ fn countRequired(params: []const Param) usize {
 const Param = ast.FunctionParamType;
 const Params = []const Param;
 
-const Declaration = struct {
+pub const Declaration = struct {
     scheme: Scheme,
     param_types: ?Params = null,
 
@@ -172,10 +170,7 @@ const Declaration = struct {
         return null;
     }
 
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         switch (self.scheme) {
             .Mono => |t| try writer.print("{f}", .{t}),
             .Poly => |p| {
@@ -219,6 +214,13 @@ const Env = struct {
 
     pub fn set(self: *Env, arena: std.mem.Allocator, key: []const u8, val: Declaration) !void {
         try self.store.put(arena, key, val);
+    }
+
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        if (self.outer) |outer| try outer.format(writer);
+        try writer.print("Env:\n", .{});
+        var it = self.store.iterator();
+        while (it.next()) |entry| try writer.print("{s} = {f}", .{ entry.key_ptr.*, entry.value_ptr.* });
     }
 };
 
@@ -271,36 +273,11 @@ pub const TypeChecker = struct {
     pub fn checkTypes(self: *TypeChecker, expr: *const ast.Expression) !struct { root: *const Type, type_map: TypeMap } {
         const env = try Env.init(self.scratch(), null);
 
-        try env.set(self.compiler_arena, "@clock", .initMono(
-            try self.nativeFunction(&.{}, c(.Integer)),
-            &.{},
-        ));
-
-        try env.set(self.compiler_arena, "@assert", .initMono(
-            try self.nativeFunction(&.{c(.Boolean)}, c(.Unit)),
-            &.{.Required},
-        ));
-
-        const generic_print_param = try self.variable();
-        try env.set(self.compiler_arena, "@print", .initPoly(
-            &.{generic_print_param.Var},
-            try self.nativeFunction(&.{generic_print_param}, c(.Unit)),
-            &.{.Required},
-        ));
-
-        const genric_len_list_param = try self.variable();
-        try env.set(self.compiler_arena, "@len", .initPoly(
-            &.{genric_len_list_param.Var},
-            try self.nativeFunction(&.{try self.list(genric_len_list_param)}, c(.Integer)),
-            &.{.Required},
-        ));
-
-        const genric_nth_list_param = try self.variable();
-        try env.set(self.compiler_arena, "@nth", .initPoly(
-            &.{genric_nth_list_param.Var},
-            try self.nativeFunction(&.{ try self.list(genric_nth_list_param), c(.Integer) }, genric_nth_list_param),
-            &.{ .Required, .Required },
-        ));
+        for (native.natives) |n| {
+            const decl = try n.getDecl(self);
+            std.debug.print("name = {s}, decl = {f}\n", .{ n.name, decl });
+            try env.set(self.compiler_arena, n.name, decl);
+        }
 
         const root = try self.infer(env, expr);
 
@@ -336,8 +313,9 @@ pub const TypeChecker = struct {
     }
 
     pub fn nativeFunction(self: *TypeChecker, from: []const *const Type, to: *const Type) !*const Type {
+        const owned_from = try self.compiler_arena.dupe(*const Type, from);
         const func = try self.compiler_arena.create(Func);
-        func.* = .{ .from = from, .to = to, .is_native = true };
+        func.* = .{ .from = owned_from, .to = to, .is_native = true };
         return try self.createType(.{ .Func = func });
     }
 
@@ -458,9 +436,7 @@ pub const TypeChecker = struct {
         var vars: std.ArrayList(*Var) = .empty;
 
         for (freeVarsFromType.keys()) |v| {
-            if (!varsFromEnv.contains(v)) {
-                try vars.append(self.scratch(), v);
-            }
+            if (!varsFromEnv.contains(v)) try vars.append(self.scratch(), v);
         }
 
         return if (vars.items.len > 0) .{ .Poly = .{ .vars = vars.items, .t = t } } else .{ .Mono = t };
@@ -635,7 +611,15 @@ pub const TypeChecker = struct {
                 const param_types = try f.getParamTypes(self.scratch());
                 return try self.inferCallWithParams(env, func_t, args, param_types);
             },
-            else => return error.ExpressionNotCallable,
+            else => {
+                const t = try self.infer(env, call.function);
+                if (t.* != .Func) return error.ExpressionNotCallable;
+                var params: std.ArrayList(*const Type) = .empty;
+                for (args) |arg| try params.append(self.compiler_arena, try self.infer(env, arg));
+                const return_t = try self.variable();
+                try self.unify(t, try self.function(params.items, return_t));
+                return return_t;
+            },
         }
     }
 
