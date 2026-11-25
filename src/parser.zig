@@ -91,6 +91,7 @@ pub const Parser = struct {
     }
 
     fn parsePrecedence(self: *Parser, precedence: Precedence) !*const ast.Expression {
+        const prev_token_type = if (self.previous) |p| p.type else null;
         try self.advance();
 
         if (comptime constants.debug_parser) {
@@ -99,7 +100,7 @@ pub const Parser = struct {
         }
 
         if (getRule(self.getPrevious().type).prefix) |prefixFn| {
-            var left = try prefixFn(self);
+            var left = try prefixFn(self, prev_token_type);
             const left_owned = try self.ast_arena.create(ast.Expression);
 
             defer {
@@ -210,23 +211,27 @@ pub const Parser = struct {
     }
 };
 
-fn parseString(parser: *Parser) !ast.Expression {
+fn parseString(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
+    _ = prev_token_type;
     const token = parser.getPrevious();
     const s = token.toString();
     return .init(.{ .String = s[1 .. s.len - 1] }, token);
 }
 
-fn parseInteger(parser: *Parser) !ast.Expression {
+fn parseInteger(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
+    _ = prev_token_type;
     const token = parser.getPrevious();
     return .init(.{ .Integer = try std.fmt.parseInt(i64, token.toString(), 10) }, token);
 }
 
-fn parseFloat(parser: *Parser) !ast.Expression {
+fn parseFloat(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
+    _ = prev_token_type;
     const token = parser.getPrevious();
     return .init(.{ .Float = try std.fmt.parseFloat(f64, token.toString()) }, token);
 }
 
-fn parseLiteral(parser: *Parser) !ast.Expression {
+fn parseLiteral(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
+    _ = prev_token_type;
     const token = parser.getPrevious();
     const data: ast.ExpressionData = switch (token.type) {
         .True => .{ .Boolean = true },
@@ -236,19 +241,22 @@ fn parseLiteral(parser: *Parser) !ast.Expression {
     return .init(data, token);
 }
 
-fn parseIdentifier(parser: *Parser) !ast.Expression {
+fn parseIdentifier(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
+    _ = prev_token_type;
     const token = parser.getPrevious();
     return .init(.{ .Identifier = token.toString() }, token);
 }
 
-fn parseUnary(parser: *Parser) !ast.Expression {
+fn parseUnary(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
+    _ = prev_token_type;
     const token = parser.getPrevious();
     const operator = token.type;
     const right = try parser.parseExpression();
     return .init(.{ .Unary = .{ .operator = operator, .right = right } }, token);
 }
 
-fn parseList(parser: *Parser) !ast.Expression {
+fn parseList(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
+    _ = prev_token_type;
     const token = parser.getPrevious();
     const items = try parser.parseSeparated(
         *const ast.Expression,
@@ -263,7 +271,8 @@ fn parseList(parser: *Parser) !ast.Expression {
     return .init(.{ .List = items }, token);
 }
 
-fn parseRecord(parser: *Parser) !ast.Expression {
+fn parseRecord(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
+    _ = prev_token_type;
     const token = parser.getPrevious();
     const entries = try parser.parseSeparated(
         ast.RecordItem,
@@ -288,13 +297,14 @@ fn parseRecord(parser: *Parser) !ast.Expression {
     return .init(.{ .Record = entries.items }, token);
 }
 
-fn parseGrouping(parser: *Parser) !ast.Expression {
+fn parseGrouping(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
     const token = parser.getPrevious();
+    const in_decl = if (prev_token_type) |t| t == .Assign else false;
 
     if (try parser.match(.RParen)) {
         if (try parser.match(.Arrow)) {
             try parser.chopNewlines();
-            const name = parser.ctx.current_var_token;
+            const name = if (in_decl) parser.ctx.current_var_token else null;
             const body = try parser.parseExpression();
             return .init(.{ .Function = .{ .params = .empty, .body = body, .name = name } }, token);
         }
@@ -314,7 +324,7 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
 
     if (try parser.match(.Arrow)) {
         try parser.chopNewlines();
-        const function_name = parser.ctx.current_var_token;
+        const function_name = if (in_decl) parser.ctx.current_var_token else null;
         const body = try parser.parseExpression();
 
         var params: std.ArrayList(ast.FunctionParam) = .empty;
@@ -340,7 +350,8 @@ fn parseGrouping(parser: *Parser) !ast.Expression {
     return .init(.{ .Grouping = expressions }, token);
 }
 
-fn parseMatch(parser: *Parser) !ast.Expression {
+fn parseMatch(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
+    _ = prev_token_type;
     const token = parser.getPrevious();
     const target = try parser.parseExpression();
 
@@ -363,7 +374,8 @@ fn parseMatch(parser: *Parser) !ast.Expression {
     return .init(.{ .Match = .{ .target = target, .arms = arms } }, token);
 }
 
-fn parseIf(parser: *Parser) !ast.Expression {
+fn parseIf(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
+    _ = prev_token_type;
     const token = parser.getPrevious();
 
     var data: ast.ExpressionData = .{ .If = .{ .arms = .empty, .alt = null } };
@@ -469,7 +481,7 @@ const Precedence = enum(u8) {
 };
 
 const ParseRule = struct {
-    prefix: ?*const fn (parser: *Parser) anyerror!ast.Expression,
+    prefix: ?*const fn (parser: *Parser, prev_token_type: ?scanner.TokenType) anyerror!ast.Expression,
     infix: ?*const fn (parser: *Parser, left: ast.Expression) anyerror!ast.Expression,
     precedence: ?Precedence,
 };

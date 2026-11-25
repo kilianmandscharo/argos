@@ -38,7 +38,7 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
                 try expectExpression(expr.items[i].*, actual.Grouping.items[i].*);
             }
         },
-        .Identifier => |ident| try std.testing.expectEqualStrings(ident, actual.Identifier),
+        .Identifier => |identifier| try std.testing.expectEqualStrings(identifier, actual.Identifier),
         .String => |string| try std.testing.expectEqualStrings(string, actual.String),
         .Integer => |n| try std.testing.expectEqual(n, actual.Integer),
         .Float => |f| try std.testing.expectEqual(f, actual.Float),
@@ -56,7 +56,7 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
             if (func.name) |name| {
                 try std.testing.expectEqualStrings(name.data, actual.Function.name.?.data);
             } else {
-                try std.testing.expect(actual.Function.name == null);
+                try std.testing.expectEqual(null, actual.Function.name);
             }
             try std.testing.expectEqual(func.params.items.len, actual.Function.params.items.len);
             for (0..func.params.items.len) |i| {
@@ -1206,7 +1206,6 @@ test "function literal" {
                 },
             },
         },
-
         .{
             .description = "declare function",
             .input =
@@ -1221,6 +1220,40 @@ test "function literal" {
                                 .params = .empty,
                                 .body = &e(.{ .Unit = {} }),
                                 .name = s("foo"),
+                            },
+                        },
+                    ),
+                },
+            },
+        },
+        .{
+            .description = "nested",
+            .input =
+            \\new = list_map([1], (n) -> n * 2)
+            ,
+            .expected_expression = .{
+                .Declaration = .{
+                    .left = s("new"),
+                    .right = &e(
+                        .{
+                            .Call = .{
+                                .function = &e(.{ .Identifier = "list_map" }),
+                                .args = try test_utils.list(*const ast.Expression, a, &.{
+                                    &e(.{ .List = try test_utils.list(*const ast.Expression, a, &.{&e(.{ .Integer = 1 })}) }),
+                                    &e(.{
+                                        .Function = .{
+                                            .name = null,
+                                            .params = try test_utils.list(ast.FunctionParam, a, &.{.{ .Required = s("n") }}),
+                                            .body = &e(.{
+                                                .Binary = .{
+                                                    .left = &e(.{ .Identifier = "n" }),
+                                                    .operator = .Asterisk,
+                                                    .right = &e(.{ .Integer = 2 }),
+                                                },
+                                            }),
+                                        },
+                                    }),
+                                }),
                             },
                         },
                     ),
@@ -1508,160 +1541,3 @@ test "access" {
         runExpressionTest,
     );
 }
-
-// test "parse program" {
-//     const ProgramTestCase = struct {
-//         description: []const u8,
-//         input: []const u8,
-//         expected: ast.Program,
-//     };
-//
-//     const run = struct {
-//         fn runTest(arena: std.mem.Allocator, test_case: ProgramTestCase) anyerror!void {
-//             const ctx = try arena.create(vm.ScriptContext);
-//             ctx.* = .{
-//                 .file_name = "scanner_test",
-//                 .source = test_case.input,
-//                 .lines = .empty,
-//             };
-//
-//             const program = try parser.createAst(arena, ctx);
-//             try std.testing.expectEqual(test_case.expected.items.len, program.items.len);
-//             for (0..program.items.len) |i| {
-//                 try expectStatement(test_case.expected.items[i], program.items[i]);
-//             }
-//         }
-//     }.runTest;
-//
-//     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-//     defer arena.deinit();
-//     const a = arena.allocator();
-//
-//     const test_cases = [_]ProgramTestCase{
-//         .{
-//             .description = "fibonacci",
-//             .input =
-//             \\let fib = fn(n) {
-//             \\    let a = 0
-//             \\    let b = 1
-//             \\    for (0..n) |_| {
-//             \\        let tmp = b
-//             \\        b = a + b
-//             \\        a = tmp
-//             \\    }
-//             \\    return a
-//             \\}
-//             \\
-//             \\print(fib(30))
-//             ,
-//             .expected = try test_utils.list(ast.Statement, a, &.{
-//                 .{
-//                     .VarDeclaration = .{
-//                         .name = s("fib"),
-//                         .expression = &e(.{
-//                             .Function = .{
-//                                 .name = "fib",
-//                                 .params = try test_utils.list(ast.FunctionParam, a, &.{
-//                                     .{ .Required = s("n") },
-//                                 }),
-//                                 .body = &e(.{
-//                                     .Block = try test_utils.list(ast.Statement, a, &.{
-//                                         .{
-//                                             .VarDeclaration = .{
-//                                                 .name = s("a"),
-//                                                 .expression = &e(.{ .Integer = 0 }),
-//                                             },
-//                                         },
-//                                         .{
-//                                             .VarDeclaration = .{
-//                                                 .name = s("b"),
-//                                                 .expression = &e(.{ .Integer = 1 }),
-//                                             },
-//                                         },
-//                                         .{
-//                                             .For = .{
-//                                                 .expression = &e(.{
-//                                                     .Range = .{
-//                                                         .start = &e(.{ .Integer = 0 }),
-//                                                         .end = &e(.{ .Identifier = "n" }),
-//                                                     },
-//                                                 }),
-//                                                 .capture = s("_"),
-//                                                 .index = null,
-//                                                 .body = &.{
-//                                                     .Expression = &e(
-//                                                         .{
-//                                                             .Block = try test_utils.list(
-//                                                                 ast.Statement,
-//                                                                 a,
-//                                                                 &.{
-//                                                                     .{
-//                                                                         .VarDeclaration = .{
-//                                                                             .name = s("tmp"),
-//                                                                             .expression = &e(.{ .Identifier = "b" }),
-//                                                                         },
-//                                                                     },
-//                                                                     .{
-//                                                                         .Assignment = .{
-//                                                                             .target = .{ .Identifier = s("b") },
-//                                                                             .expression = &e(.{
-//                                                                                 .Infix = .{
-//                                                                                     .left = &e(.{ .Identifier = "a" }),
-//                                                                                     .right = &e(.{ .Identifier = "b" }),
-//                                                                                     .operator = .Plus,
-//                                                                                 },
-//                                                                             }),
-//                                                                         },
-//                                                                     },
-//                                                                     .{
-//                                                                         .Assignment = .{
-//                                                                             .target = .{ .Identifier = s("a") },
-//                                                                             .expression = &e(.{ .Identifier = "tmp" }),
-//                                                                         },
-//                                                                     },
-//                                                                 },
-//                                                             ),
-//                                                         },
-//                                                     ),
-//                                                 },
-//                                             },
-//                                         },
-//                                         .{
-//                                             .Return = &e(.{ .Identifier = "a" }),
-//                                         },
-//                                     }),
-//                                 }),
-//                             },
-//                         }),
-//                     },
-//                 },
-//                 .{
-//                     .Expression = &e(.{
-//                         .Call = .{
-//                             .function = &e(.{ .Identifier = "print" }),
-//                             .args = try test_utils.list(ast.FunctionArg, a, &.{
-//                                 .{
-//                                     .Required = &e(.{
-//                                         .Call = .{
-//                                             .function = &e(.{ .Identifier = "fib" }),
-//                                             .args = try test_utils.list(ast.FunctionArg, a, &.{
-//                                                 .{ .Required = &e(.{ .Integer = 30 }) },
-//                                             }),
-//                                         },
-//                                     }),
-//                                 },
-//                             }),
-//                         },
-//                     }),
-//                 },
-//             }),
-//         },
-//     };
-//
-//     try test_utils.runTestsWithArena(
-//         ProgramTestCase,
-//         "parse program",
-//         &test_cases,
-//         run,
-//     );
-// }
