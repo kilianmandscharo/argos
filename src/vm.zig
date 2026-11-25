@@ -331,8 +331,13 @@ pub const VirtualMachine = struct {
                     const a = self.peekTop();
                     self.swapTop(value.wrapFloat(a.Float - b.Float));
                 },
-                .Concat => {
-                    const result = try self.concatenate();
+                .ConcatString => {
+                    const result = try self.concatenateString();
+                    _ = self.pop();
+                    self.swapTop(result);
+                },
+                .ConcatList => {
+                    const result = try self.concatenateList();
                     _ = self.pop();
                     self.swapTop(result);
                 },
@@ -371,7 +376,7 @@ pub const VirtualMachine = struct {
                 .Equal => {
                     const b = self.pop();
                     const a = self.peekTop();
-                    self.swapTop(value.wrapBool(try isEqual(a, b)));
+                    self.swapTop(value.wrapBool(isEqual(a, b)));
                 },
                 .GreaterInt => {
                     const b = self.pop();
@@ -462,7 +467,7 @@ pub const VirtualMachine = struct {
                 },
                 .JumpIfNotEq => {
                     const offset = readU16(&ip, frame);
-                    if (!try isEqual(self.peek(1), self.peekTop())) {
+                    if (!isEqual(self.peek(1), self.peekTop())) {
                         ip += offset;
                     }
                 },
@@ -583,7 +588,7 @@ pub const VirtualMachine = struct {
         };
     }
 
-    fn concatenate(self: *VirtualMachine) !value.Value {
+    fn concatenateString(self: *VirtualMachine) !value.Value {
         const left = self.peek(1).asObj().asString().chars;
         const right = self.peekTop().asObj().asString().chars;
 
@@ -605,25 +610,62 @@ pub const VirtualMachine = struct {
         return result;
     }
 
+    fn concatenateList(self: *VirtualMachine) !value.Value {
+        const left = self.peek(1).asObj().asList();
+        const right = self.peekTop().asObj().asList();
+
+        const new_list = try self.runtime_allocator.allocateList();
+        self.push(value.wrapObj(&new_list.obj));
+
+        var it_left = left.iterator();
+        while (it_left.next()) |item| try new_list.prepend(self.runtime_allocator, item.value);
+
+        var it_right = right.iterator();
+        while (it_right.next()) |item| try new_list.prepend(self.runtime_allocator, item.value);
+
+        new_list.reverse_in_place();
+
+        return self.pop();
+    }
+
     fn isFalsey(val: value.Value) bool {
         return val == .Bool and !val.Bool;
     }
 
-    fn isEqual(a: value.Value, b: value.Value) !bool {
+    fn isEqual(a: value.Value, b: value.Value) bool {
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) {
             return false;
         }
-        switch (a) {
-            .Int => return a.Int == b.Int,
-            .Float => return a.Float == b.Float,
-            .Bool => return a.Bool == b.Bool,
-            .Unit => return true,
+        return switch (a) {
+            .Int => a.Int == b.Int,
+            .Float => a.Float == b.Float,
+            .Bool => a.Bool == b.Bool,
+            .Unit => true,
             .Obj => |obj| {
-                if (obj.type != b.Obj.type) return false;
-                const a_string = obj.asString();
-                const b_string = b.Obj.asString();
-                return a_string == b_string;
+                if (obj == b.asObj()) return true;
+                switch (obj.type) {
+                    .String, .Function, .NativeFn, .Closure, .Upvalue => return obj == b.asObj(),
+                    .List => {
+                        var it_a = obj.asList().iterator();
+                        var it_b = b.asObj().asList().iterator();
+                        while (true) {
+                            const first = it_a.next();
+                            const second = it_b.next();
+                            if (first == null and second == null) return true;
+                            if (first == null or second == null) return false;
+                            if (!isEqual(first.?.value, second.?.value)) return false;
+                        }
+                    },
+                    .ListItem => return isEqual(a.asObj().asListItem().value, b.asObj().asListItem().value),
+                    .Record => {
+                        const first = obj.asRecord();
+                        const second = b.asObj().asRecord();
+                        if (first.fields.len != second.fields.len) return false;
+                        for (0..first.fields.len) |i| if (!isEqual(first.fields[i], second.fields[i])) return false;
+                        return true;
+                    },
+                }
             },
-        }
+        };
     }
 };

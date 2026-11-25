@@ -131,6 +131,42 @@ pub const natives: []const Native = &.{
         }.getDecl,
     },
     .{
+        .name = "int_from_float",
+        .function = struct {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+                _ = vm;
+                const val = args[0].Float;
+                return value.wrapInt(@intFromFloat(val));
+            }
+        }.native,
+        .getDecl = struct {
+            fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
+                return .initMono(
+                    try type_checker.nativeFunction(&.{c(.Float)}, c(.Integer)),
+                    &.{.Required},
+                );
+            }
+        }.getDecl,
+    },
+    .{
+        .name = "float_from_int",
+        .function = struct {
+            fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {
+                _ = vm;
+                const val = args[0].Int;
+                return value.wrapFloat(@floatFromInt(val));
+            }
+        }.native,
+        .getDecl = struct {
+            fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
+                return .initMono(
+                    try type_checker.nativeFunction(&.{c(.Integer)}, c(.Float)),
+                    &.{.Required},
+                );
+            }
+        }.getDecl,
+    },
+    .{
         .name = "list_len",
         .function = struct {
             fn native(vm: *virtual_machine.VirtualMachine, args: []value.Value) !value.Value {

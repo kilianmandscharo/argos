@@ -609,10 +609,16 @@ pub const Compiler = struct {
                 } else {
                     try self.compileExpression(binary.right);
                     switch (binary.operator) {
-                        .Plus => switch (self.getType(binary.left).Const) {
-                            .Integer => try self.emitOp(.AddInt),
-                            .Float => try self.emitOp(.AddFloat),
-                            .String => try self.emitOp(.Concat),
+                        .Plus => switch (self.getType(binary.left).*) {
+                            .Const => |c| {
+                                switch (c) {
+                                    .Integer => try self.emitOp(.AddInt),
+                                    .Float => try self.emitOp(.AddFloat),
+                                    .String => try self.emitOp(.ConcatString),
+                                    else => return error.InvalidTypeForAdd,
+                                }
+                            },
+                            .List => try self.emitOp(.ConcatList),
                             else => return error.InvalidTypeForAdd,
                         },
                         .Minus => switch (self.getType(binary.left).Const) {

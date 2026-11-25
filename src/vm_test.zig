@@ -609,6 +609,20 @@ test "record tests" {
             \\assert(result == 5)
             ,
         },
+        .{
+            .description = "equality",
+            .source =
+            \\a = { foo = 1, bar = 2 }
+            \\ref = a
+            \\b = { foo = 1, bar = 2 }
+            \\c = { foo = 2, bar = 3 }
+            \\e = { bar = 2, foo = 1 }
+            \\assert(a == ref and ref == a)
+            \\assert(a == b and b == a)
+            \\assert(a != c and c != a)
+            \\assert(a == e and e == a)
+            ,
+        },
     };
 
     try test_utils.runTests(TestCase, "evaluate record tests", &test_cases, run);
@@ -700,6 +714,46 @@ test "string tests" {
     };
 
     try test_utils.runTests(TestCase, "evaluate string tests", &test_cases, run);
+}
+
+test "number tests" {
+    const test_cases = [_]TestCase{
+        .{
+            .description = "float from int",
+            .source =
+            \\assert(float_from_int(5) == 5.0)
+            ,
+        },
+        .{
+            .description = "int from float",
+            .source =
+            \\assert(int_from_float(5.312) == 5)
+            ,
+        },
+        .{
+            .description = "equality",
+            .source =
+            \\assert(1 == 1)
+            \\assert(1 != 2)
+            \\assert(1.0 == 1.0)
+            \\assert(1.0 != 2.3)
+            ,
+        },
+        .{
+            .description = "equality upvalue",
+            .source =
+            \\foo = () -> (
+            \\    x = 1
+            \\    () -> x
+            \\)
+            \\func = foo()
+            \\result = func()
+            \\print(result == 1)
+            ,
+        },
+    };
+
+    try test_utils.runTests(TestCase, "evaluate number tests", &test_cases, run);
 }
 
 test "list tests" {
@@ -882,6 +936,38 @@ test "list tests" {
             \\new = list_filter([1, 2, 3], (n) -> n % 2 == 0)
             \\assert(list_len(new) == 1)
             \\assert(list_get(new, 0) == 2)
+            ,
+        },
+        .{
+            .description = "concat",
+            .source =
+            \\a = [1, 2, 3]
+            \\b = [4, 5, 6]
+            \\c = a + b
+            \\assert(list_len(c) == 6)
+            \\assert(list_get(c, 0) == 1)
+            \\assert(list_get(c, 1) == 2)
+            \\assert(list_get(c, 2) == 3)
+            \\assert(list_get(c, 3) == 4)
+            \\assert(list_get(c, 4) == 5)
+            \\assert(list_get(c, 5) == 6)
+            ,
+        },
+        .{
+            .description = "equality",
+            .source =
+            \\a = [1, 2, 3]
+            \\b = a
+            \\c = [1, 2, 3]
+            \\d = [1, 2, 3, 4]
+            \\e = [5, 6, 7]
+            \\assert(a == b)
+            \\assert(a == c)
+            \\assert(b == c)
+            \\assert(a != d)
+            \\assert(d != a)
+            \\assert(a != e)
+            \\assert(e != a)
             ,
         },
     };

@@ -39,14 +39,11 @@ pub const Type = union(enum) {
         return switch (class) {
             .Plus => switch (self.*) {
                 .Const => |c| c == .Integer or c == .Float or c == .String,
+                .List => true,
                 else => false,
             },
             .Num => switch (self.*) {
                 .Const => |c| c == .Integer or c == .Float,
-                else => false,
-            },
-            .Eq => switch (self.*) {
-                .Const => true,
                 else => false,
             },
             .Ord => switch (self.*) {
@@ -124,7 +121,7 @@ const Const = enum {
     Boolean,
 };
 
-pub const Class = enum { Plus, Num, Eq, Ord };
+pub const Class = enum { Plus, Num, Ord };
 
 pub const Var = struct {
     id: u32,
@@ -712,7 +709,6 @@ pub const TypeChecker = struct {
                     },
                     .Eq, .NotEq => {
                         try self.unify(lt, rt);
-                        try constrain(lt, .Eq);
                         return c(.Boolean);
                     },
                     .Gt, .GtOrEq, .Lt, .LtOrEq => {

@@ -230,6 +230,10 @@ pub const ObjList = struct {
         return null;
     }
 
+    pub fn reverse_in_place(self: *ObjList) void {
+        std.SinglyLinkedList.Node.reverse(&self.data.first);
+    }
+
     pub fn len(self: *ObjList) usize {
         return self.data.len();
     }

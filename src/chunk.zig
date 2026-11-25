@@ -19,7 +19,8 @@ pub const OpCode = enum(u8) {
 
     AddInt,
     AddFloat,
-    Concat,
+    ConcatString,
+    ConcatList,
 
     SubtractInt,
     SubtractFloat,
@@ -141,7 +142,8 @@ pub const Chunk = struct {
             .Cons => return simpleInstruction("OP_CONS", offset),
             .AddInt => return simpleInstruction("OP_ADD_INT", offset),
             .AddFloat => return simpleInstruction("OP_ADD_FLOAT", offset),
-            .Concat => return simpleInstruction("OP_CONCAT", offset),
+            .ConcatString => return simpleInstruction("OP_CONCAT_STRING", offset),
+            .ConcatList => return simpleInstruction("OP_CONCAT_LIST", offset),
             .SubtractInt => return simpleInstruction("OP_SUBTRACT_INT", offset),
             .SubtractFloat => return simpleInstruction("OP_SUBTRACT_FLOAT", offset),
             .MultiplyInt => return simpleInstruction("OP_MULTIPLY_INT", offset),
