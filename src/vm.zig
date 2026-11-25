@@ -644,7 +644,7 @@ pub const VirtualMachine = struct {
             .Obj => |obj| {
                 if (obj == b.asObj()) return true;
                 switch (obj.type) {
-                    .String, .Function, .NativeFn, .Closure, .Upvalue => return obj == b.asObj(),
+                    .String, .Function, .NativeFn, .Closure, .Upvalue => return false,
                     .List => {
                         var it_a = obj.asList().iterator();
                         var it_b = b.asObj().asList().iterator();

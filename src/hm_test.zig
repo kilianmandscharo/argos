@@ -179,13 +179,13 @@ test "type checker" {
         .{ .description = "eq string", .source = "\"a\" == \"a\"", .expected = c(.Boolean) },
         .{ .description = "eq boolean", .source = "true == false", .expected = c(.Boolean) },
         .{ .description = "eq mismatch", .source = "1 == \"a\"", .expect_error = error.CantUnify },
-        .{ .description = "eq constrain", .source = "(a, b) -> a == b", .expected = try binaryTo(alloc, .initMany(&.{.Eq}), c(.Boolean)) },
+        .{ .description = "eq constrain", .source = "(a, b) -> a == b", .expected = try binaryTo(alloc, .initMany(&.{}), c(.Boolean)) },
 
         .{ .description = "not eq integer", .source = "1 != 2", .expected = c(.Boolean) },
         .{ .description = "not eq string", .source = "\"a\" != \"b\"", .expected = c(.Boolean) },
         .{ .description = "not eq boolean", .source = "true != false", .expected = c(.Boolean) },
         .{ .description = "not eq mismatch", .source = "1 != true", .expect_error = error.CantUnify },
-        .{ .description = "not eq constrain", .source = "(a, b) -> a != b", .expected = try binaryTo(alloc, .initMany(&.{.Eq}), c(.Boolean)) },
+        .{ .description = "not eq constrain", .source = "(a, b) -> a != b", .expected = try binaryTo(alloc, .initMany(&.{}), c(.Boolean)) },
 
         .{ .description = "gt integer", .source = "2 > 1", .expected = c(.Boolean) },
         .{ .description = "gt float", .source = "2.0 > 1.0", .expected = c(.Boolean) },
