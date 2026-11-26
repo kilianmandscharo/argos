@@ -674,15 +674,24 @@ pub const TypeChecker = struct {
                 const t = try self.infer(env, unary.right);
                 switch (unary.operator) {
                     .Minus => {
-                        try constrain(t, .Num);
+                        constrain(t, .Num) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected Num on right side of '-'");
+                            return err;
+                        };
                         return t;
                     },
                     .Bang => {
-                        try self.unify(t, c(.Boolean));
+                        self.unify(t, c(.Boolean)) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected boolean on right side of '!'");
+                            return err;
+                        };
                         return c(.Boolean);
                     },
                     .Tilde => {
-                        try self.unify(t, c(.Integer));
+                        self.unify(t, c(.Integer)) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected integer on right side of '~'");
+                            return err;
+                        };
                         return c(.Integer);
                     },
                     else => return error.InvalidUnaryOperator,

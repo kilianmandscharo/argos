@@ -22,6 +22,7 @@ pub const ScriptContext = struct {
     source: []const u8,
     file_name: []const u8,
     static_arena: std.mem.Allocator,
+    line_offset: usize = 0,
 
     pub fn appendLine(self: *ScriptContext, l: scanner.Line) !void {
         try self.lines.append(self.static_arena, l);
@@ -29,7 +30,7 @@ pub const ScriptContext = struct {
 
     fn findSpanStart(self: *ScriptContext, span: ast.Span) struct { col: usize, line: scanner.Line } {
         var start = span.start;
-        for (self.lines.items) |l| {
+        for (self.lines.items[self.line_offset..]) |l| {
             const len = l.end - l.start;
             if (len <= start) {
                 start -= len;
@@ -43,7 +44,6 @@ pub const ScriptContext = struct {
 
     pub fn markSpan(self: *ScriptContext, span: ast.Span, message: []const u8) void {
         const result = self.findSpanStart(span);
-
         const span_len = span.end - span.start;
         const line = std.mem.trim(u8, self.source[result.line.start..result.line.end], &.{'\n'});
 
@@ -90,15 +90,20 @@ pub const TableGlobals = std.HashMapUnmanaged(*object.ObjString, value.Value, St
 pub fn run(io: std.Io, gpa: std.mem.Allocator, static_arena: std.mem.Allocator, file_name: []const u8, source: []const u8) !InterpretResult {
     if (comptime constants.debug_trace_execution) logDebug("Starting pre-compilation...", .{});
 
+    var line_offset: usize = 0;
     var buf: std.Io.Writer.Allocating = .init(static_arena);
-    for (native.raw_natives) |n| try buf.writer.print("{s}\n", .{n.function});
-    try buf.writer.print("{s}", .{source});
+    for (native.raw_natives) |n| {
+        try buf.writer.print("{s}\n", .{n.function});
+        line_offset += std.mem.count(u8, n.function, "\n") + 1;
+    }
+    try buf.writer.print("{s}", .{std.mem.trim(u8, source, &.{'\n'})});
 
     var script_context = ScriptContext{
         .file_name = file_name,
         .source = buf.written(),
         .lines = .empty,
         .static_arena = static_arena,
+        .line_offset = line_offset,
     };
 
     var ast_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);

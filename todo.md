@@ -9,3 +9,4 @@
 - rework error messages
 - implement bytes
 - check how native generics are handled
+- if something like "~5" comes on the line after a match the tilde is swallowed by the match expression

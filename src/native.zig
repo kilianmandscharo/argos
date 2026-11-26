@@ -24,9 +24,9 @@ pub const raw_natives: []const NativeRaw = &.{
         .name = "list_map",
         .function =
         \\list_map = (list, fn, acc = []) -> 
-        \\    match list with
+        \\    (match list with
         \\    | [] -> list_reverse(acc)
-        \\    | h :: t -> list_map(t, fn, fn(h) :: acc)
+        \\    | h :: t -> list_map(t, fn, fn(h) :: acc))
         ,
         .getDecl = struct {
             fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {
@@ -48,9 +48,9 @@ pub const raw_natives: []const NativeRaw = &.{
         .name = "list_filter",
         .function =
         \\list_filter = (list, fn, acc = []) -> 
-        \\    match list with
+        \\    (match list with
         \\    | [] -> list_reverse(acc)
-        \\    | h :: t -> list_filter(t, fn, if fn(h) then h :: acc else acc)
+        \\    | h :: t -> list_filter(t, fn, if fn(h) then h :: acc else acc))
         ,
         .getDecl = struct {
             fn getDecl(type_checker: *hm.TypeChecker) anyerror!hm.Declaration {

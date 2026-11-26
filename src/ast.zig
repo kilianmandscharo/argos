@@ -25,7 +25,7 @@ pub const Expression = struct {
     ) std.Io.Writer.Error!void {
         try writer.print("{s}", .{@tagName(self.data)});
         switch (self.data) {
-            .Declaration => |v| try writer.print(" \"{s}\"", .{v.left.data}),
+            .Declaration => |v| try writer.print(" \"{s}\"", .{v.left}),
             .Identifier => |v| try writer.print(" \"{s}\"", .{v}),
             .Integer => |v| try writer.print(" {d}", .{v}),
             .Float => |v| try writer.print(" {d}", .{v}),
@@ -38,7 +38,7 @@ pub const Expression = struct {
                     else => {},
                 }
             },
-            .Access => |access| try writer.print(" of field {s}", .{access.right.data}),
+            .Access => |access| try writer.print(" of field {s}", .{access.right}),
             else => {},
         }
     }
