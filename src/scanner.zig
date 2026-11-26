@@ -63,70 +63,13 @@ pub const TokenType = enum {
 pub const Token = struct {
     data: []const u8,
     type: TokenType,
-    line: u32,
-    column: u32,
-
-    pub fn dummy() @This() {
-        return .{
-            .data = "",
-            .type = .Eof,
-            .line = 0,
-            .column = 0,
-        };
-    }
-
-    pub fn dummyWithName(name: []const u8) @This() {
-        var token = dummy();
-        token.data = name;
-        return token;
-    }
+    start: usize,
+    end: usize,
 
     pub fn toString(self: Token) []const u8 {
         if (self.type == .NewLine) return "<newline>";
         if (self.type == .Eof) return "EOF";
         return self.data;
-    }
-
-    pub fn format(
-        self: @This(),
-        writer: anytype,
-    ) !void {
-        try writer.print("{s}({s}:{d}:{d})", .{ @tagName(self.type), self.data, self.line + 1, self.column + 1 });
-    }
-
-    pub fn printError(
-        self: @This(),
-        message: []const u8,
-        script_context: *vm.ScriptContext,
-        module: []const u8,
-    ) void {
-        const line = script_context.lines.items[self.line];
-        var end = line.end;
-
-        if (end == 0) {
-            end = line.start;
-            while (end < script_context.source.len and script_context.source[end] != '\n') {
-                end += 1;
-            }
-        }
-
-        std.debug.print("{s}:{d}:{d}: error: {s}\n{s}\n", .{
-            script_context.file_name,
-            line.no + 1,
-            self.column + 1,
-            message,
-            script_context.source[line.start .. end],
-        });
-
-        for (0..self.column) |_| {
-            std.debug.print(" ", .{});
-        }
-
-        for (0..self.data.len) |_| {
-            std.debug.print("^", .{});
-        }
-
-        std.debug.print("\n{s}Error\n", .{module});
     }
 };
 
@@ -136,11 +79,7 @@ pub const Line = struct {
     no: u32,
 
     pub fn init(start: u32, no: u32) @This() {
-        return .{
-            .start = start,
-            .end = 0,
-            .no = no,
-        };
+        return .{ .start = start, .end = 0, .no = no };
     }
 };
 
@@ -154,20 +93,15 @@ pub const Scanner = struct {
 
     pub fn init(script_context: *vm.ScriptContext) !Scanner {
         try script_context.appendLine(.init(0, 0));
-        return .{
-            .start = 0,
-            .current = 0,
-            .column = 0,
-            .script_context = script_context,
-        };
+        return .{ .start = 0, .current = 0, .column = 0, .script_context = script_context };
     }
 
     pub fn makeToken(self: *Scanner, token_type: TokenType) Token {
         return .{
             .data = self.script_context.source[self.start..self.current],
             .type = token_type,
-            .line = self.currentLine().no,
-            .column = self.column - @as(u32, @intCast(self.current - self.start)),
+            .start = self.start,
+            .end = self.current,
         };
     }
 
@@ -183,6 +117,8 @@ pub const Scanner = struct {
     pub fn advance(self: *Scanner) u8 {
         self.column += 1;
         self.current += 1;
+        var line = self.currentLine();
+        line.end = @intCast(self.current);
         return self.script_context.source[self.current - 1];
     }
 

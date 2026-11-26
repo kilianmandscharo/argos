@@ -9,6 +9,7 @@ const logging = @import("logging.zig");
 const constants = @import("constants.zig");
 const parser = @import("parser.zig");
 const memory = @import("memory.zig");
+const ast = @import("ast.zig");
 
 const InterpretResult = enum {
     Ok,
@@ -24,6 +25,39 @@ pub const ScriptContext = struct {
 
     pub fn appendLine(self: *ScriptContext, l: scanner.Line) !void {
         try self.lines.append(self.static_arena, l);
+    }
+
+    fn findSpanStart(self: *ScriptContext, span: ast.Span) struct { col: usize, line: scanner.Line } {
+        var start = span.start;
+        for (self.lines.items) |l| {
+            const len = l.end - l.start;
+            if (len <= start) {
+                start -= len;
+                continue;
+            }
+            return .{ .col = start, .line = l };
+        }
+        const line = self.lines.items[self.lines.items.len - 1];
+        return .{ .line = line, .col = span.start - line.start };
+    }
+
+    pub fn markSpan(self: *ScriptContext, span: ast.Span, message: []const u8) void {
+        const result = self.findSpanStart(span);
+
+        const span_len = span.end - span.start;
+        const line = std.mem.trim(u8, self.source[result.line.start..result.line.end], &.{'\n'});
+
+        std.debug.print("{s}:{d}:{d}: error: {s}\n{s}\n", .{
+            self.file_name,
+            result.line.no + 1,
+            result.col + 1,
+            message,
+            line,
+        });
+
+        for (0..result.col) |_| std.debug.print(" ", .{});
+        for (0..if (span_len > 0) span_len else 1) |_| std.debug.print("^", .{});
+        std.debug.print("\n", .{});
     }
 };
 
@@ -68,7 +102,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, static_arena: std.mem.Allocator, 
     };
 
     var ast_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const ast = try parser.createAst(ast_arena.allocator(), &script_context);
+    const program = try parser.createAst(ast_arena.allocator(), &script_context);
 
     var vm = try static_arena.create(VirtualMachine);
     var cm = try static_arena.create(compiler.Compiler);
@@ -83,7 +117,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, static_arena: std.mem.Allocator, 
 
     if (comptime constants.debug_trace_execution) logDebug("Compiling...", .{});
 
-    const function = try cm.compile(ast);
+    const function = try cm.compile(program);
     cm.deinit();
     ast_arena.deinit();
 

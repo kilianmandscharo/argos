@@ -1,1 +1,1 @@
-new = list_map([1], (n) -> n * 2)
+a."foo"

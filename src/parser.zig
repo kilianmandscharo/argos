@@ -20,7 +20,7 @@ pub const Parser = struct {
     debug_indent: usize = 0,
     script_context: *vm.ScriptContext,
     ctx: struct {
-        current_var_token: ?scanner.Token,
+        current_decl_name: ?[]const u8,
     },
 
     pub fn init(ast_arena: std.mem.Allocator, s: *scanner.Scanner, script_context: *vm.ScriptContext) !Parser {
@@ -35,7 +35,7 @@ pub const Parser = struct {
             .previous = null,
             .ast_arena = ast_arena,
             .ctx = .{
-                .current_var_token = null,
+                .current_decl_name = null,
             },
         };
     }
@@ -70,7 +70,7 @@ pub const Parser = struct {
 
         const grouping = try self.createExpression(.{
             .data = .{ .Grouping = expressions.items },
-            .token = scanner.Token.dummy(),
+            .span = .init(0, self.current.end),
         });
 
         const program = try self.createExpression(.{
@@ -80,7 +80,7 @@ pub const Parser = struct {
                     .body = grouping,
                 },
             },
-            .token = scanner.Token.dummy(),
+            .span = .init(0, self.current.end),
         });
 
         return program;
@@ -198,15 +198,16 @@ pub const Parser = struct {
     }
 
     fn errorAtCurrent(self: *Parser, message: []const u8) anyerror {
-        return self.errorAt(self.current, message);
+        return self.errorAt(.init(self.current.start, self.current.end), message);
     }
 
     fn errorAtPrevious(self: *Parser, message: []const u8) anyerror {
-        return self.errorAt(self.getPrevious(), message);
+        const prev = self.getPrevious();
+        return self.errorAt(.init(prev.start, prev.end), message);
     }
 
-    fn errorAt(self: *Parser, token: scanner.Token, message: []const u8) anyerror {
-        token.printError(message, self.script_context, "Parser");
+    fn errorAt(self: *Parser, span: ast.Span, message: []const u8) anyerror {
+        self.script_context.markSpan(span, message);
         return error.ParserError;
     }
 };
@@ -215,19 +216,19 @@ fn parseString(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expres
     _ = prev_token_type;
     const token = parser.getPrevious();
     const s = token.toString();
-    return .init(.{ .String = s[1 .. s.len - 1] }, token);
+    return .init(.{ .String = s[1 .. s.len - 1] }, .init(token.start, token.end));
 }
 
 fn parseInteger(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
     _ = prev_token_type;
     const token = parser.getPrevious();
-    return .init(.{ .Integer = try std.fmt.parseInt(i64, token.toString(), 10) }, token);
+    return .init(.{ .Integer = try std.fmt.parseInt(i64, token.toString(), 10) }, .init(token.start, token.end));
 }
 
 fn parseFloat(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
     _ = prev_token_type;
     const token = parser.getPrevious();
-    return .init(.{ .Float = try std.fmt.parseFloat(f64, token.toString()) }, token);
+    return .init(.{ .Float = try std.fmt.parseFloat(f64, token.toString()) }, .init(token.start, token.end));
 }
 
 fn parseLiteral(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
@@ -238,13 +239,13 @@ fn parseLiteral(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expre
         .False => .{ .Boolean = false },
         else => unreachable,
     };
-    return .init(data, token);
+    return .init(data, .init(token.start, token.end));
 }
 
 fn parseIdentifier(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
     _ = prev_token_type;
     const token = parser.getPrevious();
-    return .init(.{ .Identifier = token.toString() }, token);
+    return .init(.{ .Identifier = token.toString() }, .init(token.start, token.end));
 }
 
 fn parseUnary(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
@@ -252,7 +253,7 @@ fn parseUnary(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Express
     const token = parser.getPrevious();
     const operator = token.type;
     const right = try parser.parseExpression();
-    return .init(.{ .Unary = .{ .operator = operator, .right = right } }, token);
+    return .init(.{ .Unary = .{ .operator = operator, .right = right } }, .init(token.start, right.span.end));
 }
 
 fn parseList(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
@@ -268,7 +269,7 @@ fn parseList(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expressi
         .RBracket,
         .Comma,
     );
-    return .init(.{ .List = items.items }, token);
+    return .init(.{ .List = items.items }, .init(token.start, parser.current.end));
 }
 
 fn parseRecord(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
@@ -280,7 +281,7 @@ fn parseRecord(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expres
             fn parse(p: *Parser) !ast.RecordItem {
                 const expr = try p.parseExpression();
                 if (expr.data != .Declaration) {
-                    return p.errorAt(expr.token, "expected declaration in record");
+                    return p.errorAt(expr.span, "expected declaration in record");
                 }
                 return .{ .key = expr.data.Declaration.left, .value = expr.data.Declaration.right };
             }
@@ -291,10 +292,10 @@ fn parseRecord(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expres
     std.mem.sort(ast.RecordItem, entries.items, {}, struct {
         fn lessThan(ctx: void, a: ast.RecordItem, b: ast.RecordItem) bool {
             _ = ctx;
-            return std.mem.lessThan(u8, a.key.data, b.key.data);
+            return std.mem.lessThan(u8, a.key, b.key);
         }
     }.lessThan);
-    return .init(.{ .Record = entries.items }, token);
+    return .init(.{ .Record = entries.items }, .init(token.start, parser.current.end));
 }
 
 fn parseGrouping(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
@@ -304,11 +305,11 @@ fn parseGrouping(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expr
     if (try parser.match(.RParen)) {
         if (try parser.match(.Arrow)) {
             try parser.chopNewlines();
-            const name = if (in_decl) parser.ctx.current_var_token else null;
+            const name = if (in_decl) parser.ctx.current_decl_name else null;
             const body = try parser.parseExpression();
-            return .init(.{ .Function = .{ .params = &.{}, .body = body, .name = name } }, token);
+            return .init(.{ .Function = .{ .params = &.{}, .body = body, .name = name } }, .init(token.start, parser.current.end));
         }
-        return .init(.{ .Unit = {} }, token);
+        return .init(.{ .Unit = {} }, .init(token.start, parser.current.end));
     }
 
     const expressions = try parser.parseSeparated(
@@ -324,7 +325,7 @@ fn parseGrouping(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expr
 
     if (try parser.match(.Arrow)) {
         try parser.chopNewlines();
-        const function_name = if (in_decl) parser.ctx.current_var_token else null;
+        const function_name = if (in_decl) parser.ctx.current_decl_name else null;
         const body = try parser.parseExpression();
 
         var params: std.ArrayList(ast.FunctionParam) = .empty;
@@ -334,20 +335,20 @@ fn parseGrouping(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expr
                 const value = expr.data.Declaration.right;
                 try params.append(parser.ast_arena, .{ .Default = .{ .name = paramName, .value = value } });
             } else if (expr.data == .Identifier) {
-                try params.append(parser.ast_arena, .{ .Required = expr.token });
+                try params.append(parser.ast_arena, .{ .Required = expr.data.Identifier });
             } else {
                 return parser.errorAtPrevious("invalid function parameter");
             }
         }
 
-        return .init(.{ .Function = .{ .params = params.items, .body = body, .name = function_name } }, token);
+        return .init(.{ .Function = .{ .params = params.items, .body = body, .name = function_name } }, .init(token.start, parser.current.end));
     }
 
     if (expressions.items.len == 1) {
         return expressions.items[0].*;
     }
 
-    return .init(.{ .Grouping = expressions.items }, token);
+    return .init(.{ .Grouping = expressions.items }, .init(token.start, parser.current.end));
 }
 
 fn parseMatch(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
@@ -371,7 +372,7 @@ fn parseMatch(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Express
         try arms.append(parser.ast_arena, .{ .pattern = pattern, .expression = expression });
     }
 
-    return .init(.{ .Match = .{ .target = target, .arms = arms.items } }, token);
+    return .init(.{ .Match = .{ .target = target, .arms = arms.items } }, .init(token.start, parser.current.end));
 }
 
 fn parseIf(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
@@ -410,7 +411,7 @@ fn parseIf(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression
     }
 
     data.If.arms = arms.items;
-    return .init(data, token);
+    return .init(data, .init(token.start, parser.current.end));
 }
 
 fn parseBinary(parser: *Parser, left: ast.Expression) !ast.Expression {
@@ -419,7 +420,7 @@ fn parseBinary(parser: *Parser, left: ast.Expression) !ast.Expression {
 
     const left_owned = try parser.createExpression(left);
 
-    return .init(.{ .Binary = .{ .operator = operator, .left = left_owned, .right = right } }, left.token);
+    return .init(.{ .Binary = .{ .operator = operator, .left = left_owned, .right = right } }, .init(left.span.start, right.span.end));
 }
 
 fn parseDot(parser: *Parser, left: ast.Expression) !ast.Expression {
@@ -427,7 +428,7 @@ fn parseDot(parser: *Parser, left: ast.Expression) !ast.Expression {
     switch (right.data) {
         .Identifier => {
             const left_owned = try parser.createExpression(left);
-            return .init(.{ .Access = .{ .left = left_owned, .right = right.token } }, left.token);
+            return .init(.{ .Access = .{ .left = left_owned, .right = right.data.Identifier } }, .init(left.span.start, right.span.end));
         },
         else => return parser.errorAtPrevious("expect identifier on right side of access"),
     }
@@ -447,7 +448,7 @@ fn parseCall(parser: *Parser, left: ast.Expression) !ast.Expression {
 
     const left_owned = try parser.createExpression(left);
 
-    return .init(.{ .Call = .{ .function = left_owned, .args = args.items } }, left.token);
+    return .init(.{ .Call = .{ .function = left_owned, .args = args.items } }, .init(left.span.start, parser.current.end));
 }
 
 fn parseDeclaration(parser: *Parser, left: ast.Expression) !ast.Expression {
@@ -455,13 +456,13 @@ fn parseDeclaration(parser: *Parser, left: ast.Expression) !ast.Expression {
         return parser.errorAtPrevious("expect identifier on left side of declaration");
     }
 
-    const before = parser.ctx.current_var_token;
-    parser.ctx.current_var_token = left.token;
-    defer parser.ctx.current_var_token = before;
+    const before = parser.ctx.current_decl_name;
+    parser.ctx.current_decl_name = left.data.Identifier;
+    defer parser.ctx.current_decl_name = before;
 
     const right = try parser.parseExpression();
 
-    return .init(.{ .Declaration = .{ .left = left.token, .right = right } }, left.token);
+    return .init(.{ .Declaration = .{ .left = left.data.Identifier, .right = right } }, .init(left.span.start, parser.current.end));
 }
 
 const Precedence = enum(u8) {

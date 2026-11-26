@@ -337,8 +337,8 @@ pub const Compiler = struct {
         try self.currentChunk().write(self.gc_alloc, chunk.OpByte{ .Op = b }, 0);
     }
 
-    fn errorAt(self: *Compiler, token: *const scanner.Token, message: []const u8) anyerror {
-        token.printError(message, self.script_context, "Compile");
+    fn errorAt(self: *Compiler, span: ast.Span, message: []const u8) anyerror {
+        self.script_context.markSpan(span, message);
         return error.CompileError;
     }
 
@@ -355,7 +355,7 @@ pub const Compiler = struct {
     }
 
     fn compileFunction(self: *Compiler, function: *const ast.Function, tail_recursive: bool) !void {
-        const name = if (function.name) |name| name.data else null;
+        const name = if (function.name) |name| name else null;
         var new_function = try self.addFunction(name, tail_recursive, function.params);
 
         if (comptime constants.debug_compiler) {
@@ -369,19 +369,19 @@ pub const Compiler = struct {
 
         for (function.params) |*param| {
             switch (param.*) {
-                .Required => |*param_name| {
+                .Required => |param_name| {
                     new_function.function.arity += 1;
                     if (new_function.function.arity > 255) {
-                        return self.errorAt(param_name, "can't have more than 255 parameters");
+                        return error.TooManyParams;
                     }
-                    try new_function.addLocal(param_name.data, null);
+                    try new_function.addLocal(param_name, null);
                 },
                 .Default => |*default_param| {
                     new_function.function.arity += 1;
                     if (new_function.function.arity > 255) {
-                        return self.errorAt(&default_param.name, "can't have more than 255 parameters");
+                        return error.TooManyParams;
                     }
-                    try new_function.addLocal(default_param.name.data, null);
+                    try new_function.addLocal(default_param.name, null);
                 },
             }
         }
@@ -450,7 +450,7 @@ pub const Compiler = struct {
         }
 
         if (count == 255) {
-            return self.errorAt(&call.function.token, "can't have more than 255 arguments");
+            return self.errorAt(call.function.span, "can't have more than 255 arguments");
         }
 
         const func_t = self.getType(call.function);
@@ -494,7 +494,7 @@ pub const Compiler = struct {
     fn compileDeclaration(self: *Compiler, declaration: *const ast.Declaration) !void {
         if (declaration.right.data != .Function) {
             try self.compileExpression(declaration.right);
-            try self.getFunction().addLocal(declaration.left.data, null);
+            try self.getFunction().addLocal(declaration.left, null);
             try self.emitOp(.Unit);
             return;
         }
@@ -508,7 +508,7 @@ pub const Compiler = struct {
 
         if (!func_t.is_generic) {
             try self.compileFunction(&function, tail_recursive);
-            try self.getFunction().addLocal(declaration.left.data, function.params);
+            try self.getFunction().addLocal(declaration.left, function.params);
             try self.emitOp(.Unit);
             return;
         }
@@ -530,7 +530,7 @@ pub const Compiler = struct {
             }
 
             if (comptime constants.debug_compiler) {
-                self.log("Var map for function '{s}':", .{declaration.left.data});
+                self.log("Var map for function '{s}':", .{declaration.left});
                 var it = self.var_map.iterator();
                 while (it.next()) |entry| self.log("    {f} = {f}", .{ entry.key_ptr.*, entry.value_ptr.* });
             }
@@ -538,7 +538,7 @@ pub const Compiler = struct {
             try self.compileFunction(&function, tail_recursive);
             self.var_map.clearRetainingCapacity();
 
-            try self.getFunction().addLocal(try self.getGenericFunctionName(function.name.?.data, resolved_t), function.params);
+            try self.getFunction().addLocal(try self.getGenericFunctionName(function.name.?, resolved_t), function.params);
         }
 
         try self.emitOp(.Unit);
@@ -748,10 +748,10 @@ pub const Compiler = struct {
                     if (arm.pattern.data == .Binary and arm.pattern.data.Binary.operator == .Cons) {
                         const cons = arm.pattern.data.Binary;
                         if (cons.left.data != .Identifier) {
-                            return self.errorAt(&arm.pattern.token, "expect identifier on left side of cons pattern");
+                            return self.errorAt(arm.pattern.span, "expect identifier on left side of cons pattern");
                         }
                         if (cons.right.data != .Identifier) {
-                            return self.errorAt(&arm.pattern.token, "expect identifier on right side of cons pattern");
+                            return self.errorAt(arm.pattern.span, "expect identifier on right side of cons pattern");
                         }
 
                         try self.emitOp(.IsEmpty);
@@ -763,8 +763,8 @@ pub const Compiler = struct {
 
                         const currentFunction = self.getFunction();
                         currentFunction.beginScope();
-                        try currentFunction.addLocal(cons.left.token.data, null);
-                        try currentFunction.addLocal(cons.right.token.data, null);
+                        try currentFunction.addLocal(cons.left.data.Identifier, null);
+                        try currentFunction.addLocal(cons.right.data.Identifier, null);
                         try self.compileExpression(arm.expression);
                         currentFunction.endScope();
                         try currentFunction.cleanupLocals();
@@ -839,7 +839,7 @@ pub const Compiler = struct {
                 const t = self.getType(access.left);
                 var index: usize = 0;
                 for (t.Record, 0..) |field, i| {
-                    if (std.mem.eql(u8, access.right.data, field.key)) {
+                    if (std.mem.eql(u8, access.right, field.key)) {
                         index = i;
                         break;
                     }
@@ -864,7 +864,7 @@ pub const Compiler = struct {
 
     pub fn isTailRecursive(function: *const ast.Function) bool {
         if (function.name) |function_name| {
-            return checkTail(function_name.data, function.body, true);
+            return checkTail(function_name, function.body, true);
         }
         return false;
     }

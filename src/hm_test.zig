@@ -104,7 +104,7 @@ const runTypeCheckerTest = struct {
         defer arena.deinit();
 
         var script_context = vm.ScriptContext{
-            .file_name = "",
+            .file_name = "hm_test",
             .source = test_case.source,
             .lines = .empty,
             .static_arena = arena.allocator(),

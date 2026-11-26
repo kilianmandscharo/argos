@@ -527,7 +527,7 @@ pub const TypeChecker = struct {
         if (env.get(name)) |decl| {
             return decl;
         }
-        expr.token.printError("unbound var", self.script_context, "TypeChecker");
+        self.script_context.markSpan(expr.span, "unbound var");
         return error.UnboundVar;
     }
 
@@ -544,7 +544,7 @@ pub const TypeChecker = struct {
                     const scheme: Scheme = .{
                         .Mono = fresh_var,
                     };
-                    try env.set(self.scratch(), name.data, .fromScheme(scheme));
+                    try env.set(self.scratch(), name, .fromScheme(scheme));
                     try params.append(self.compiler_arena, fresh_var);
                     try param_types.append(self.scratch(), .Required);
                 },
@@ -558,7 +558,7 @@ pub const TypeChecker = struct {
                     const scheme: Scheme = .{
                         .Mono = fresh_var,
                     };
-                    try env.set(self.scratch(), default.name.data, .fromScheme(scheme));
+                    try env.set(self.scratch(), default.name, .fromScheme(scheme));
                     try params.append(self.compiler_arena, fresh_var);
                     found_default = true;
                     try param_types.append(self.scratch(), .Default);
@@ -654,7 +654,7 @@ pub const TypeChecker = struct {
             .Declaration => |declaration| {
                 if (declaration.right.data == .Function) {
                     const inner_env = try Env.init(self.scratch(), env);
-                    try inner_env.set(self.scratch(), declaration.left.data, .initMonoEmpty(try self.variable())); // for recursive calls
+                    try inner_env.set(self.scratch(), declaration.left, .initMonoEmpty(try self.variable())); // for recursive calls
 
                     const result = try self.inferFunction(inner_env, &declaration.right.data.Function);
                     try self.type_map.put(self.compiler_arena, declaration.right, result.t);
@@ -662,11 +662,11 @@ pub const TypeChecker = struct {
                     const scheme = try self.generalize(env, result.t);
                     if (scheme == .Poly) result.t.Func.is_generic = true;
 
-                    try env.set(self.scratch(), declaration.left.data, .{ .scheme = scheme, .param_types = result.params });
+                    try env.set(self.scratch(), declaration.left, .{ .scheme = scheme, .param_types = result.params });
                 } else {
                     const t = try self.infer(env, declaration.right);
                     const scheme = try self.generalize(env, t);
-                    try env.set(self.scratch(), declaration.left.data, .fromScheme(scheme));
+                    try env.set(self.scratch(), declaration.left, .fromScheme(scheme));
                 }
                 return c(.Unit);
             },
@@ -746,11 +746,11 @@ pub const TypeChecker = struct {
             },
             .Record => |r| {
                 const entries = try self.scratch().alloc(RecordEntry, r.len);
-                for (r, 0..) |e, i| entries[i] = .{ .key = e.key.data, .value = try self.infer(env, e.value) };
+                for (r, 0..) |e, i| entries[i] = .{ .key = e.key, .value = try self.infer(env, e.value) };
                 return try self.record(entries);
             },
             .Access => |a| {
-                const key = a.right.data;
+                const key = a.right;
                 const lt = try self.infer(env, a.left);
                 switch (lt.*) {
                     .Record => |r| {

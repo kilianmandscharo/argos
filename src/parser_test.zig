@@ -7,13 +7,7 @@ const ast = @import("ast.zig");
 const vm = @import("vm.zig");
 
 fn e(data: ast.ExpressionData) ast.Expression {
-    return .init(data, scanner.Token.dummy());
-}
-
-fn s(data: []const u8) scanner.Token {
-    var token = scanner.Token.dummy();
-    token.data = data;
-    return token;
+    return .init(data, .init(0, 0));
 }
 
 fn expectTag(expected: anytype, actual: anytype) !void {
@@ -29,7 +23,7 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
 
     switch (expected) {
         .Declaration => |declaration| {
-            try std.testing.expectEqualStrings(declaration.left.data, actual.Declaration.left.data);
+            try std.testing.expectEqualStrings(declaration.left, actual.Declaration.left);
             try expectExpression(declaration.right.*, actual.Declaration.right.*);
         },
         .Grouping => |expr| {
@@ -54,7 +48,7 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
         },
         .Function => |func| {
             if (func.name) |name| {
-                try std.testing.expectEqualStrings(name.data, actual.Function.name.?.data);
+                try std.testing.expectEqualStrings(name, actual.Function.name.?);
             } else {
                 try std.testing.expectEqual(null, actual.Function.name);
             }
@@ -64,9 +58,9 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
                 const second = actual.Function.params[i];
                 try expectTag(first, second);
                 if (first == .Required) {
-                    try std.testing.expectEqualStrings(first.Required.data, second.Required.data);
+                    try std.testing.expectEqualStrings(first.Required, second.Required);
                 } else {
-                    try std.testing.expectEqualStrings(first.Default.name.data, second.Default.name.data);
+                    try std.testing.expectEqualStrings(first.Default.name, second.Default.name);
                     try expectExpression(first.Default.value.*, second.Default.value.*);
                 }
             }
@@ -83,7 +77,7 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
         },
         .Access => |expr| {
             try expectExpression(expr.left.*, actual.Access.left.*);
-            try std.testing.expectEqualStrings(expr.right.data, actual.Access.right.data);
+            try std.testing.expectEqualStrings(expr.right, actual.Access.right);
         },
         .List => |expr| {
             try std.testing.expectEqual(expr.len, actual.List.len);
@@ -94,7 +88,7 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
         .Record => |expr| {
             try std.testing.expectEqual(expr.len, actual.Record.len);
             for (expr, 0..) |entry, i| {
-                try std.testing.expectEqualStrings(entry.key.data, actual.Record[i].key.data);
+                try std.testing.expectEqualStrings(entry.key, actual.Record[i].key);
                 try expectExpression(entry.value.*, actual.Record[i].value.*);
             }
         },
@@ -849,8 +843,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = "bar", .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = "foo", .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -861,8 +855,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = "bar", .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = "foo", .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -876,8 +870,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = "bar", .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = "foo", .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -891,8 +885,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = "bar", .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = "foo", .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -909,8 +903,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = "bar", .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = "foo", .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -927,8 +921,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("bar"), .value = &e(.{ .Integer = 2 }) },
-                    .{ .key = s("foo"), .value = &e(.{ .Integer = 1 }) },
+                    .{ .key = "bar", .value = &e(.{ .Integer = 2 }) },
+                    .{ .key = "foo", .value = &e(.{ .Integer = 1 }) },
                 },
             },
         },
@@ -966,8 +960,8 @@ test "record literal" {
             ,
             .expected_expression = .{
                 .Record = &.{
-                    .{ .key = s("bar"), .value = &e(.{ .Record = &.{.{ .key = s("a"), .value = &e(.{ .Integer = 2 }) }} }) },
-                    .{ .key = s("foo"), .value = &e(.{ .Record = &.{.{ .key = s("a"), .value = &e(.{ .Integer = 1 }) }} }) },
+                    .{ .key = "bar", .value = &e(.{ .Record = &.{.{ .key = "a", .value = &e(.{ .Integer = 2 }) }} }) },
+                    .{ .key = "foo", .value = &e(.{ .Record = &.{.{ .key = "a", .value = &e(.{ .Integer = 1 }) }} }) },
                 },
             },
         },
@@ -1114,8 +1108,8 @@ test "function literal" {
             .expected_expression = .{
                 .Function = .{
                     .params = &.{
-                        .{ .Required = s("a") },
-                        .{ .Required = s("b") },
+                        .{ .Required = "a" },
+                        .{ .Required = "b" },
                     },
                     .body = &e(.{
                         .Binary = .{
@@ -1138,14 +1132,14 @@ test "function literal" {
             .expected_expression = .{
                 .Function = .{
                     .params = &.{
-                        .{ .Required = s("a") },
-                        .{ .Required = s("b") },
+                        .{ .Required = "a" },
+                        .{ .Required = "b" },
                     },
                     .body = &e(.{
                         .Grouping = &.{
                             &e(.{
                                 .Declaration = .{
-                                    .left = s("c"),
+                                    .left = "c",
                                     .right = &e(.{
                                         .Binary = .{
                                             .left = &e(.{ .Identifier = "a" }),
@@ -1174,13 +1168,13 @@ test "function literal" {
             ,
             .expected_expression = .{
                 .Declaration = .{
-                    .left = s("foo"),
+                    .left = "foo",
                     .right = &e(.{
                         .Function = .{
-                            .name = s("foo"),
+                            .name = "foo",
                             .params = &.{
-                                .{ .Default = .{ .name = s("a"), .value = &e(.{ .Integer = 11 }) } },
-                                .{ .Default = .{ .name = s("b"), .value = &e(.{ .Integer = 12 }) } },
+                                .{ .Default = .{ .name = "a", .value = &e(.{ .Integer = 11 }) } },
+                                .{ .Default = .{ .name = "b", .value = &e(.{ .Integer = 12 }) } },
                             },
                             .body = &e(.{
                                 .Binary = .{
@@ -1201,13 +1195,13 @@ test "function literal" {
             ,
             .expected_expression = .{
                 .Declaration = .{
-                    .left = s("foo"),
+                    .left = "foo",
                     .right = &e(
                         .{
                             .Function = .{
                                 .params = &.{},
                                 .body = &e(.{ .Unit = {} }),
-                                .name = s("foo"),
+                                .name = "foo",
                             },
                         },
                     ),
@@ -1221,7 +1215,7 @@ test "function literal" {
             ,
             .expected_expression = .{
                 .Declaration = .{
-                    .left = s("new"),
+                    .left = "new",
                     .right = &e(
                         .{
                             .Call = .{
@@ -1231,7 +1225,7 @@ test "function literal" {
                                     &e(.{
                                         .Function = .{
                                             .name = null,
-                                            .params = &.{.{ .Required = s("n") }},
+                                            .params = &.{.{ .Required = "n" }},
                                             .body = &e(.{
                                                 .Binary = .{
                                                     .left = &e(.{ .Identifier = "n" }),
@@ -1407,13 +1401,13 @@ test "grouping" {
                 .Grouping = &.{
                     &e(.{
                         .Declaration = .{
-                            .left = s("a"),
+                            .left = "a",
                             .right = &e(.{ .Integer = 1 }),
                         },
                     }),
                     &e(.{
                         .Declaration = .{
-                            .left = s("b"),
+                            .left = "b",
                             .right = &e(.{ .Integer = 1 }),
                         },
                     }),
@@ -1438,13 +1432,13 @@ test "grouping" {
                 .Grouping = &.{
                     &e(.{
                         .Declaration = .{
-                            .left = s("a"),
+                            .left = "a",
                             .right = &e(.{ .Integer = 1 }),
                         },
                     }),
                     &e(.{
                         .Declaration = .{
-                            .left = s("b"),
+                            .left = "b",
                             .right = &e(.{ .Integer = 1 }),
                         },
                     }),
@@ -1476,7 +1470,7 @@ test "access" {
             \\a.foo
             ,
             .expected_expression = .{
-                .Access = .{ .left = &e(.{ .Identifier = "a" }), .right = s("foo") },
+                .Access = .{ .left = &e(.{ .Identifier = "a" }), .right = "foo" },
             },
         },
         .{
@@ -1485,7 +1479,7 @@ test "access" {
             \\{ a = 1 }.a
             ,
             .expected_expression = .{
-                .Access = .{ .left = &e(.{ .Record = &.{.{ .key = s("a"), .value = &e(.{ .Integer = 1 }) }} }), .right = s("a") },
+                .Access = .{ .left = &e(.{ .Record = &.{.{ .key = "a", .value = &e(.{ .Integer = 1 }) }} }), .right = "a" },
             },
         },
         .{
@@ -1496,8 +1490,8 @@ test "access" {
             .expected_expression = .{
                 .Binary = .{
                     .operator = .Plus,
-                    .left = &e(.{ .Access = .{ .left = &e(.{ .Identifier = "a" }), .right = s("foo") } }),
-                    .right = &e(.{ .Access = .{ .left = &e(.{ .Identifier = "a" }), .right = s("bar") } }),
+                    .left = &e(.{ .Access = .{ .left = &e(.{ .Identifier = "a" }), .right = "foo" } }),
+                    .right = &e(.{ .Access = .{ .left = &e(.{ .Identifier = "a" }), .right = "bar" } }),
                 },
             },
         },

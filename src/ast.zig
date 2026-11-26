@@ -1,17 +1,24 @@
 const std = @import("std");
 const scanner = @import("scanner.zig");
 
+pub const Span = struct {
+    start: usize,
+    end: usize,
+
+    pub fn init(start: usize, end: usize) Span {
+        return .{ .start = start, .end = end };
+    }
+};
+
 pub const Expression = struct {
-    token: scanner.Token,
+    span: Span,
     data: ExpressionData,
 
-    pub fn init(data: ExpressionData, token: scanner.Token) @This() {
-        return .{
-            .data = data,
-            .token = token,
-        };
+    pub fn init(data: ExpressionData, span: Span) @This() {
+        return .{ .data = data, .span = span };
     }
 
+    // TODO: implement long and short printing for each expression
     pub fn format(
         self: @This(),
         writer: *std.Io.Writer,
@@ -59,17 +66,16 @@ pub const ExpressionData = union(enum) {
 
 pub const Access = struct {
     left: *const Expression,
-    right: scanner.Token,
+    right: []const u8,
 };
 
 pub const RecordItem = struct {
-    key: scanner.Token,
+    key: []const u8,
     value: *const Expression,
 };
 
 pub const Declaration = struct {
-    // for now no pattern matching on assignment
-    left: scanner.Token,
+    left: []const u8,
     right: *const Expression,
 };
 
@@ -89,7 +95,7 @@ const Unary = struct {
 pub const Function = struct {
     params: []const FunctionParam,
     body: *const Expression,
-    name: ?scanner.Token = null,
+    name: ?[]const u8 = null,
 
     pub fn getParamTypes(self: Function, arena: std.mem.Allocator) ![]FunctionParamType {
         const out = try arena.alloc(FunctionParamType, self.params.len);
@@ -106,12 +112,12 @@ pub const FunctionParamType = enum {
 };
 
 pub const FunctionParam = union(FunctionParamType) {
-    Required: scanner.Token,
+    Required: []const u8,
     Default: FunctionParamDefault,
 };
 
 const FunctionParamDefault = struct {
-    name: scanner.Token,
+    name: []const u8,
     value: *const Expression,
 };
 
@@ -149,102 +155,105 @@ pub fn printExpression(expr: *const Expression, writer: *std.Io.Writer) anyerror
 }
 
 fn printExpressionInner(expr: *const Expression, writer: *std.Io.Writer, level: usize) anyerror!void {
-    switch (expr.data) {
-        .Identifier => |name| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("{s}", .{name});
-        },
-        .String => |s| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("\"{s}\"", .{s});
-        },
-        .Integer => |n| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("{d}", .{n});
-        },
-        .Float => |f| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("{d}", .{f});
-        },
-        .Boolean => |b| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("{}", .{b});
-        },
-        .Unit => {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("()", .{});
-        },
-        .Binary => |e| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("Binary:\n", .{});
-            try printIndent(writer, level + 1);
-            try writer.print("{s}", .{e.operator.toString()});
-            try printExpressionInner(e.left, writer, level + 1);
-            try printExpressionInner(e.right, writer, level + 1);
-        },
-        .Unary => |e| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("Unary:\n", .{});
-            try printIndent(writer, level + 1);
-            try writer.print("{s}", .{e.operator.toString()});
-            try printExpressionInner(e.right, writer, level + 1);
-        },
-        .Declaration => |e| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("Declare {s}:", .{e.left.data});
-            try printExpressionInner(e.right, writer, level + 1);
-        },
-        .Function => |e| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("Function", .{});
-            if (e.name) |token| {
-                try writer.print(" {s}:", .{token.data});
-            } else {
-                try writer.print(" <anonymous>:", .{});
-            }
-            if (e.params.len > 0) {
-                try writer.print("\n", .{});
-                try printIndent(writer, level + 1);
-            }
-            for (e.params) |param| {
-                switch (param) {
-                    .Required => |*name| {
-                        try writer.print("{s} ", .{name.data});
-                    },
-                    .Default => |*default| {
-                        try writer.print("{s}={f} ", .{ default.name.data, default.value });
-                    },
-                }
-            }
-            try printExpressionInner(e.body, writer, level + 1);
-        },
-        .Grouping => |e| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("Grouping:", .{});
-            for (e) |item| {
-                try printExpressionInner(item, writer, level + 1);
-            }
-        },
-        .Call => |e| {
-            try writer.print("\n", .{});
-            try printIndent(writer, level);
-            try writer.print("Call:", .{});
-            try printExpressionInner(e.function, writer, level + 1);
-            for (e.args) |arg| {
-                try printExpressionInner(arg, writer, level + 1);
-            }
-        },
-        .Record, .Access, .If, .List, .Match => {},
-    }
+    _ = expr;
+    _ = writer;
+    _ = level;
+    // switch (expr.data) {
+    //     .Identifier => |name| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("{s}", .{name});
+    //     },
+    //     .String => |s| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("\"{s}\"", .{s});
+    //     },
+    //     .Integer => |n| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("{d}", .{n});
+    //     },
+    //     .Float => |f| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("{d}", .{f});
+    //     },
+    //     .Boolean => |b| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("{}", .{b});
+    //     },
+    //     .Unit => {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("()", .{});
+    //     },
+    //     .Binary => |e| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("Binary:\n", .{});
+    //         try printIndent(writer, level + 1);
+    //         try writer.print("{s}", .{e.operator.toString()});
+    //         try printExpressionInner(e.left, writer, level + 1);
+    //         try printExpressionInner(e.right, writer, level + 1);
+    //     },
+    //     .Unary => |e| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("Unary:\n", .{});
+    //         try printIndent(writer, level + 1);
+    //         try writer.print("{s}", .{e.operator.toString()});
+    //         try printExpressionInner(e.right, writer, level + 1);
+    //     },
+    //     .Declaration => |e| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("Declare {s}:", .{e.left.data});
+    //         try printExpressionInner(e.right, writer, level + 1);
+    //     },
+    //     .Function => |e| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("Function", .{});
+    //         if (e.name) |token| {
+    //             try writer.print(" {s}:", .{token.data});
+    //         } else {
+    //             try writer.print(" <anonymous>:", .{});
+    //         }
+    //         if (e.params.len > 0) {
+    //             try writer.print("\n", .{});
+    //             try printIndent(writer, level + 1);
+    //         }
+    //         for (e.params) |param| {
+    //             switch (param) {
+    //                 .Required => |*name| {
+    //                     try writer.print("{s} ", .{name.data});
+    //                 },
+    //                 .Default => |*default| {
+    //                     try writer.print("{s}={f} ", .{ default.name.data, default.value });
+    //                 },
+    //             }
+    //         }
+    //         try printExpressionInner(e.body, writer, level + 1);
+    //     },
+    //     .Grouping => |e| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("Grouping:", .{});
+    //         for (e) |item| {
+    //             try printExpressionInner(item, writer, level + 1);
+    //         }
+    //     },
+    //     .Call => |e| {
+    //         try writer.print("\n", .{});
+    //         try printIndent(writer, level);
+    //         try writer.print("Call:", .{});
+    //         try printExpressionInner(e.function, writer, level + 1);
+    //         for (e.args) |arg| {
+    //             try printExpressionInner(arg, writer, level + 1);
+    //         }
+    //     },
+    //     .Record, .Access, .If, .List, .Match => {},
+    // }
 }
