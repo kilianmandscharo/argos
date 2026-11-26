@@ -24,7 +24,7 @@ test "tail recursion" {
             };
 
             const ast = try parser.createAst(arena.allocator(), &script_context);
-            const function = &ast.data.Function.body.data.Grouping.items[0].data.Declaration.right.data.Function;
+            const function = &ast.data.Function.body.data.Grouping[0].data.Declaration.right.data.Function;
             const result = compiler.Compiler.isTailRecursive(function);
             try std.testing.expectEqual(test_case.expected, result);
         }

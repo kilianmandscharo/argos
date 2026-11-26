@@ -69,14 +69,14 @@ pub const Parser = struct {
         }
 
         const grouping = try self.createExpression(.{
-            .data = .{ .Grouping = expressions },
+            .data = .{ .Grouping = expressions.items },
             .token = scanner.Token.dummy(),
         });
 
         const program = try self.createExpression(.{
             .data = .{
                 .Function = .{
-                    .params = .empty,
+                    .params = &.{},
                     .body = grouping,
                 },
             },
@@ -268,7 +268,7 @@ fn parseList(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expressi
         .RBracket,
         .Comma,
     );
-    return .init(.{ .List = items }, token);
+    return .init(.{ .List = items.items }, token);
 }
 
 fn parseRecord(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
@@ -306,7 +306,7 @@ fn parseGrouping(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expr
             try parser.chopNewlines();
             const name = if (in_decl) parser.ctx.current_var_token else null;
             const body = try parser.parseExpression();
-            return .init(.{ .Function = .{ .params = .empty, .body = body, .name = name } }, token);
+            return .init(.{ .Function = .{ .params = &.{}, .body = body, .name = name } }, token);
         }
         return .init(.{ .Unit = {} }, token);
     }
@@ -340,14 +340,14 @@ fn parseGrouping(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expr
             }
         }
 
-        return .init(.{ .Function = .{ .params = params, .body = body, .name = function_name } }, token);
+        return .init(.{ .Function = .{ .params = params.items, .body = body, .name = function_name } }, token);
     }
 
     if (expressions.items.len == 1) {
         return expressions.items[0].*;
     }
 
-    return .init(.{ .Grouping = expressions }, token);
+    return .init(.{ .Grouping = expressions.items }, token);
 }
 
 fn parseMatch(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
@@ -371,23 +371,24 @@ fn parseMatch(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Express
         try arms.append(parser.ast_arena, .{ .pattern = pattern, .expression = expression });
     }
 
-    return .init(.{ .Match = .{ .target = target, .arms = arms } }, token);
+    return .init(.{ .Match = .{ .target = target, .arms = arms.items } }, token);
 }
 
 fn parseIf(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression {
     _ = prev_token_type;
     const token = parser.getPrevious();
 
-    var data: ast.ExpressionData = .{ .If = .{ .arms = .empty, .alt = null } };
+    var arms: std.ArrayList(ast.IfArm) = .empty;
+    var data: ast.ExpressionData = .{ .If = .{ .arms = &.{}, .alt = null } };
 
     while (true) {
         try parser.chopNewlines();
 
-        if (data.If.arms.items.len == 0) {
+        if (arms.items.len == 0) {
             const condition = try parser.parseExpression();
             try parser.consume(.Then, "expect 'then' after if target expression");
             try parser.chopNewlines();
-            try data.If.arms.append(parser.ast_arena, .{ .condition = condition, .then = try parser.parseExpression() });
+            try arms.append(parser.ast_arena, .{ .condition = condition, .then = try parser.parseExpression() });
             continue;
         }
 
@@ -395,7 +396,7 @@ fn parseIf(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression
             const condition = try parser.parseExpression();
             try parser.consume(.Then, "expect 'then' after elif target expression");
             try parser.chopNewlines();
-            try data.If.arms.append(parser.ast_arena, .{ .condition = condition, .then = try parser.parseExpression() });
+            try arms.append(parser.ast_arena, .{ .condition = condition, .then = try parser.parseExpression() });
             continue;
         }
 
@@ -408,6 +409,7 @@ fn parseIf(parser: *Parser, prev_token_type: ?scanner.TokenType) !ast.Expression
         break;
     }
 
+    data.If.arms = arms.items;
     return .init(data, token);
 }
 
@@ -445,7 +447,7 @@ fn parseCall(parser: *Parser, left: ast.Expression) !ast.Expression {
 
     const left_owned = try parser.createExpression(left);
 
-    return .init(.{ .Call = .{ .function = left_owned, .args = args } }, left.token);
+    return .init(.{ .Call = .{ .function = left_owned, .args = args.items } }, left.token);
 }
 
 fn parseDeclaration(parser: *Parser, left: ast.Expression) !ast.Expression {

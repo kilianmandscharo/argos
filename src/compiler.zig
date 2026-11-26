@@ -356,7 +356,7 @@ pub const Compiler = struct {
 
     fn compileFunction(self: *Compiler, function: *const ast.Function, tail_recursive: bool) !void {
         const name = if (function.name) |name| name.data else null;
-        var new_function = try self.addFunction(name, tail_recursive, function.params.items);
+        var new_function = try self.addFunction(name, tail_recursive, function.params);
 
         if (comptime constants.debug_compiler) {
             self.log("added new function, current function stack:", .{});
@@ -367,7 +367,7 @@ pub const Compiler = struct {
 
         new_function.beginScope();
 
-        for (function.params.items) |*param| {
+        for (function.params) |*param| {
             switch (param.*) {
                 .Required => |*param_name| {
                     new_function.function.arity += 1;
@@ -428,12 +428,12 @@ pub const Compiler = struct {
     }
 
     fn compileCall(self: *Compiler, call: *const ast.Call) !void {
-        var count = call.args.items.len;
+        var count = call.args.len;
 
         var params: ?[]const ast.FunctionParam = null;
         switch (call.function.data) {
             .Function => |f| {
-                params = f.params.items;
+                params = f.params;
             },
             .Identifier => |name| {
                 const search_name = try self.getGenericIdentifierName(call.function, name) orelse name;
@@ -459,7 +459,7 @@ pub const Compiler = struct {
         if (constants.debug_compiler) self.log("function {s} is tail_recursive: {}", .{ current_function.getDisplayName(), current_function.tail_recursive });
 
         if (isRecursiveCall(current_function, call) and current_function.tail_recursive) {
-            try self.compileArgs(params, call.args.items);
+            try self.compileArgs(params, call.args);
             try self.emitOpU8(.TailCall, @intCast(count));
         } else {
             if (func_t.Func.is_generic and !func_t.Func.is_native) {
@@ -467,7 +467,7 @@ pub const Compiler = struct {
             } else {
                 try self.compileExpression(call.function);
             }
-            try self.compileArgs(params, call.args.items);
+            try self.compileArgs(params, call.args);
             try self.emitOpU8(.Call, @intCast(count));
         }
     }
@@ -508,7 +508,7 @@ pub const Compiler = struct {
 
         if (!func_t.is_generic) {
             try self.compileFunction(&function, tail_recursive);
-            try self.getFunction().addLocal(declaration.left.data, function.params.items);
+            try self.getFunction().addLocal(declaration.left.data, function.params);
             try self.emitOp(.Unit);
             return;
         }
@@ -538,7 +538,7 @@ pub const Compiler = struct {
             try self.compileFunction(&function, tail_recursive);
             self.var_map.clearRetainingCapacity();
 
-            try self.getFunction().addLocal(try self.getGenericFunctionName(function.name.?.data, resolved_t), function.params.items);
+            try self.getFunction().addLocal(try self.getGenericFunctionName(function.name.?.data, resolved_t), function.params);
         }
 
         try self.emitOp(.Unit);
@@ -685,9 +685,9 @@ pub const Compiler = struct {
 
                 function.beginScope();
 
-                for (grouping.items, 0..) |item, i| {
+                for (grouping, 0..) |item, i| {
                     try self.compileExpression(item);
-                    const is_last = i == grouping.items.len - 1;
+                    const is_last = i == grouping.len - 1;
                     if (!is_last) {
                         try self.emitOp(.Pop);
                     }
@@ -707,12 +707,12 @@ pub const Compiler = struct {
                 try self.compileCall(call);
             },
             .List => |list| {
-                for (list.items) |item| {
+                for (list) |item| {
                     try self.compileExpression(item);
                 }
                 const new_list = try self.runtime_allocator.allocateList();
                 try self.emitConstant(value.wrapObj(&new_list.obj));
-                try self.emitOpU16(.ListInit, @intCast(list.items.len));
+                try self.emitOpU16(.ListInit, @intCast(list.len));
             },
             .Match => |match| {
                 try self.compileExpression(match.target);
@@ -720,7 +720,7 @@ pub const Compiler = struct {
                 var end_jumps: std.ArrayList(usize) = .empty;
                 var found_else = false;
 
-                for (match.arms.items) |arm| {
+                for (match.arms) |arm| {
                     if (arm.pattern.data == .Identifier and std.mem.eql(u8, arm.pattern.data.Identifier, "_")) {
                         try self.emitOp(.Pop);
                         try self.compileExpression(arm.expression);
@@ -728,7 +728,7 @@ pub const Compiler = struct {
                         break;
                     }
 
-                    if (arm.pattern.data == .List and arm.pattern.data.List.items.len == 0) {
+                    if (arm.pattern.data == .List and arm.pattern.data.List.len == 0) {
                         try self.emitOp(.IsEmpty);
                         const jump = try self.emitJump(.JumpIfFalse);
 
@@ -804,7 +804,7 @@ pub const Compiler = struct {
             .If => |ifExpr| {
                 var end_jumps: std.ArrayList(usize) = .empty;
 
-                for (ifExpr.arms.items) |arm| {
+                for (ifExpr.arms) |arm| {
                     try self.compileExpression(arm.condition);
 
                     const then_jump = try self.emitJump(.JumpIfFalse);
@@ -872,7 +872,7 @@ pub const Compiler = struct {
     fn checkTail(function_name: []const u8, expr: *const ast.Expression, in_tail: bool) bool {
         return switch (expr.data) {
             .Call => |call| {
-                for (call.args.items) |arg| {
+                for (call.args) |arg| {
                     if (!checkTail(function_name, arg, false)) return false;
                 }
                 if (call.function.data == .Identifier and
@@ -893,28 +893,28 @@ pub const Compiler = struct {
                     checkTail(function_name, binary.right, false);
             },
             .Grouping => |grouping| {
-                for (grouping.items, 0..) |item, i| {
-                    const tail = if (i == grouping.items.len - 1) in_tail else false;
+                for (grouping, 0..) |item, i| {
+                    const tail = if (i == grouping.len - 1) in_tail else false;
                     if (!checkTail(function_name, item, tail)) return false;
                 }
                 return true;
             },
             .List => |list| {
-                for (list.items) |item| {
+                for (list) |item| {
                     if (!checkTail(function_name, item, false)) return false;
                 }
                 return true;
             },
             .Match => |match| {
                 if (!checkTail(function_name, match.target, false)) return false;
-                for (match.arms.items) |arm| {
+                for (match.arms) |arm| {
                     if (!checkTail(function_name, arm.pattern, false)) return false;
                     if (!checkTail(function_name, arm.expression, in_tail)) return false;
                 }
                 return true;
             },
             .If => |ifExpr| {
-                for (ifExpr.arms.items) |arm| {
+                for (ifExpr.arms) |arm| {
                     if (!checkTail(function_name, arm.condition, false)) return false;
                     if (!checkTail(function_name, arm.then, in_tail)) return false;
                 }

@@ -49,7 +49,7 @@ pub const ExpressionData = union(enum) {
     Binary: Binary,
     Function: Function,
     Call: Call,
-    List: std.ArrayList(*const Expression),
+    List: []const *const Expression,
     Record: []const RecordItem,
     Match: Match,
     If: If,
@@ -73,7 +73,7 @@ pub const Declaration = struct {
     right: *const Expression,
 };
 
-const Grouping = std.ArrayList(*const Expression);
+const Grouping = []const *const Expression;
 
 const Binary = struct {
     operator: scanner.TokenType,
@@ -87,13 +87,13 @@ const Unary = struct {
 };
 
 pub const Function = struct {
-    params: std.ArrayList(FunctionParam),
+    params: []const FunctionParam,
     body: *const Expression,
     name: ?scanner.Token = null,
 
     pub fn getParamTypes(self: Function, arena: std.mem.Allocator) ![]FunctionParamType {
-        const out = try arena.alloc(FunctionParamType, self.params.items.len);
-        for (self.params.items, 0..) |param, i| {
+        const out = try arena.alloc(FunctionParamType, self.params.len);
+        for (self.params, 0..) |param, i| {
             out[i] = std.meta.activeTag(param);
         }
         return out;
@@ -117,12 +117,12 @@ const FunctionParamDefault = struct {
 
 pub const Call = struct {
     function: *const Expression,
-    args: std.ArrayList(*const Expression),
+    args: []const *const Expression,
 };
 
 const Match = struct {
     target: *const Expression,
-    arms: std.ArrayList(MatchArm),
+    arms: []const MatchArm,
 };
 
 pub const MatchArm = struct {
@@ -131,7 +131,7 @@ pub const MatchArm = struct {
 };
 
 pub const If = struct {
-    arms: std.ArrayList(IfArm),
+    arms: []const IfArm,
     alt: ?*const Expression,
 };
 
@@ -212,11 +212,11 @@ fn printExpressionInner(expr: *const Expression, writer: *std.Io.Writer, level: 
             } else {
                 try writer.print(" <anonymous>:", .{});
             }
-            if (e.params.items.len > 0) {
+            if (e.params.len > 0) {
                 try writer.print("\n", .{});
                 try printIndent(writer, level + 1);
             }
-            for (e.params.items) |param| {
+            for (e.params) |param| {
                 switch (param) {
                     .Required => |*name| {
                         try writer.print("{s} ", .{name.data});
@@ -232,7 +232,7 @@ fn printExpressionInner(expr: *const Expression, writer: *std.Io.Writer, level: 
             try writer.print("\n", .{});
             try printIndent(writer, level);
             try writer.print("Grouping:", .{});
-            for (e.items) |item| {
+            for (e) |item| {
                 try printExpressionInner(item, writer, level + 1);
             }
         },
@@ -241,7 +241,7 @@ fn printExpressionInner(expr: *const Expression, writer: *std.Io.Writer, level: 
             try printIndent(writer, level);
             try writer.print("Call:", .{});
             try printExpressionInner(e.function, writer, level + 1);
-            for (e.args.items) |arg| {
+            for (e.args) |arg| {
                 try printExpressionInner(arg, writer, level + 1);
             }
         },

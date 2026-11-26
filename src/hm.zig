@@ -536,7 +536,7 @@ pub const TypeChecker = struct {
         var param_types: std.ArrayList(Param) = .empty;
         var found_default = false;
 
-        for (f.params.items) |param| {
+        for (f.params) |param| {
             switch (param) {
                 .Required => |name| {
                     if (found_default) return error.DefaultBeforeRequiredParam;
@@ -601,7 +601,7 @@ pub const TypeChecker = struct {
     }
 
     fn inferCall(self: *TypeChecker, env: *Env, expr: *const ast.Expression, call: *const ast.Call) !*const Type {
-        const args = call.args.items;
+        const args = call.args;
 
         switch (call.function.data) {
             .Identifier => |name| {
@@ -731,15 +731,15 @@ pub const TypeChecker = struct {
             },
             .Grouping => |grouping| {
                 const inner_env = try Env.init(self.scratch(), env);
-                for (grouping.items[0 .. grouping.items.len - 1]) |e| {
+                for (grouping[0 .. grouping.len - 1]) |e| {
                     _ = try self.infer(inner_env, e);
                 }
-                return try self.infer(inner_env, grouping.items[grouping.items.len - 1]);
+                return try self.infer(inner_env, grouping[grouping.len - 1]);
             },
             .List => |l| {
-                if (l.items.len == 0) return try self.genericList();
-                const t = try self.infer(env, l.items[0]);
-                for (l.items[1..l.items.len]) |e| {
+                if (l.len == 0) return try self.genericList();
+                const t = try self.infer(env, l[0]);
+                for (l[1..l.len]) |e| {
                     try self.unify(t, try self.infer(env, e));
                 }
                 return try self.list(t);
@@ -769,7 +769,7 @@ pub const TypeChecker = struct {
             .Match => |match| {
                 const target_t = try self.infer(env, match.target);
                 const result = try self.variable();
-                for (match.arms.items) |arm| {
+                for (match.arms) |arm| {
                     switch (arm.pattern.data) {
                         .Identifier => |name| {
                             if (std.mem.eql(u8, name, "_")) {
@@ -809,7 +809,7 @@ pub const TypeChecker = struct {
             },
             .If => |ifExpr| {
                 const result = try self.variable();
-                for (ifExpr.arms.items) |arm| {
+                for (ifExpr.arms) |arm| {
                     try self.unify(try self.infer(env, arm.condition), c(.Boolean));
                     try self.unify(try self.infer(env, arm.then), result);
                 }

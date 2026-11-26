@@ -33,9 +33,9 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
             try expectExpression(declaration.right.*, actual.Declaration.right.*);
         },
         .Grouping => |expr| {
-            try std.testing.expectEqual(expr.items.len, actual.Grouping.items.len);
-            for (0..expr.items.len) |i| {
-                try expectExpression(expr.items[i].*, actual.Grouping.items[i].*);
+            try std.testing.expectEqual(expr.len, actual.Grouping.len);
+            for (0..expr.len) |i| {
+                try expectExpression(expr[i].*, actual.Grouping[i].*);
             }
         },
         .Identifier => |identifier| try std.testing.expectEqualStrings(identifier, actual.Identifier),
@@ -58,10 +58,10 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
             } else {
                 try std.testing.expectEqual(null, actual.Function.name);
             }
-            try std.testing.expectEqual(func.params.items.len, actual.Function.params.items.len);
-            for (0..func.params.items.len) |i| {
-                const first = func.params.items[i];
-                const second = actual.Function.params.items[i];
+            try std.testing.expectEqual(func.params.len, actual.Function.params.len);
+            for (0..func.params.len) |i| {
+                const first = func.params[i];
+                const second = actual.Function.params[i];
                 try expectTag(first, second);
                 if (first == .Required) {
                     try std.testing.expectEqualStrings(first.Required.data, second.Required.data);
@@ -74,10 +74,10 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
         },
         .Call => |expr| {
             try expectExpression(expr.function.*, actual.Call.function.*);
-            try std.testing.expectEqual(expr.args.items.len, actual.Call.args.items.len);
-            for (0..expr.args.items.len) |i| {
-                const first = expr.args.items[i];
-                const second = actual.Call.args.items[i];
+            try std.testing.expectEqual(expr.args.len, actual.Call.args.len);
+            for (0..expr.args.len) |i| {
+                const first = expr.args[i];
+                const second = actual.Call.args[i];
                 try expectExpression(first.*, second.*);
             }
         },
@@ -86,9 +86,9 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
             try std.testing.expectEqualStrings(expr.right.data, actual.Access.right.data);
         },
         .List => |expr| {
-            try std.testing.expectEqual(expr.items.len, actual.List.items.len);
-            for (expr.items, 0..) |item, i| {
-                try expectExpression(item.*, actual.List.items[i].*);
+            try std.testing.expectEqual(expr.len, actual.List.len);
+            for (expr, 0..) |item, i| {
+                try expectExpression(item.*, actual.List[i].*);
             }
         },
         .Record => |expr| {
@@ -100,19 +100,19 @@ fn expectExpressionData(expected: ast.ExpressionData, actual: ast.ExpressionData
         },
         .Match => |expr| {
             try expectExpression(expr.target.*, actual.Match.target.*);
-            try std.testing.expectEqual(expr.arms.items.len, actual.Match.arms.items.len);
-            for (0..expr.arms.items.len) |i| {
-                const first = expr.arms.items[i];
-                const second = actual.Match.arms.items[i];
+            try std.testing.expectEqual(expr.arms.len, actual.Match.arms.len);
+            for (0..expr.arms.len) |i| {
+                const first = expr.arms[i];
+                const second = actual.Match.arms[i];
                 try expectExpression(first.pattern.*, second.pattern.*);
                 try expectExpression(first.expression.*, second.expression.*);
             }
         },
         .If => |expr| {
-            try std.testing.expectEqual(expr.arms.items.len, actual.If.arms.items.len);
-            for (0..expr.arms.items.len) |i| {
-                const first = expr.arms.items[i];
-                const second = actual.If.arms.items[i];
+            try std.testing.expectEqual(expr.arms.len, actual.If.arms.len);
+            for (0..expr.arms.len) |i| {
+                const first = expr.arms[i];
+                const second = actual.If.arms[i];
                 try expectExpression(first.condition.*, second.condition.*);
                 try expectExpression(first.then.*, second.then.*);
             }
@@ -149,7 +149,7 @@ fn runExpressionTest(arena: std.mem.Allocator, test_case: ExpressionTestCase) an
         try std.testing.expectError(error.ParserError, result);
     } else {
         const program = try result;
-        const expressions = program.data.Function.body.data.Grouping.items;
+        const expressions = program.data.Function.body.data.Grouping;
         try std.testing.expectEqual(expressions.len, 1);
         try expectExpressionData(test_case.expected_expression.?, expressions[0].data);
     }
@@ -642,7 +642,7 @@ test "binary expression" {
             .expected_expression = .{
                 .Binary = .{
                     .left = &e(.{ .Integer = 1 }),
-                    .right = &e(.{ .List = .empty }),
+                    .right = &e(.{ .List = &.{} }),
                     .operator = .Cons,
                 },
             },
@@ -658,17 +658,13 @@ test "binary expression" {
 }
 
 test "list literal" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
     const test_cases = [_]ExpressionTestCase{
         .{
             .description = "empty list",
             .input =
             \\[]
             ,
-            .expected_expression = .{ .List = .empty },
+            .expected_expression = .{ .List = &.{} },
         },
         .{
             .description = "empty list with new line",
@@ -677,7 +673,7 @@ test "list literal" {
             \\
             \\]
             ,
-            .expected_expression = .{ .List = .empty },
+            .expected_expression = .{ .List = &.{} },
         },
         .{
             .description = "list one line",
@@ -685,10 +681,10 @@ test "list literal" {
             \\[1, 2]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, alloc, &.{
+                .List = &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
-                }),
+                },
             },
         },
         .{
@@ -697,10 +693,10 @@ test "list literal" {
             \\[1, 2,]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, alloc, &.{
+                .List = &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
-                }),
+                },
             },
         },
         .{
@@ -712,10 +708,10 @@ test "list literal" {
             \\]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, alloc, &.{
+                .List = &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
-                }),
+                },
             },
         },
         .{
@@ -727,10 +723,10 @@ test "list literal" {
             \\]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, alloc, &.{
+                .List = &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
-                }),
+                },
             },
         },
         .{
@@ -745,10 +741,10 @@ test "list literal" {
             \\]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, alloc, &.{
+                .List = &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
-                }),
+                },
             },
         },
         .{
@@ -763,10 +759,10 @@ test "list literal" {
             \\]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, alloc, &.{
+                .List = &.{
                     &e(.{ .Integer = 1 }),
                     &e(.{ .Integer = 2 }),
-                }),
+                },
             },
         },
         .{
@@ -802,20 +798,20 @@ test "list literal" {
             \\]
             ,
             .expected_expression = .{
-                .List = try test_utils.list(*const ast.Expression, alloc, &.{
+                .List = &.{
                     &e(.{
-                        .List = try test_utils.list(*const ast.Expression, alloc, &.{
+                        .List = &.{
                             &e(.{ .Integer = 1 }),
                             &e(.{ .Integer = 2 }),
-                        }),
+                        },
                     }),
                     &e(.{
-                        .List = try test_utils.list(*const ast.Expression, alloc, &.{
+                        .List = &.{
                             &e(.{ .Integer = 3 }),
                             &e(.{ .Integer = 4 }),
-                        }),
+                        },
                     }),
-                }),
+                },
             },
         },
     };
@@ -986,10 +982,6 @@ test "record literal" {
 }
 
 test "function call" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-
     const test_cases = [_]ExpressionTestCase{
         .{
             .description = "no args",
@@ -999,7 +991,7 @@ test "function call" {
             .expected_expression = .{
                 .Call = .{
                     .function = &e(.{ .Identifier = "test" }),
-                    .args = .empty,
+                    .args = &.{},
                 },
             },
         },
@@ -1011,10 +1003,10 @@ test "function call" {
             .expected_expression = .{
                 .Call = .{
                     .function = &e(.{ .Identifier = "test" }),
-                    .args = try test_utils.list(*const ast.Expression, a, &.{
+                    .args = &.{
                         &e(.{ .Integer = 1 }),
                         &e(.{ .Integer = 2 }),
-                    }),
+                    },
                 },
             },
         },
@@ -1026,10 +1018,10 @@ test "function call" {
             .expected_expression = .{
                 .Call = .{
                     .function = &e(.{ .Identifier = "test" }),
-                    .args = try test_utils.list(*const ast.Expression, a, &.{
+                    .args = &.{
                         &e(.{ .Integer = 1 }),
                         &e(.{ .Integer = 2 }),
-                    }),
+                    },
                 },
             },
         },
@@ -1044,10 +1036,10 @@ test "function call" {
             .expected_expression = .{
                 .Call = .{
                     .function = &e(.{ .Identifier = "test" }),
-                    .args = try test_utils.list(*const ast.Expression, a, &.{
+                    .args = &.{
                         &e(.{ .Integer = 1 }),
                         &e(.{ .Integer = 2 }),
-                    }),
+                    },
                 },
             },
         },
@@ -1062,10 +1054,10 @@ test "function call" {
             .expected_expression = .{
                 .Call = .{
                     .function = &e(.{ .Identifier = "test" }),
-                    .args = try test_utils.list(*const ast.Expression, a, &.{
+                    .args = &.{
                         &e(.{ .Integer = 1 }),
                         &e(.{ .Integer = 2 }),
-                    }),
+                    },
                 },
             },
         },
@@ -1080,13 +1072,13 @@ test "function call" {
                     .left = &e(.{
                         .Call = .{
                             .function = &e(.{ .Identifier = "test" }),
-                            .args = .empty,
+                            .args = &.{},
                         },
                     }),
                     .right = &e(.{
                         .Call = .{
                             .function = &e(.{ .Identifier = "test" }),
-                            .args = .empty,
+                            .args = &.{},
                         },
                     }),
                 },
@@ -1103,10 +1095,6 @@ test "function call" {
 }
 
 test "function literal" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-
     const test_cases = [_]ExpressionTestCase{
         .{
             .description = "empty",
@@ -1114,7 +1102,7 @@ test "function literal" {
             \\() -> ()
             ,
             .expected_expression = .{
-                .Function = .{ .params = .empty, .body = &e(.{ .Unit = {} }) },
+                .Function = .{ .params = &.{}, .body = &e(.{ .Unit = {} }) },
             },
         },
 
@@ -1125,10 +1113,10 @@ test "function literal" {
             ,
             .expected_expression = .{
                 .Function = .{
-                    .params = try test_utils.list(ast.FunctionParam, a, &.{
+                    .params = &.{
                         .{ .Required = s("a") },
                         .{ .Required = s("b") },
-                    }),
+                    },
                     .body = &e(.{
                         .Binary = .{
                             .left = &e(.{ .Identifier = "a" }),
@@ -1149,12 +1137,12 @@ test "function literal" {
             ,
             .expected_expression = .{
                 .Function = .{
-                    .params = try test_utils.list(ast.FunctionParam, a, &.{
+                    .params = &.{
                         .{ .Required = s("a") },
                         .{ .Required = s("b") },
-                    }),
+                    },
                     .body = &e(.{
-                        .Grouping = try test_utils.list(*const ast.Expression, a, &.{
+                        .Grouping = &.{
                             &e(.{
                                 .Declaration = .{
                                     .left = s("c"),
@@ -1174,7 +1162,7 @@ test "function literal" {
                                     .right = &e(.{ .Identifier = "c" }),
                                 },
                             }),
-                        }),
+                        },
                     }),
                 },
             },
@@ -1190,10 +1178,10 @@ test "function literal" {
                     .right = &e(.{
                         .Function = .{
                             .name = s("foo"),
-                            .params = try test_utils.list(ast.FunctionParam, a, &.{
+                            .params = &.{
                                 .{ .Default = .{ .name = s("a"), .value = &e(.{ .Integer = 11 }) } },
                                 .{ .Default = .{ .name = s("b"), .value = &e(.{ .Integer = 12 }) } },
-                            }),
+                            },
                             .body = &e(.{
                                 .Binary = .{
                                     .left = &e(.{ .Identifier = "a" }),
@@ -1217,7 +1205,7 @@ test "function literal" {
                     .right = &e(
                         .{
                             .Function = .{
-                                .params = .empty,
+                                .params = &.{},
                                 .body = &e(.{ .Unit = {} }),
                                 .name = s("foo"),
                             },
@@ -1238,12 +1226,12 @@ test "function literal" {
                         .{
                             .Call = .{
                                 .function = &e(.{ .Identifier = "list_map" }),
-                                .args = try test_utils.list(*const ast.Expression, a, &.{
-                                    &e(.{ .List = try test_utils.list(*const ast.Expression, a, &.{&e(.{ .Integer = 1 })}) }),
+                                .args = &.{
+                                    &e(.{ .List = &.{&e(.{ .Integer = 1 })} }),
                                     &e(.{
                                         .Function = .{
                                             .name = null,
-                                            .params = try test_utils.list(ast.FunctionParam, a, &.{.{ .Required = s("n") }}),
+                                            .params = &.{.{ .Required = s("n") }},
                                             .body = &e(.{
                                                 .Binary = .{
                                                     .left = &e(.{ .Identifier = "n" }),
@@ -1253,7 +1241,7 @@ test "function literal" {
                                             }),
                                         },
                                     }),
-                                }),
+                                },
                             },
                         },
                     ),
@@ -1271,10 +1259,6 @@ test "function literal" {
 }
 
 test "match expression" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-
     const test_cases = [_]ExpressionTestCase{
         .{
             .description = "one line",
@@ -1284,12 +1268,12 @@ test "match expression" {
             .expected_expression = .{
                 .Match = .{
                     .target = &e(.{ .Identifier = "foo" }),
-                    .arms = try test_utils.list(ast.MatchArm, a, &.{
+                    .arms = &.{
                         .{
                             .pattern = &e(.{ .Boolean = true }),
                             .expression = &e(.{ .Integer = 42 }),
                         },
-                    }),
+                    },
                 },
             },
         },
@@ -1304,7 +1288,7 @@ test "match expression" {
             .expected_expression = .{
                 .Match = .{
                     .target = &e(.{ .Identifier = "something" }),
-                    .arms = try test_utils.list(ast.MatchArm, a, &.{
+                    .arms = &.{
                         .{
                             .pattern = &e(.{ .String = "foo" }),
                             .expression = &e(.{ .Integer = 42 }),
@@ -1317,7 +1301,7 @@ test "match expression" {
                             .pattern = &e(.{ .String = "baz" }),
                             .expression = &e(.{ .Integer = 44 }),
                         },
-                    }),
+                    },
                 },
             },
         },
@@ -1332,10 +1316,6 @@ test "match expression" {
 }
 
 test "if expression" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-
     const test_cases = [_]ExpressionTestCase{
         .{
             .description = "one line",
@@ -1344,12 +1324,12 @@ test "if expression" {
             ,
             .expected_expression = .{
                 .If = .{
-                    .arms = try test_utils.list(ast.IfArm, a, &.{
+                    .arms = &.{
                         .{
                             .condition = &e(.{ .Identifier = "foo" }),
                             .then = &e(.{ .Identifier = "bar" }),
                         },
-                    }),
+                    },
                     .alt = null,
                 },
             },
@@ -1364,12 +1344,12 @@ test "if expression" {
             ,
             .expected_expression = .{
                 .If = .{
-                    .arms = try test_utils.list(ast.IfArm, a, &.{
+                    .arms = &.{
                         .{
                             .condition = &e(.{ .Identifier = "foo" }),
                             .then = &e(.{ .Identifier = "bar" }),
                         },
-                    }),
+                    },
                     .alt = &e(.{ .Identifier = "baz" }),
                 },
             },
@@ -1384,7 +1364,7 @@ test "if expression" {
             ,
             .expected_expression = .{
                 .If = .{
-                    .arms = try test_utils.list(ast.IfArm, a, &.{
+                    .arms = &.{
                         .{
                             .condition = &e(.{ .Identifier = "foo" }),
                             .then = &e(.{ .Integer = 42 }),
@@ -1397,7 +1377,7 @@ test "if expression" {
                             .condition = &e(.{ .Identifier = "baz" }),
                             .then = &e(.{ .Integer = 44 }),
                         },
-                    }),
+                    },
                     .alt = &e(.{ .Integer = 45 }),
                 },
             },
@@ -1413,10 +1393,6 @@ test "if expression" {
 }
 
 test "grouping" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-
     const test_cases = [_]ExpressionTestCase{
         .{
             .description = "with encasing new lines",
@@ -1428,7 +1404,7 @@ test "grouping" {
             \\)
             ,
             .expected_expression = .{
-                .Grouping = try test_utils.list(*const ast.Expression, a, &.{
+                .Grouping = &.{
                     &e(.{
                         .Declaration = .{
                             .left = s("a"),
@@ -1448,7 +1424,7 @@ test "grouping" {
                             .operator = .Plus,
                         },
                     }),
-                }),
+                },
             },
         },
         .{
@@ -1459,7 +1435,7 @@ test "grouping" {
             \\ a + b)
             ,
             .expected_expression = .{
-                .Grouping = try test_utils.list(*const ast.Expression, a, &.{
+                .Grouping = &.{
                     &e(.{
                         .Declaration = .{
                             .left = s("a"),
@@ -1479,7 +1455,7 @@ test "grouping" {
                             .operator = .Plus,
                         },
                     }),
-                }),
+                },
             },
         },
     };
