@@ -168,7 +168,7 @@ pub const Parser = struct {
         }
     }
 
-    fn consume(self: *Parser, expected: scanner.TokenType, message: []const u8) !void {
+    fn consume(self: *Parser, expected: scanner.TokenType, comptime message: []const u8) !void {
         if (self.check(expected)) {
             try self.advance();
             return;
@@ -197,17 +197,17 @@ pub const Parser = struct {
         }
     }
 
-    fn errorAtCurrent(self: *Parser, message: []const u8) anyerror {
+    fn errorAtCurrent(self: *Parser, comptime message: []const u8) anyerror {
         return self.errorAt(.init(self.current.start, self.current.end), message);
     }
 
-    fn errorAtPrevious(self: *Parser, message: []const u8) anyerror {
+    fn errorAtPrevious(self: *Parser, comptime message: []const u8) anyerror {
         const prev = self.getPrevious();
         return self.errorAt(.init(prev.start, prev.end), message);
     }
 
-    fn errorAt(self: *Parser, span: ast.Span, message: []const u8) anyerror {
-        self.script_context.markSpan(span, message);
+    fn errorAt(self: *Parser, span: ast.Span, comptime message: []const u8) anyerror {
+        self.script_context.markSpan(span, message, .{});
         return error.ParserError;
     }
 };

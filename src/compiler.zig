@@ -337,8 +337,8 @@ pub const Compiler = struct {
         try self.currentChunk().write(self.gc_alloc, chunk.OpByte{ .Op = b }, 0);
     }
 
-    fn errorAt(self: *Compiler, span: ast.Span, message: []const u8) anyerror {
-        self.script_context.markSpan(span, message);
+    fn errorAt(self: *Compiler, span: ast.Span, comptime message: []const u8) anyerror {
+        self.script_context.markSpan(span, message, .{});
         return error.CompileError;
     }
 

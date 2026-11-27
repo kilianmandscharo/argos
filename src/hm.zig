@@ -465,7 +465,10 @@ pub const TypeChecker = struct {
         const resolved = t.prune();
         switch (resolved.*) {
             .Var => |v| v.classes.insert(class),
-            else => if (!resolved.hasInstance(class)) return error.MissingInstance,
+            else => if (!resolved.hasInstance(class)) {
+                std.debug.print("missing instance {s} on type {f}\n", .{ @tagName(class), resolved });
+                return error.MissingInstance;
+            },
         }
     }
 
@@ -512,6 +515,7 @@ pub const TypeChecker = struct {
                 try self.unify(entry.value, b.Record[i].value);
             }
         } else {
+            std.debug.print("type mismatch: {f} <> {f}\n", .{ a, b });
             return error.CantUnify;
         }
     }
@@ -527,7 +531,7 @@ pub const TypeChecker = struct {
         if (env.get(name)) |decl| {
             return decl;
         }
-        self.script_context.markSpan(expr.span, "unbound var");
+        self.script_context.markSpan(expr.span, "unbound var", .{});
         return error.UnboundVar;
     }
 
@@ -579,7 +583,10 @@ pub const TypeChecker = struct {
                     const generic_func_type = decl.getGenericFuncType();
 
                     const arg_type = try self.infer(env, arg);
-                    try self.unify(arg_type, func_t.from[i]);
+                    self.unify(arg_type, func_t.from[i]) catch |err| {
+                        self.script_context.markSpan(arg.span, "invalid arg type in function call", .{});
+                        return err;
+                    };
 
                     if (arg_type.* == .Func) {
                         if (generic_func_type) |original_f| {
@@ -590,7 +597,10 @@ pub const TypeChecker = struct {
                 },
                 else => {
                     const arg_type = try self.infer(env, arg);
-                    try self.unify(arg_type, func_t.from[i]);
+                    self.unify(arg_type, func_t.from[i]) catch |err| {
+                        self.script_context.markSpan(arg.span, "invalid arg type in function call", .{});
+                        return err;
+                    };
                 },
             }
         }
@@ -672,24 +682,25 @@ pub const TypeChecker = struct {
             },
             .Unary => |unary| {
                 const t = try self.infer(env, unary.right);
-                switch (unary.operator) {
+                const op = unary.operator;
+                switch (op) {
                     .Minus => {
                         constrain(t, .Num) catch |err| {
-                            self.script_context.markSpan(expr.span, "expected Num on right side of '-'");
+                            self.script_context.markSpan(expr.span, "expected Num on right side of {f}", .{op});
                             return err;
                         };
                         return t;
                     },
                     .Bang => {
                         self.unify(t, c(.Boolean)) catch |err| {
-                            self.script_context.markSpan(expr.span, "expected boolean on right side of '!'");
+                            self.script_context.markSpan(expr.span, "expected bool on right side of {f}", .{op});
                             return err;
                         };
                         return c(.Boolean);
                     },
                     .Tilde => {
                         self.unify(t, c(.Integer)) catch |err| {
-                            self.script_context.markSpan(expr.span, "expected integer on right side of '~'");
+                            self.script_context.markSpan(expr.span, "expected int on right side of {f}", .{op});
                             return err;
                         };
                         return c(.Integer);
@@ -700,39 +711,76 @@ pub const TypeChecker = struct {
             .Binary => |binary| {
                 const lt = try self.infer(env, binary.left);
                 const rt = try self.infer(env, binary.right);
-                switch (binary.operator) {
+                const op = binary.operator;
+                switch (op) {
                     .And, .Or => {
-                        try self.unify(lt, c(.Boolean));
-                        try self.unify(rt, c(.Boolean));
+                        self.unify(lt, c(.Boolean)) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected bool on left side of {f}", .{op});
+                            return err;
+                        };
+                        self.unify(rt, c(.Boolean)) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected bool on right side of {f}", .{op});
+                            return err;
+                        };
                         return c(.Boolean);
                     },
                     .Plus => {
-                        try self.unify(lt, rt);
-                        try constrain(lt, .Plus);
+                        self.unify(lt, rt) catch |err| {
+                            self.script_context.markSpan(expr.span, "left and right side of {f} need to be of the same type", .{op});
+                            return err;
+                        };
+                        constrain(lt, .Plus) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected type Plus for {f}", .{op});
+                            return err;
+                        };
                         return lt;
                     },
                     .Minus, .Asterisk, .Slash, .Percent => {
-                        try self.unify(lt, rt);
-                        try constrain(lt, .Num);
+                        self.unify(lt, rt) catch |err| {
+                            self.script_context.markSpan(expr.span, "left and right side of {f} need to be of the same type", .{op});
+                            return err;
+                        };
+                        constrain(lt, .Num) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected type Num for {f}", .{op});
+                            return err;
+                        };
                         return lt;
                     },
                     .Eq, .NotEq => {
-                        try self.unify(lt, rt);
+                        self.unify(lt, rt) catch |err| {
+                            self.script_context.markSpan(expr.span, "left and right side of {f} need to be of the same type", .{op});
+                            return err;
+                        };
                         return c(.Boolean);
                     },
                     .Gt, .GtOrEq, .Lt, .LtOrEq => {
-                        try self.unify(lt, rt);
-                        try constrain(lt, .Ord);
+                        self.unify(lt, rt) catch |err| {
+                            self.script_context.markSpan(expr.span, "left and right side of {f} need to be of the same type", .{op});
+                            return err;
+                        };
+                        constrain(lt, .Ord) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected type Ord for {f}", .{op});
+                            return err;
+                        };
                         return c(.Boolean);
                     },
                     .Ampersand, .Pipe, .Caret, .LeftShift, .RightShift => {
-                        try self.unify(lt, c(.Integer));
-                        try self.unify(rt, c(.Integer));
+                        self.unify(lt, c(.Integer)) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected int on left side of {f}", .{op});
+                            return err;
+                        };
+                        self.unify(rt, c(.Integer)) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected int on right side of {f}", .{op});
+                            return err;
+                        };
                         return c(.Integer);
                     },
                     .Cons => {
                         const list_t = try self.list(lt);
-                        try self.unify(rt, list_t);
+                        self.unify(rt, list_t) catch |err| {
+                            self.script_context.markSpan(expr.span, "expected list on right side of {f}", .{op});
+                            return err;
+                        };
                         return list_t;
                     },
                     else => return error.InvalidBinaryOperator,

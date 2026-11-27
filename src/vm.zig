@@ -29,29 +29,28 @@ pub const ScriptContext = struct {
     }
 
     fn findSpanStart(self: *ScriptContext, span: ast.Span) struct { col: usize, line: scanner.Line } {
-        var start = span.start;
         for (self.lines.items[self.line_offset..]) |l| {
-            const len = l.end - l.start;
-            if (len <= start) {
-                start -= len;
-                continue;
+            if (span.start >= l.start and span.start <= l.end) {
+                return .{ .col = span.start - l.start, .line = l };
             }
-            return .{ .col = start, .line = l };
         }
-        const line = self.lines.items[self.lines.items.len - 1];
-        return .{ .line = line, .col = span.start - line.start };
+        unreachable;
     }
 
-    pub fn markSpan(self: *ScriptContext, span: ast.Span, message: []const u8) void {
+    pub fn markSpan(self: *ScriptContext, span: ast.Span, comptime message: []const u8, args: anytype) void {
         const result = self.findSpanStart(span);
         const span_len = span.end - span.start;
         const line = std.mem.trim(u8, self.source[result.line.start..result.line.end], &.{'\n'});
 
-        std.debug.print("{s}:{d}:{d}: error: {s}\n{s}\n", .{
+        std.debug.print("{s}:{d}:{d}: error: ", .{
             self.file_name,
             result.line.no + 1,
             result.col + 1,
-            message,
+        });
+
+        std.debug.print(message, args);
+
+        std.debug.print("\n{s}\n", .{
             line,
         });
 

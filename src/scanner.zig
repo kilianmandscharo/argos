@@ -58,6 +58,10 @@ pub const TokenType = enum {
     pub fn toString(self: @This()) []const u8 {
         return @tagName(self);
     }
+
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("{s}", .{@tagName(self)});
+    }
 };
 
 pub const Token = struct {

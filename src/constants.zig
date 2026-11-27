@@ -13,5 +13,5 @@ pub const debug_stress_gc = false;
 pub const debug_log_gc = false;
 pub const gc_heap_grow_factor = 2;
 
-pub const stack_trace_on_error = true;
+pub const stack_trace_on_error = false;
 pub const vm_test_mode = true;
